@@ -1,0 +1,38 @@
+name: "Frisk — AI supply-chain scan"
+description: "Vet AI-agent content (MCP servers, skills, plugins) for malicious code. Fails the build on high-severity findings; uploads SARIF to the Security tab."
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  targets:
+    description: "Space-separated paths and/or git URLs to scan."
+    required: false
+    default: "."
+  fail-on:
+    description: "Fail the job when the worst finding reaches this level: block | warn | never."
+    required: false
+    default: "block"
+  sarif:
+    description: "Generate frisk.sarif and upload it to GitHub code scanning."
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install frisk
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}"
+    - name: Scan
+      shell: bash
+      run: frisk ${{ inputs.targets }} --fail-on "${{ inputs.fail-on }}"
+    - name: Generate SARIF
+      if: ${{ inputs.sarif == 'true' && always() }}
+      shell: bash
+      run: frisk ${{ inputs.targets }} --sarif --fail-on never > frisk.sarif
+    - name: Upload SARIF
+      if: ${{ inputs.sarif == 'true' && always() }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: frisk.sarif

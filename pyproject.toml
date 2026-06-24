@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "frisk-scan"
+version = "0.1.0"
+description = "Vet AI-agent content (MCP servers, skills, plugins) for malicious code before you install it."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Gokul P M" }]
+keywords = ["mcp", "security", "ai-agents", "supply-chain", "claude", "scanner", "prompt-injection"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+]
+dependencies = []   # stdlib only — zero third-party dependencies by design
+
+[project.urls]
+Homepage = "https://github.com/Thandv/frisk"
+Issues = "https://github.com/Thandv/frisk/issues"
+
+[project.scripts]
+frisk = "frisk.cli:main"
+frisk-mcp = "frisk.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/frisk"]
