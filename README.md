@@ -93,6 +93,10 @@ verify: DRIFT DETECTED  (1 of 2 entries changed)
 This pins local source, git targets, **and** the package/URL references in your MCP
 config (so a swapped `npx` version or a changed server URL surfaces too).
 
+For **continuous** monitoring, commit your `.frisk-lock.json` and drop
+[`examples/continuous-verify.yml`](examples/continuous-verify.yml) into your repo —
+it re-checks on a schedule and fails (notifying you) the moment anything drifts.
+
 ### Compliance mapping
 
 Every finding is mapped to the **OWASP Top 10 for LLM Applications (2025)** —
