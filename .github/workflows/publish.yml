@@ -1,0 +1,25 @@
+name: publish
+# Publishes to PyPI automatically when you cut a GitHub Release — no token needed.
+# Uses PyPI Trusted Publishing (OIDC). One-time setup on PyPI:
+#   https://pypi.org/manage/project/frisk-scan/settings/publishing/
+#   Add a publisher:  owner=Thandv  repo=frisk  workflow=publish.yml
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write        # required for trusted publishing
+
+jobs:
+  pypi-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build
+      - run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

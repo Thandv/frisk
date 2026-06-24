@@ -1,0 +1,30 @@
+# Continuous rug-pull monitoring (free, self-hosted via GitHub Actions).
+#
+# Copy this into YOUR repo at .github/workflows/frisk-verify.yml. First, pin what
+# you trust and commit the lockfile:
+#
+#   frisk lock . --mcp-config path/to/your/mcp-config.json
+#   git add .frisk-lock.json && git commit -m "pin agent content"
+#
+# Then this workflow re-checks daily and FAILS (notifying you) if anything you
+# approved silently changed — an auto-update or a rug pull.
+#
+# (The paid Frisk tier does this without CI: hosted, real-time, multi-machine,
+#  with Slack/PagerDuty alerts and an org dashboard.)
+name: frisk-verify
+on:
+  schedule:
+    - cron: "0 8 * * *"     # daily at 08:00 UTC
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install frisk-scan
+      - name: Verify pinned content has not drifted
+        run: frisk verify
