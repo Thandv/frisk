@@ -8,7 +8,7 @@ from . import __version__
 from .engine import Finding, scan_path, scan_text, verdict, fails
 from .report import to_text, to_json, to_sarif, _c
 from .sources import materialize, parse_mcp_config
-from . import pin
+from . import pin, proxy
 
 
 def _scan_target(target: str) -> list[Finding]:
@@ -155,12 +155,36 @@ def _cmd_verify(argv: list[str]) -> int:
     return 1 if pin.has_drift(report) else 0
 
 
+def _cmd_proxy(argv: list[str]) -> int:
+    if "--" not in argv:
+        print("frisk proxy: usage: frisk proxy [--log FILE] -- <server command>\n"
+              "  e.g.  frisk proxy -- uvx some-mcp-server", file=sys.stderr)
+        return 2
+    sep = argv.index("--")
+    opts, server_cmd = argv[:sep], argv[sep + 1:]
+    if not server_cmd:
+        print("frisk proxy: no server command after --", file=sys.stderr)
+        return 2
+    p = argparse.ArgumentParser(prog="frisk proxy",
+                                description="Enforce frisk checks at runtime between an MCP client and server.")
+    p.add_argument("--log", metavar="FILE", help="append proxy events to a file (default: stderr)")
+    args = p.parse_args(opts)
+    logf = open(args.log, "a", encoding="utf-8") if args.log else sys.stderr
+    try:
+        return proxy.Proxy(server_cmd, log=logf).run()
+    except FileNotFoundError as e:
+        print(f"frisk proxy: cannot launch server: {e}", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "lock":
         return _cmd_lock(argv[1:])
     if argv and argv[0] == "verify":
         return _cmd_verify(argv[1:])
+    if argv and argv[0] == "proxy":
+        return _cmd_proxy(argv[1:])
     return _cmd_scan(argv)
 
 

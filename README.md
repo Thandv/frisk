@@ -103,6 +103,30 @@ Every finding is mapped to the **OWASP Top 10 for LLM Applications (2025)** —
 e.g. prompt-injection → `LLM01`, secret exfiltration → `LLM02`, malicious code →
 `LLM03 Supply Chain` — and the mapping is included in `--json` and `--sarif` output.
 
+### Enforce at runtime (proxy)
+
+`verify` only helps when you remember to run it. The **proxy** closes that gap:
+point your MCP client at frisk instead of the server, and every tool description
+is re-checked on *every* load — so a clean-at-approval, malicious-later swap
+("rug pull") is caught in real time, not on a schedule.
+
+Wrap the server command in your client config:
+
+```json
+{ "mcpServers": {
+    "some-server": {
+      "command": "frisk",
+      "args": ["proxy", "--", "uvx", "some-mcp-server"]
+    } } }
+```
+
+The proxy launches the real server, relays the protocol, and enforces:
+- a tool with a **block**-level finding is **dropped** (the model never sees it);
+- a tool whose description **changed** since first seen is **flagged** (possible rug pull);
+- prompt-injection detected in a **tool result** gets a visible warning prepended before it reaches the model.
+
+Events are logged to stderr (add `--log frisk-proxy.log` to keep a file).
+
 ## Use it as an MCP server (let your agent vet *before* it installs)
 
 Add `frisk` to any MCP client so an agent can check a tool before adding it:
