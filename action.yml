@@ -1,5 +1,5 @@
 name: "Frisk — AI supply-chain scan"
-description: "Vet AI-agent content (MCP servers, skills, plugins) for malicious code. Fails the build on high-severity findings; uploads SARIF to the Security tab."
+description: "Scan MCP servers, skills & plugins for malicious code before you install them. Static, local, zero-dependency."
 branding:
   icon: "shield"
   color: "red"
