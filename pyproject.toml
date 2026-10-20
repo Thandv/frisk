@@ -24,9 +24,37 @@ dependencies = []   # stdlib only — zero third-party dependencies by design
 Homepage = "https://github.com/Thandv/frisk"
 Issues = "https://github.com/Thandv/frisk/issues"
 
+[project.optional-dependencies]
+# Never needed at runtime. `test` is what the CI test legs install; `dev` adds the
+# linters for the separate lint job, so a linter release that drops an old Python
+# cannot break the test matrix.
+test = ["pytest"]
+dev = ["pytest", "ruff", "mypy"]
+
 [project.scripts]
 frisk = "frisk.cli:main"
 frisk-mcp = "frisk.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/frisk"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+norecursedirs = ["corpus", "examples", ".*", "dist", "build"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120   # the existing code's longest line is 112; formatting gets its own ticket
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM"]
+
+[tool.mypy]
+check_untyped_defs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["frisk.*"]
+disallow_untyped_defs = true

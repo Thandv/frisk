@@ -1,0 +1,45 @@
+[
+  {
+    "path": "examples/malicious-skill/SKILL.md",
+    "line": 1,
+    "rule": "rce.pipe_installer",
+    "severity": "block",
+    "expected_change": "FR-E2",
+    "note": "Fence-relative line: the installer line is on file line 11 (fence line 1). FR-E2 reports the file line."
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
+    "line": 14,
+    "rule": "inject.hide_from_user",
+    "severity": "block",
+    "expected_change": null
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
+    "line": 17,
+    "rule": "inject.hidden_important",
+    "severity": "warn",
+    "expected_change": null
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
+    "line": 18,
+    "rule": "inject.before_using",
+    "severity": "warn",
+    "expected_change": null
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
+    "line": 18,
+    "rule": "inject.read_then_send",
+    "severity": "warn",
+    "expected_change": null
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
+    "line": 19,
+    "rule": "inject.ignore_prev",
+    "severity": "block",
+    "expected_change": null
+  }
+]

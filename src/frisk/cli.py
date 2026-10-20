@@ -88,7 +88,8 @@ def _cmd_scan(argv: list[str]) -> int:
         print(f"frisk: {verdict(findings)}  ({label})")
     else:
         if audit_lines:
-            print("\n".join(audit_lines)); print()
+            print("\n".join(audit_lines))
+            print()
         print(to_text(findings, label))
 
     if args.fail_on == "never":

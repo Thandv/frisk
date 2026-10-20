@@ -26,6 +26,7 @@ import json
 import subprocess
 import sys
 import threading
+from typing import TextIO
 
 from .engine import scan_text, worst_severity
 
@@ -39,7 +40,7 @@ def _tool_text(tool: dict) -> str:
 
 
 class Proxy:
-    def __init__(self, server_cmd: list[str], log=sys.stderr):
+    def __init__(self, server_cmd: list[str], log: TextIO = sys.stderr):
         self.server_cmd = server_cmd
         self.log = log
         self.pins: dict[str, str] = {}          # tool name -> description hash
@@ -127,12 +128,15 @@ class Proxy:
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
-                sys.stdout.write(line + "\n"); sys.stdout.flush(); continue
+                sys.stdout.write(line + "\n")
+                sys.stdout.flush()
+                continue
             try:
                 msg = self.inspect(msg)
             except Exception as e:  # noqa: BLE001 — never let inspection break the stream
                 self._log(f"inspect error (passing through): {e}")
-            sys.stdout.write(json.dumps(msg) + "\n"); sys.stdout.flush()
+            sys.stdout.write(json.dumps(msg) + "\n")
+            sys.stdout.flush()
 
         code = proc.wait()
         self._log(f"server exited ({code}); dropped={self.stats['dropped']} "
