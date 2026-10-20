@@ -42,6 +42,8 @@ class TestClassifyTable(unittest.TestCase):
              ServerRef("s", "remote", "https://a.example.invalid", False, REMOTE_DETAIL)),
             ("absolute local script", {"command": "python3", "args": [script]},
              ServerRef("s", "local", d, True, "local source via python3")),
+            ("interpreter by absolute path", {"command": "/opt/bin/python3", "args": [script]},
+             ServerRef("s", "local", d, True, "local source via python3")),
             ("local directory arg", {"command": "node", "args": [d]},
              ServerRef("s", "local", d, True, "local source via node")),
             ("command is a local file", {"command": script},

@@ -2,7 +2,8 @@
 
 Answers `initialize` and `tools/list` (one clean tool, one poisoned tool), ignores
 notifications, and exits when stdin closes. If FAKE_MCP_PIDFILE is set, it writes its
-own PID there first so the test can prove this process has exited.
+own PID there first so the test can prove this process has exited. If FAKE_MCP_EXIT
+is set, it exits with that status once stdin closes (default 0).
 """
 from __future__ import annotations
 
@@ -56,3 +57,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    sys.exit(int(os.environ.get("FAKE_MCP_EXIT", "0")))
