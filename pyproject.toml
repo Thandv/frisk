@@ -30,3 +30,9 @@ frisk-mcp = "frisk.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/frisk"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+norecursedirs = ["corpus", "examples", ".*", "dist", "build"]
+addopts = "-p no:cacheprovider"

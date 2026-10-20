@@ -161,6 +161,19 @@ Static analysis is a **first line of defense, not a guarantee**. It can't see wh
 a remote server or an unfetched npm/PyPI package does at runtime, and a determined
 attacker can evade regex. Treat a `PASS` as "no known-bad patterns found," not "safe."
 
+## Development
+
+The suite is stdlib `unittest`, so it runs on the 3.9 floor with nothing installed:
+
+```bash
+PYTHONPATH=src python3 -B -m unittest discover -s tests
+python3 -m pytest -q          # same suite; pytest reads its config from pyproject.toml
+bash scripts/verify.sh        # unittest under every local interpreter found (CLT 3.9, Homebrew 3.12-3.14)
+```
+
+`scripts/verify.sh` prints one PASS/FAIL line per interpreter and fails if any run
+fails or if fewer than `FRISK_MIN_PYTHONS` (default 2) interpreters were found.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Built from the security gate behind

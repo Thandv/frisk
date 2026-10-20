@@ -6,3 +6,4 @@ build/
 dist/
 frisk.sarif
 .frisk-cache/
+.pytest_cache/
