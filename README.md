@@ -174,6 +174,10 @@ bash scripts/verify.sh        # unittest under every local interpreter found (CL
 `scripts/verify.sh` prints one PASS/FAIL line per interpreter and fails if any run
 fails or if fewer than `FRISK_MIN_PYTHONS` (default 2) interpreters were found.
 
+Optional extras, never needed at runtime: `pip install -e ".[test]"` (pytest) and
+`pip install -e ".[dev]"` (pytest, ruff, mypy). CI runs `ruff check` and `mypy src`
+in an advisory lint job; their config is in `pyproject.toml`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Built from the security gate behind
