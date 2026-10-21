@@ -5,15 +5,19 @@ import argparse
 import sys
 
 from . import __version__
-from .engine import ScanResult, scan_path, scan_text, verdict, fails
+from .engine import ScanResult, display_prefix, reroot, scan_path, scan_text, verdict, fails
 from .report import to_text, to_json, to_sarif, _c
-from .sources import materialize, parse_mcp_config
+from .sources import is_git_url, materialize, parse_mcp_config
 from . import pin, proxy
 
 
 def _scan_target(target: str) -> ScanResult:
+    """Scan one target; paths follow docs/adr/0001-finding-paths.md."""
     with materialize(target) as (root, _label):
-        return scan_path(root, root if root.is_dir() else None)
+        result = scan_path(root)
+        if is_git_url(target):
+            return reroot(result, "")  # clone-relative
+        return reroot(result, display_prefix(target, root.is_file()))
 
 
 def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
@@ -25,9 +29,7 @@ def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
         return result, lines
     for s in servers:
         if s.scannable:
-            server = scan_path(s.ref)
-            for f in server.findings:
-                f.path = f"{s.name}::{f.path}"
+            server = reroot(scan_path(s.ref), f"{s.name}::")
             result.extend(server)
             v = verdict(server.findings)
             tag = _c(f"{v:<5}", {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}[v])

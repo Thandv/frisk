@@ -165,8 +165,13 @@ def _read_text(path: Path, rel: str) -> str | ScanResult:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _in_target(path: Path, root: Path | None) -> str:
+    """The POSIX path of `path` inside the scanned root (see docs/adr/0001-finding-paths.md)."""
+    return (path.relative_to(root) if root else path).as_posix()
+
+
 def scan_file(path: Path, root: Path | None = None) -> ScanResult:
-    rel = str(path.relative_to(root)) if root else str(path)
+    rel = _in_target(path, root)
     text = _read_text(path, rel)
     if isinstance(text, ScanResult):
         return text
@@ -191,10 +196,41 @@ def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
         inside = f.relative_to(p).parts
         if ".git" in inside:
             if inside.index(".git") == len(inside) - 1:  # the VCS entry itself, once
-                result.coverage.skipped.append(Skipped(str(f.relative_to(base)), "vcs_dir"))
+                result.coverage.skipped.append(Skipped(_in_target(f, base), "vcs_dir"))
             continue
         if f.is_file():
             result.extend(scan_file(f, base))
+    return result.sort()
+
+
+def display_prefix(target: str, is_file: bool) -> str:
+    """The prefix that turns a local target's in-target paths into the paths shown.
+
+    ADR 0001: a directory is the target as given minus leading './' and trailing '/'
+    ('.' adds nothing); a single file is reported as the argument verbatim, so its
+    prefix is the argument up to the file name.
+    """
+    if is_file:
+        return target[:len(target) - len(Path(target).name)]
+    base = target
+    while base.startswith("./"):
+        base = base[2:]
+    base = base.rstrip("/")
+    if base in ("", "."):
+        return "/" if target.startswith("/") else ""
+    return base + "/"
+
+
+def reroot(result: ScanResult, prefix: str) -> ScanResult:
+    """The one place display paths are made: prefix every finding and skipped path.
+
+    Finding paths, coverage.skipped paths and coverage.* finding paths all pass through
+    here, so they always follow the same rule (docs/adr/0001-finding-paths.md).
+    """
+    for f in result.findings:
+        f.path = prefix + f.path
+    for s in result.coverage.skipped:
+        s.path = prefix + s.path
     return result.sort()
 
 
