@@ -260,6 +260,20 @@ class TestUnreadable(TempDir):
         self.assertEqual([(f.path, f.rule, f.severity) for f in result.findings],
                          [("locked", "coverage.unreadable", "warn")])
 
+    # Review 5: a target directory that cannot be listed is reported under the target as
+    # named (ADR 0001), not with a trailing '/.' (was 'locked/.').
+    def test_unlistable_target_directory_keeps_the_target_path(self) -> None:
+        locked = self.root / "locked"
+        locked.mkdir()
+        self.lock(locked, 0o755)
+        with chdir(self.root):
+            for target, path in (("locked", "locked"), ("./locked/", "locked"),
+                                 (str(locked), str(locked))):
+                with self.subTest(target=target):
+                    doc = run_json([target])
+                    self.assertEqual([s["path"] for s in doc["coverage"]["skipped"]], [path])
+                    self.assertEqual([f["path"] for f in doc["findings"]], [path])
+
 
 # --- paths ------------------------------------------------------------------
 

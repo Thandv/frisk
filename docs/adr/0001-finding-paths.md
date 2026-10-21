@@ -19,7 +19,8 @@ a user sees is done in exactly one place:
 
 **`frisk.engine.reroot(result, prefix, origin)`** rewrites every finding path, every
 `coverage.skipped[].path`, and therefore every `coverage.*` finding path, as
-`prefix + in-target path`, and records the finding's `origin` (`local`, `git`,
+`prefix + in-target path` (the target directory itself, for example when it cannot be
+listed, is the prefix without its trailing `/`: `examples`, never `examples/.`), and records the finding's `origin` (`local`, `git`,
 `mcp`, `text`), which SARIF uses to pick the location form. No other code edits a
 finding path. `engine.display_prefix(target, is_file)` computes the prefix for a
 local target; the other prefixes are constants given by the caller (`''` for a git

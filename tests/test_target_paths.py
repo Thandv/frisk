@@ -137,7 +137,9 @@ class TestRepeatedTargets(ProjectCase):
         (hooks / "pre-commit").write_text("#!/bin/sh\n# " + OVERRIDE + "\n", encoding="utf-8")
         (self.proj / "skill" / "linked").symlink_to(self.proj / "other", target_is_directory=True)
         with chdir(self.proj):
+            # review 5: the .git directory itself, named as a target, is not covered either
             for extra, path in (("skill2", "skill2/SKILL.md"), ("skill/.git/hooks", "skill/.git/hooks/pre-commit"),
+                                ("skill/.git", "skill/.git/hooks/pre-commit"),
                                 ("skill/linked", "skill/linked/SKILL.md")):
                 with self.subTest(extra=extra):
                     found = paths(run_json(["skill", extra]))[0]

@@ -297,11 +297,18 @@ def reroot(result: ScanResult, prefix: str, origin: str) -> ScanResult:
     ("local", "git" or "mcp") tells SARIF which location form the path takes.
     """
     for f in result.findings:
-        f.path = prefix + f.path
+        f.path = _join(prefix, f.path)
         f.origin = origin
     for s in result.coverage.skipped:
-        s.path = prefix + s.path
+        s.path = _join(prefix, s.path)
     return result.sort()
+
+
+def _join(prefix: str, path: str) -> str:
+    """prefix + path, except that the target directory itself ('.') is the target as named."""
+    if path == "." and prefix.endswith("/"):
+        return prefix.rstrip("/") or "/"
+    return prefix + path
 
 
 def worst_severity(findings: list[Finding]) -> str | None:
