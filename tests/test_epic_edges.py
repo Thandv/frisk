@@ -208,11 +208,12 @@ class TestCoverageEdges(TempDir):
         (self.root / ".github").mkdir()
         (self.root / ".github" / "a.md").write_text(OVERRIDE + "\n", encoding="utf-8")
         result = scan_path(self.root)
+        # FR-E2 review round 2: a nested .git directory warns (a gitfile does not).
         self.assertEqual([(f.path, f.line, f.rule) for f in result.findings],
-                         [(".github/a.md", 1, "inject.ignore_prev")])
+                         [(".github/a.md", 1, "inject.ignore_prev"), ("sub/.git", 1, "coverage.nested_vcs")])
         self.assertEqual(result.coverage.files_scanned, 1)
         self.assertEqual(result.coverage.skipped,
-                         [Skipped("mod/.git", "vcs_dir"), Skipped("sub/.git", "vcs_dir")])
+                         [Skipped("mod/.git", "vcs_dir"), Skipped("sub/.git", "vcs_dir", "nested")])
         with chdir(self.root):
             doc = run_json(["./"])
         self.assertEqual([s["path"] for s in doc["coverage"]["skipped"]], ["mod/.git", "sub/.git"])

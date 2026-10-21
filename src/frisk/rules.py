@@ -35,7 +35,10 @@ EXECUTABLE_EXTS = {
     ".so", ".dylib", ".dll", ".wasm", ".exe", ".node", ".pyc", ".pyo", ".jar", ".class",
 }
 ARCHIVE_EXTS = {".zip", ".tar", ".gz", ".tgz"}
-# Leading bytes of native executables (checked before decoding: an ELF header is valid UTF-8).
+# Opaque data formats: when not valid UTF-8 they are skipped silently (counted as binary).
+OPAQUE_DATA_EXTS = {".bin", ".dat", ".db", ".sqlite", ".sqlite3", ".npy", ".parquet"}
+# Leading bytes of native executables. Checked only for a file that is not valid UTF-8 and
+# has no code/text extension or shebang (see engine._read_text).
 EXECUTABLE_MAGIC = {
     b"\x7fELF": "ELF",
     b"\xfe\xed\xfa\xce": "Mach-O",
@@ -188,7 +191,9 @@ COVERAGE_RULES = [
     ("coverage.binary", "coverage", "warn",
      "executable or archive content that cannot be scanned as text"),
     ("coverage.unreadable", "coverage", "warn",
-     "code or text file that could not be read or decoded as UTF-8, or a directory that could not be listed"),
+     "file that could not be read or is not valid UTF-8, or a directory that could not be listed"),
+    ("coverage.nested_vcs", "coverage", "warn",
+     "a .git directory below the top of the target, whose contents are not scanned"),
     ("coverage.surface_error", "coverage", "warn",
      "a scan surface failed on a file, so part of it may not have been pattern-matched"),
 ]

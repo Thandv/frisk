@@ -8,7 +8,9 @@
 - A target named twice (`frisk skill skill`, `frisk skill ./skill/`, or a relative and
   an absolute spelling of the same path), or a target inside another target directory
   (`frisk skill skill/SKILL.md`), is scanned once instead of doubling every finding,
-  count and skipped entry. The verdict line still lists the targets as typed.
+  count and skipped entry. Paths are compared by real path; a target inside a `.git`
+  directory or reached through a symlinked directory is kept, because the parent's scan
+  skips those. The verdict line still lists the targets as typed.
 
 Deferred to FR-E3a (markdown surface): unclosed ``` fences, ~~~ fences, and a longer
 backtick fence that contains a shorter one are not yet scanned as code.

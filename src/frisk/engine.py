@@ -10,8 +10,8 @@ from pathlib import Path
 
 from . import surfaces
 from .rules import (
-    ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, RULE_META, TEXT_EXTS,
-    TEXT_RULES, UNICODE_RULE, executable_magic, hidden_unicode,
+    ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
+    TEXT_EXTS, TEXT_RULES, UNICODE_RULE, executable_magic, hidden_unicode,
 )
 from .surfaces import Span
 
@@ -172,13 +172,15 @@ def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:
     try:
         text = data.decode("utf-8-sig")  # a leading BOM is encoding, not content
     except UnicodeDecodeError:
-        # Valid UTF-8 is always scanned, whatever its first bytes; only content that does
-        # not decode is checked for executable magic.
-        magic = executable_magic(data)
+        # Valid UTF-8 is always scanned. Content that does not decode is scanned lossily
+        # (and warns) unless it is clearly not text: executable magic on a file with no
+        # code/text extension or shebang, or an opaque data format, or NUL bytes.
+        textual = ext in CODE_EXTS or ext in TEXT_EXTS or data.startswith(b"#!")
+        magic = None if textual else executable_magic(data)
         if magic is not None:
             return None, _not_scanned(rel, "binary", magic, "coverage.binary",
                                       f"executable content not scanned ({magic})")
-        if not (ext in CODE_EXTS or ext in TEXT_EXTS or not ext or data.startswith(b"#!")):
+        if not textual and (ext in OPAQUE_DATA_EXTS or b"\0" in data[:8192]):
             return None, _not_scanned(rel, "binary", "not UTF-8 text")
         notes = _not_scanned(rel, "unreadable", "UnicodeDecodeError", "coverage.unreadable",
                              "file is not valid UTF-8 (UnicodeDecodeError); "
@@ -221,7 +223,13 @@ def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
         inside = f.relative_to(p).parts
         if ".git" in inside:
             if inside.index(".git") == len(inside) - 1:  # the VCS entry itself, once
-                result.coverage.skipped.append(Skipped(_in_target(f, base), "vcs_dir"))
+                rel = _in_target(f, base)
+                if len(inside) > 1 and f.is_dir():
+                    # Below the top, a .git directory is an easy hiding place: warn.
+                    result.extend(_not_scanned(rel, "vcs_dir", "nested", "coverage.nested_vcs",
+                                               "nested .git directory not scanned"))
+                else:
+                    result.coverage.skipped.append(Skipped(rel, "vcs_dir"))
             continue
         if f.is_file():
             result.extend(scan_file(f, base))
@@ -244,9 +252,10 @@ def _check_listable(directory: Path, base: Path, result: ScanResult) -> None:
 def display_prefix(target: str, is_file: bool) -> str:
     """The prefix that turns a local target's in-target paths into the paths shown.
 
-    ADR 0001: a directory is the target as given, normalised (no './', '//', '/.' or
-    trailing '/'; '.' adds nothing); a single file is reported as the argument verbatim, so its
-    prefix is the argument up to the file name.
+    ADR 0001: a directory is the target as given, normalised with posixpath.normpath (no
+    './', '//', '/.' or trailing '/', and 'a/../b' -> 'b'; '.' adds nothing); a single
+    file is reported as the argument verbatim, so its prefix is the argument up to the
+    file name.
     """
     if is_file:
         return target[:len(target) - len(Path(target).name)]

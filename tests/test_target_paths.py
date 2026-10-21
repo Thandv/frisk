@@ -107,6 +107,23 @@ class TestRepeatedTargets(ProjectCase):
                     self.assertEqual((doc["findings"], doc["coverage"]), (once["findings"], once["coverage"]))
             self.assertEqual(len(run_json(["skill", "other"])["findings"]), 2 * len(once["findings"]))
 
+    def test_targets_the_parent_scan_does_not_cover_are_kept(self) -> None:
+        # FR-E2 review round 2: a name prefix is not containment; .git contents and a
+        # symlinked directory are skipped by the parent's walk, so they stay targets.
+        twin = self.proj / "skill2"
+        twin.mkdir()
+        (twin / "SKILL.md").write_text(OVERRIDE + "\n", encoding="utf-8")
+        hooks = self.proj / "skill" / ".git" / "hooks"
+        hooks.mkdir()
+        (hooks / "pre-commit").write_text("#!/bin/sh\n# " + OVERRIDE + "\n", encoding="utf-8")
+        (self.proj / "skill" / "linked").symlink_to(self.proj / "other", target_is_directory=True)
+        with chdir(self.proj):
+            for extra, path in (("skill2", "skill2/SKILL.md"), ("skill/.git/hooks", "skill/.git/hooks/pre-commit"),
+                                ("skill/linked", "skill/linked/SKILL.md")):
+                with self.subTest(extra=extra):
+                    found = paths(run_json(["skill", extra]))[0]
+                    self.assertIn(path, found)
+
 
 class TestSingleFile(ProjectCase):
     def test_file_path_equals_the_argument(self) -> None:

@@ -174,6 +174,51 @@ class TestUnreadable(CoverageCase):
         self.assertEqual(result.coverage.skipped, [Skipped("a.md", "unreadable", "IsADirectoryError")])
 
 
+class TestNonUtf8IsStillScanned(CoverageCase):
+    """FR-E2 review round 2: forcing a decode failure must not hide a payload."""
+
+    def payload_file(self, name: str, head: bytes) -> list[tuple[int, str]]:
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / name).write_bytes(head + b"\n" + OVERRIDE.encode() + b"\n")
+            return [(f.line, f.rule) for f in scan_path(d).findings]
+
+    def test_magic_plus_an_invalid_byte_on_a_text_file(self) -> None:
+        for name in ("SKILL.md", "page.html", "a.conf", "run.sh"):
+            with self.subTest(name=name):
+                self.assertEqual(self.payload_file(name, ELF_HEADER + b"\xff"),
+                                 [(1, "coverage.unreadable"), (2, "inject.ignore_prev")])
+
+    def test_unlisted_extensions_are_scanned_lossily(self) -> None:
+        for name in ("component.tsx", "notes.mdx", "main.go", "x.unknown"):
+            with self.subTest(name=name):
+                self.assertEqual(self.payload_file(name, b"\xff"),
+                                 [(1, "coverage.unreadable"), (2, "inject.ignore_prev")])
+
+    def test_shebang_script_is_scanned_even_with_nul_bytes(self) -> None:
+        self.assertEqual(self.payload_file("run.xyz", b"#!/bin/sh\x00\xff"),
+                         [(1, "coverage.unreadable"), (2, "inject.ignore_prev")])
+
+    def test_nul_bytes_or_opaque_extension_stay_silent(self) -> None:
+        self.assertEqual(self.payload_file("blob.xyz", b"\x00\xff"), [])
+        self.assertEqual(self.payload_file("data.db", b"\xff"), [])
+
+    def test_extensionless_magic_is_binary(self) -> None:
+        # Residual by design: an extensionless file with executable magic is treated as a
+        # binary (WARN, not scanned), like a real executable.
+        self.assertEqual(self.payload_file("tool", ELF_HEADER + b"\xff"), [(1, "coverage.binary")])
+
+    def test_replacement_character_and_bom_in_lossy_text(self) -> None:
+        result = self.only("a.md", b"\xef\xbb\xbf" + OVERRIDE.encode() + b" \xff\n")
+        (f,) = [x for x in result.findings if x.rule == "inject.ignore_prev"]
+        self.assertEqual(f.line, 1)
+        self.assertEqual(f.source_line, OVERRIDE + " \ufffd")
+        self.assertNotIn("\ufeff", f.excerpt)
+
+    def test_suspect_character_at_offset_zero(self) -> None:
+        result = self.only("a.md", (chr(0x200B) + "hi\n").encode())
+        self.assertEqual([(f.line, f.rule) for f in result.findings], [(1, "unicode.invisible")])
+
+
 class TestVcsDir(CoverageCase):
     def test_git_dir_is_recorded_once_and_not_scanned(self) -> None:
         self.put(".git/HEAD", b"ref: refs/heads/main\n")
@@ -181,8 +226,10 @@ class TestVcsDir(CoverageCase):
         self.put("pkg/.git/config", b"[core]\n")
         self.put("pkg/README.md", b"fine\n")
         result = scan_path(self.root)
-        self.assertEqual(result.findings, [])
-        self.assertEqual(result.coverage.skipped, [Skipped(".git", "vcs_dir"), Skipped("pkg/.git", "vcs_dir")])
+        # FR-E2 review round 2: the top-level .git is silent; a nested one warns.
+        self.assertEqual([(f.path, f.rule) for f in result.findings], [("pkg/.git", "coverage.nested_vcs")])
+        self.assertEqual(result.coverage.skipped,
+                         [Skipped(".git", "vcs_dir"), Skipped("pkg/.git", "vcs_dir", "nested")])
         self.assertEqual(result.coverage.files_scanned, 1)
 
     def test_target_inside_a_git_dir_is_scanned(self) -> None:

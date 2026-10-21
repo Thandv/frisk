@@ -259,7 +259,7 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 ### coverage.binary
 
 - Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A file frisk did not read as text because it is executable or archived: a native executable by its first bytes (ELF, Mach-O; checked only when the file is not valid UTF-8, so a text file cannot dodge the scan by starting with those bytes), a shared library or binary module (.so, .dylib, .dll, .wasm, .exe, .node), compiled Python (.pyc, .pyo), Java bytecode (.jar, .class), or an archive (.zip, .tar, .gz, .tgz; reported as contents unscanned). The file is also listed in coverage.skipped with reason binary.
+- Matches: A file frisk did not read as text because it is executable or archived: a native executable by its first bytes (ELF, Mach-O; checked only for a file that is not valid UTF-8 and has no code or text extension and no shebang), a shared library or binary module (.so, .dylib, .dll, .wasm, .exe, .node), compiled Python (.pyc, .pyo), Java bytecode (.jar, .class), or an archive (.zip, .tar, .gz, .tgz; reported as contents unscanned). The file is also listed in coverage.skipped with reason binary.
 - Likely false positive: Prebuilt binaries a project ships on purpose, such as a vendored native extension.
 - On a hit: frisk cannot see what the binary does. Build it from reviewed source, or scan the unpacked archive.
 
@@ -267,9 +267,17 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 ### coverage.unreadable
 
 - Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A code or text file (by extension, an extensionless file, or any file starting with a shebang) that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError; such a file is still scanned with the undecodable bytes replaced, so one bad byte cannot hide a payload), or a directory that could not be listed (its contents were not scanned). The entry is also listed in coverage.skipped with reason unreadable.
+- Matches: A file that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError). A non-UTF-8 file is still scanned with the undecodable bytes replaced, so one bad byte cannot hide a payload; only media, executables, archives, opaque data formats (.bin, .dat, .db, .sqlite, .npy, .parquet) and files containing NUL bytes are skipped instead, or a directory that could not be listed (its contents were not scanned). The entry is also listed in coverage.skipped with reason unreadable.
 - Likely false positive: A legacy Latin-1 encoded script or document.
 - On a hit: Re-encode the file as UTF-8 and scan again; one invalid byte must not be allowed to hide a payload.
+
+<a id="coverage.nested_vcs"></a>
+### coverage.nested_vcs
+
+- Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
+- Matches: A .git directory below the top of the scanned target. Like the top-level one it is not scanned (it is listed in coverage.skipped as vcs_dir with detail nested), but content placed there can be referenced from files that are scanned, so it warns.
+- Likely false positive: Vendored dependencies checked in with their own repository metadata.
+- On a hit: Check that nothing outside the directory refers into it; remove vendored .git directories.
 
 <a id="coverage.surface_error"></a>
 ### coverage.surface_error

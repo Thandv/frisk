@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from . import __version__
 from .engine import ScanResult, display_prefix, reroot, scan_path, scan_text, verdict, fails
@@ -22,15 +23,29 @@ def _scan_target(target: str) -> ScanResult:
 
 
 def _distinct(targets: list[str]) -> list[str]:
-    """Targets in order, without repeats: a local path named twice (in any spelling) or one
-    inside another local target directory is dropped, since its files are already scanned."""
-    local = {t: os.path.abspath(t) for t in targets if not is_git_url(t)}
-    dirs = {a for t, a in local.items() if os.path.isdir(t)}
+    """Targets in order, without repeats.
+
+    A local path named twice (any spelling, compared by real path) is scanned once. A
+    target inside another target directory is dropped only when that directory's scan
+    already covers it: no .git component between them (scan_path skips .git) and, since
+    real paths are compared, a target reached through a symlinked directory never counts
+    as inside.
+    """
+    local = {t: os.path.realpath(t) for t in targets if not is_git_url(t)}
+    dirs = {r for t, r in local.items() if os.path.isdir(t)}
+
+    def covered(real: str) -> bool:
+        for d in dirs:
+            if d != real and real.startswith(d.rstrip(os.sep) + os.sep):
+                if ".git" not in Path(os.path.relpath(real, d)).parts:
+                    return True
+        return False
+
     seen: set[str] = set()
     out: list[str] = []
     for t in targets:
         key = local.get(t, t)
-        if key in seen or any(key.startswith(d.rstrip(os.sep) + os.sep) for d in dirs if d != key):
+        if key in seen or covered(key):
             continue
         seen.add(key)
         out.append(t)
