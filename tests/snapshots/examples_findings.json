@@ -1,11 +1,11 @@
 [
   {
     "path": "examples/malicious-skill/SKILL.md",
-    "line": 1,
+    "line": 11,
     "rule": "rce.pipe_installer",
     "severity": "block",
-    "expected_change": "FR-E2",
-    "note": "Fence-relative line: the installer line is on file line 11 (fence line 1). FR-E2 reports the file line."
+    "expected_change": null,
+    "note": "Inside a code fence. Before FR-E2 this was reported at fence line 1; FR-E2 t2 reports the file line."
   },
   {
     "path": "examples/malicious-skill/SKILL.md",
