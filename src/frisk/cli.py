@@ -25,7 +25,9 @@ def _scan_target(target: str) -> ScanResult:
 def _distinct(targets: list[str]) -> list[str]:
     """Targets in order, without repeats.
 
-    A local path named twice (any spelling, compared by real path) is scanned once. An
+    A local path named twice (any spelling; a directory compared by real path, a file by
+    its directory's real path plus its own name, as the directory walk sees it, so two
+    names for one file both count) is scanned once. An
     existing target inside another target directory is dropped only when that
     directory's scan already covers it: no .git component between them (scan_path skips
     .git directories) and, since real paths are compared, a target reached through a
@@ -46,7 +48,10 @@ def _distinct(targets: list[str]) -> list[str]:
     def covered(path: str) -> bool:
         for d in dirs:
             if d != path and path.startswith(d.rstrip(os.sep) + os.sep):
-                if ".git" not in Path(os.path.relpath(path, d)).parts:
+                parts = Path(os.path.relpath(path, d)).parts
+                if parts[-1] == ".git" and os.path.isfile(path):
+                    parts = parts[:-1]  # a gitfile is scanned by the parent's walk
+                if ".git" not in parts:
                     return True
         return False
 

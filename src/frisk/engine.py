@@ -154,6 +154,8 @@ def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:
     one invalid byte must not hide the rest of the file.
     """
     ext = path.suffix.lower()
+    if ext == ".":  # Python 3.14 reports 'name.' as suffix '.', 3.9 as '': no extension
+        ext = ""
     if ext in MEDIA_EXTS:
         return None, _not_scanned(rel, "binary", ext)
     if ext in EXECUTABLE_EXTS:
@@ -191,7 +193,8 @@ def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:
                              "file is not valid UTF-8 (UnicodeDecodeError); "
                              "scanned with undecodable bytes replaced")
         text = data.decode("utf-8-sig", errors="replace")
-    return text.replace("\r\n", "\n").replace("\r", "\n"), notes
+    # NUL bytes are dropped: shells ignore them, so 'c<NUL>url' must still match as 'curl'.
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\0", ""), notes
 
 
 def _in_target(path: Path, root: Path | None) -> str:

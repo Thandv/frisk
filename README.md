@@ -82,7 +82,7 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   (`.zip`, `.tar`, `.gz`, `.tgz`) each also raise a `coverage.binary` **warning**, so the
   verdict is never PASS while executable content went unscanned. Media (images, fonts,
   audio, video, PDF) and opaque data (`.bin`, `.dat`, `.db`, `.sqlite`, `.npy`,
-  `.parquet`) are skipped silently. A non-UTF-8 file with NUL bytes and an extension
+  `.parquet`) that is not valid UTF-8 are skipped silently. A non-UTF-8 file with NUL bytes and an extension
   frisk does not list as code or text also raises `coverage.binary`.
 - `unreadable`: a file that cannot be read or is not valid UTF-8, or a directory that
   cannot be listed, raises a `coverage.unreadable` warning naming the error. Any other

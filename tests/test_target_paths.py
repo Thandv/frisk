@@ -113,9 +113,18 @@ class TestRepeatedTargets(ProjectCase):
             self.assertEqual(run_json(["skill", "skill/l.md"])["findings"], run_json(["skill"])["findings"])
 
     def test_missing_nested_target_still_errors(self) -> None:
-        with chdir(self.proj), contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertEqual(main(["skill", "skill/nope"]), 2)
-        self.assertIn("not a path", err.getvalue())
+        (self.proj / "skill" / "dangling").symlink_to(self.proj / "gone")
+        for nested in ("skill/nope", "skill/dangling"):
+            with self.subTest(nested=nested), chdir(self.proj), \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(main(["skill", nested]), 2)
+                self.assertIn("not a path", err.getvalue())
+
+    def test_gitfile_inside_a_target_is_not_scanned_twice(self) -> None:
+        (self.proj / "skill" / "m").mkdir()
+        (self.proj / "skill" / "m" / ".git").write_text(OVERRIDE + "\n", encoding="utf-8")
+        with chdir(self.proj):
+            self.assertEqual(run_json(["skill", "skill/m/.git"])["findings"], run_json(["skill"])["findings"])
 
     def test_targets_the_parent_scan_does_not_cover_are_kept(self) -> None:
         # FR-E2 review round 2: a name prefix is not containment; .git contents and a
