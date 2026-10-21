@@ -106,7 +106,8 @@ carries `helpUri` (its section of [docs/rules.md](docs/rules.md)) and a
 `security-severity` (block 8.5, warn 5.0) for GitHub's severity levels. Each result has
 `partialFingerprints["frisk/v1"]`: a sha256 of the rule id, the path, the matched
 source line with whitespace collapsed, and an occurrence index, with no line number, so
-inserting lines above a finding does not turn it into a new alert. `--text` and
+inserting lines above a finding does not turn it into a new alert
+([ADR 0002](docs/adr/0002-sarif-fingerprints.md)). `--text` and
 `--mcp-config` results carry a logical location (`<text>`, `server::path`) instead of a
 file location.
 
