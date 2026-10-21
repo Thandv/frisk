@@ -159,6 +159,23 @@ SUSPECT_UNICODE = {
 }
 _BOM = chr(0xFEFF)
 
+# The hidden-Unicode rule: (id, category, severity). Its matcher is hidden_unicode().
+UNICODE_RULE = ("unicode.invisible", "obfuscation", "block")
+
+
+def hidden_unicode(text: str) -> list[tuple[int, str]]:
+    """Return (offset, description) for the first occurrence of each suspect character.
+
+    Offsets index into `text`. A BOM is allowed only as the very first character.
+    """
+    start = 1 if text[:1] == _BOM else 0
+    hits: list[tuple[int, str]] = []
+    for ch, name in SUSPECT_UNICODE.items():
+        idx = text.find(ch, start)
+        if idx != -1:
+            hits.append((idx, f"suspicious invisible/bidi character: {name}"))
+    return hits
+
 # Map each finding category to the OWASP Top 10 for LLM Applications (2025) entry
 # it most directly corresponds to — surfaced in JSON/SARIF output for compliance.
 CATEGORY_OWASP = {

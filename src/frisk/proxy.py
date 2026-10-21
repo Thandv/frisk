@@ -68,7 +68,7 @@ class Proxy:
             changed = name in self.pins and self.pins[name] != h
             self.pins[name] = h
 
-            findings = scan_text(_tool_text(tool), name)
+            findings = scan_text(_tool_text(tool), name).findings
             sev = worst_severity(findings)
 
             if sev == "block":
@@ -91,7 +91,7 @@ class Proxy:
     def _scan_content(self, content: list) -> None:
         for item in content:
             if item.get("type") == "text" and isinstance(item.get("text"), str):
-                findings = scan_text(item["text"], "tool-result")
+                findings = scan_text(item["text"], "tool-result").findings
                 if worst_severity(findings) == "block":
                     self.stats["flagged"] += 1
                     self._log(f"injection in tool result: {findings[0].description}")

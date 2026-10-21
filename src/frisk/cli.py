@@ -5,38 +5,38 @@ import argparse
 import sys
 
 from . import __version__
-from .engine import Finding, scan_path, scan_text, verdict, fails
+from .engine import ScanResult, scan_path, scan_text, verdict, fails
 from .report import to_text, to_json, to_sarif, _c
 from .sources import materialize, parse_mcp_config
 from . import pin, proxy
 
 
-def _scan_target(target: str) -> list[Finding]:
+def _scan_target(target: str) -> ScanResult:
     with materialize(target) as (root, _label):
         return scan_path(root, root if root.is_dir() else None)
 
 
-def _audit_config(path: str) -> tuple[list[Finding], list[str]]:
-    findings: list[Finding] = []
+def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
+    result = ScanResult()
     lines: list[str] = [_c(f"MCP config audit: {path}", "bold"), ""]
     servers = parse_mcp_config(path)
     if not servers:
         lines.append("  (no servers found in config)")
-        return findings, lines
+        return result, lines
     for s in servers:
         if s.scannable:
-            fs = scan_path(s.ref)
-            for f in fs:
+            server = scan_path(s.ref)
+            for f in server.findings:
                 f.path = f"{s.name}::{f.path}"
-            findings.extend(fs)
-            v = verdict(fs)
+            result.extend(server)
+            v = verdict(server.findings)
             tag = _c(f"{v:<5}", {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}[v])
         else:
             tag = _c("SKIP ", "dim")
         lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {s.detail}")
         if not s.scannable:
             lines.append(_c(f"           → {s.ref}", "dim"))
-    return findings, lines
+    return result.sort(), lines
 
 
 # --- scan (default) ---------------------------------------------------------
@@ -64,21 +64,22 @@ def _cmd_scan(argv: list[str]) -> int:
         p.print_help()
         return 2
 
-    findings: list[Finding] = []
+    result = ScanResult()
     audit_lines: list[str] = []
     label = ", ".join(args.targets + args.mcp_config) or "<text>"
     try:
         if args.text is not None:
-            findings.extend(scan_text(args.text, "<text>"))
+            result.extend(scan_text(args.text, "<text>"))
         for t in args.targets:
-            findings.extend(_scan_target(t))
+            result.extend(_scan_target(t))
         for cfg in args.mcp_config:
-            fs, lines = _audit_config(cfg)
-            findings.extend(fs)
+            server_result, lines = _audit_config(cfg)
+            result.extend(server_result)
             audit_lines.extend(lines)
     except (FileNotFoundError, RuntimeError, ValueError) as e:
         print(f"frisk: {e}", file=sys.stderr)
         return 2
+    findings = result.sort().findings
 
     if args.json:
         print(to_json(findings, label))

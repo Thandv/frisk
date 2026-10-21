@@ -34,7 +34,7 @@ def live_findings() -> list[Row]:
     """Scan every examples/*/ directory; return sorted (path, line, rule, severity)."""
     rows: list[Row] = []
     for directory in sorted(p for p in EXAMPLES.iterdir() if p.is_dir()):
-        for f in scan_path(directory, REPO):
+        for f in scan_path(directory, REPO).findings:
             rows.append((Path(f.path).as_posix(), f.line, f.rule, f.severity))
     return sorted(rows)
 
