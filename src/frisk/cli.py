@@ -25,19 +25,28 @@ def _scan_target(target: str) -> ScanResult:
 def _distinct(targets: list[str]) -> list[str]:
     """Targets in order, without repeats.
 
-    A local path named twice (any spelling, compared by real path) is scanned once. A
-    target inside another target directory is dropped only when that directory's scan
-    already covers it: no .git component between them (scan_path skips .git) and, since
-    real paths are compared, a target reached through a symlinked directory never counts
-    as inside.
+    A local path named twice (any spelling, compared by real path) is scanned once. An
+    existing target inside another target directory is dropped only when that
+    directory's scan already covers it: no .git component between them (scan_path skips
+    .git directories) and, since real paths are compared, a target reached through a
+    symlinked directory never counts as inside. Case-insensitive filesystems are not
+    folded: 'skill' and 'Skill' are scanned twice.
     """
-    local = {t: os.path.realpath(t) for t in targets if not is_git_url(t)}
-    dirs = {r for t, r in local.items() if os.path.isdir(t)}
+    def real(t: str) -> str:
+        # A file is identified by its real directory plus its own name: the parent's walk
+        # reads a symlinked file under the link's name, so it is inside that directory.
+        if os.path.isfile(t):
+            return os.path.join(os.path.realpath(os.path.dirname(os.path.abspath(t))), os.path.basename(t))
+        return os.path.realpath(t)
 
-    def covered(real: str) -> bool:
+    local = {t: real(t) for t in targets if not is_git_url(t)}
+    dirs = {r for t, r in local.items() if os.path.isdir(t)}
+    existing = {t for t in local if os.path.exists(t)}  # a missing target still errors
+
+    def covered(path: str) -> bool:
         for d in dirs:
-            if d != real and real.startswith(d.rstrip(os.sep) + os.sep):
-                if ".git" not in Path(os.path.relpath(real, d)).parts:
+            if d != path and path.startswith(d.rstrip(os.sep) + os.sep):
+                if ".git" not in Path(os.path.relpath(path, d)).parts:
                     return True
         return False
 
@@ -45,7 +54,7 @@ def _distinct(targets: list[str]) -> list[str]:
     out: list[str] = []
     for t in targets:
         key = local.get(t, t)
-        if key in seen or covered(key):
+        if key in seen or (t in existing and covered(key)):
             continue
         seen.add(key)
         out.append(t)

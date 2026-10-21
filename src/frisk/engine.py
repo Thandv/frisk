@@ -173,15 +173,20 @@ def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:
         text = data.decode("utf-8-sig")  # a leading BOM is encoding, not content
     except UnicodeDecodeError:
         # Valid UTF-8 is always scanned. Content that does not decode is scanned lossily
-        # (and warns) unless it is clearly not text: executable magic on a file with no
-        # code/text extension or shebang, or an opaque data format, or NUL bytes.
-        textual = ext in CODE_EXTS or ext in TEXT_EXTS or data.startswith(b"#!")
+        # and warns, unless it is clearly not text: executable magic on a file with no
+        # code/text extension or shebang (coverage.binary), an opaque data format (silent),
+        # or NUL bytes in a file with an unlisted extension (coverage.binary). Files with
+        # no extension (Dockerfile, .bashrc, hooks) are always scanned unless magic matches.
+        textual = ext in CODE_EXTS or ext in TEXT_EXTS or data.removeprefix(b"\xef\xbb\xbf").startswith(b"#!")
         magic = None if textual else executable_magic(data)
         if magic is not None:
             return None, _not_scanned(rel, "binary", magic, "coverage.binary",
                                       f"executable content not scanned ({magic})")
-        if not textual and (ext in OPAQUE_DATA_EXTS or b"\0" in data[:8192]):
+        if not textual and ext in OPAQUE_DATA_EXTS:
             return None, _not_scanned(rel, "binary", "not UTF-8 text")
+        if not textual and ext and b"\0" in data:
+            return None, _not_scanned(rel, "binary", "not UTF-8 text", "coverage.binary",
+                                      f"binary content not scanned ({ext})")
         notes = _not_scanned(rel, "unreadable", "UnicodeDecodeError", "coverage.unreadable",
                              "file is not valid UTF-8 (UnicodeDecodeError); "
                              "scanned with undecodable bytes replaced")
@@ -221,8 +226,8 @@ def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
     _check_listable(p, base, result)
     for f in sorted(p.rglob("*")):
         inside = f.relative_to(p).parts
-        if ".git" in inside:
-            if inside.index(".git") == len(inside) - 1:  # the VCS entry itself, once
+        if ".git" in inside and not (inside[-1] == ".git" and f.is_file()):  # a gitfile is scanned
+            if inside.index(".git") == len(inside) - 1:  # the VCS directory itself, once
                 rel = _in_target(f, base)
                 if len(inside) > 1 and f.is_dir():
                     # Below the top, a .git directory is an easy hiding place: warn.

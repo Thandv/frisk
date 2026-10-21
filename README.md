@@ -81,13 +81,15 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   shebang), compiled Python (`.pyc`, `.pyo`), Java (`.jar`, `.class`) and archives
   (`.zip`, `.tar`, `.gz`, `.tgz`) each also raise a `coverage.binary` **warning**, so the
   verdict is never PASS while executable content went unscanned. Media (images, fonts,
-  audio, video, PDF), opaque data (`.bin`, `.dat`, `.db`, `.sqlite`, `.npy`, `.parquet`)
-  and other non-UTF-8 files containing NUL bytes are skipped silently.
+  audio, video, PDF) and opaque data (`.bin`, `.dat`, `.db`, `.sqlite`, `.npy`,
+  `.parquet`) are skipped silently. A non-UTF-8 file with NUL bytes and an extension
+  frisk does not list as code or text also raises `coverage.binary`.
 - `unreadable`: a file that cannot be read or is not valid UTF-8, or a directory that
   cannot be listed, raises a `coverage.unreadable` warning naming the error. Any other
   non-UTF-8 file is still scanned with the bad bytes replaced (and counted as scanned
   too), so one invalid byte cannot hide a payload.
-- `vcs_dir`: a `.git` directory, listed once and not scanned. A `.git` directory below
+- `vcs_dir`: a `.git` directory, listed once and not scanned (a `.git` *file*, as in
+  worktrees and submodules, is scanned like any file). A `.git` directory below
   the top of the target also raises a `coverage.nested_vcs` warning, since content
   hidden there can be referenced from scanned files.
 - `surface_error`: one of frisk's scan surfaces failed on a file (`detail` names it);

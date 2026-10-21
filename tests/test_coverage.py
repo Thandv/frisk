@@ -198,9 +198,18 @@ class TestNonUtf8IsStillScanned(CoverageCase):
         self.assertEqual(self.payload_file("run.xyz", b"#!/bin/sh\x00\xff"),
                          [(1, "coverage.unreadable"), (2, "inject.ignore_prev")])
 
-    def test_nul_bytes_or_opaque_extension_stay_silent(self) -> None:
-        self.assertEqual(self.payload_file("blob.xyz", b"\x00\xff"), [])
+    def test_opaque_extension_is_silent_and_nul_bytes_warn(self) -> None:
+        # Round 3: NUL bytes in an unlisted extension warn (was silent); opaque data stays silent.
         self.assertEqual(self.payload_file("data.db", b"\xff"), [])
+        self.assertEqual(self.payload_file("blob.xyz", b"\x00\xff"), [(1, "coverage.binary")])
+        self.assertEqual(self.payload_file("late.xyz", b"x" * 9000 + b"\x00\xff"), [(1, "coverage.binary")])
+
+    def test_extensionless_dotfiles_and_bom_shebang_are_scanned_despite_nul(self) -> None:
+        for name, head in (("Dockerfile", b"\x00\xff"), (".bashrc", b"\x00\xff"),
+                           ("pre-commit.hook", b"\xef\xbb\xbf#!/bin/sh\x00\xff")):
+            with self.subTest(name=name):
+                self.assertEqual(self.payload_file(name, head),
+                                 [(1, "coverage.unreadable"), (2, "inject.ignore_prev")])
 
     def test_extensionless_magic_is_binary(self) -> None:
         # Residual by design: an extensionless file with executable magic is treated as a
@@ -220,6 +229,12 @@ class TestNonUtf8IsStillScanned(CoverageCase):
 
 
 class TestVcsDir(CoverageCase):
+    def test_a_git_file_is_scanned(self) -> None:
+        # Round 3: only .git directories are VCS metadata; a file named .git is scanned.
+        result = self.only("gf/.git", (OVERRIDE + "\n").encode())
+        self.assertEqual([(f.path, f.rule) for f in result.findings], [("gf/.git", "inject.ignore_prev")])
+        self.assertEqual(result.coverage.skipped, [])
+
     def test_git_dir_is_recorded_once_and_not_scanned(self) -> None:
         self.put(".git/HEAD", b"ref: refs/heads/main\n")
         self.put(".git/hooks/pre-commit", ("#!/bin/sh\n# " + OVERRIDE + "\n").encode())

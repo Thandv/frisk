@@ -197,8 +197,9 @@ class TestCoverageEdges(TempDir):
         self.assertEqual((result.findings, result.coverage.files_scanned, result.coverage.skipped),
                          ([], 3, []))
 
-    # Correct: a .git entry anywhere inside the target (dir or gitfile) is skipped once as
-    # vcs_dir and its contents are neither scanned nor counted; '.github' is not VCS.
+    # Correct (as revised by the FR-E2 review): a nested .git directory is skipped once as
+    # vcs_dir, its contents neither scanned nor counted, and it warns; a gitfile is scanned
+    # like any file; '.github' is not VCS.
     def test_git_dirs_inside_the_target(self) -> None:
         hooks = self.root / "sub" / ".git" / "hooks"
         hooks.mkdir(parents=True)
@@ -211,12 +212,12 @@ class TestCoverageEdges(TempDir):
         # FR-E2 review round 2: a nested .git directory warns (a gitfile does not).
         self.assertEqual([(f.path, f.line, f.rule) for f in result.findings],
                          [(".github/a.md", 1, "inject.ignore_prev"), ("sub/.git", 1, "coverage.nested_vcs")])
-        self.assertEqual(result.coverage.files_scanned, 1)
-        self.assertEqual(result.coverage.skipped,
-                         [Skipped("mod/.git", "vcs_dir"), Skipped("sub/.git", "vcs_dir", "nested")])
+        # Round 3: the gitfile mod/.git is an ordinary scanned file (no finding in it).
+        self.assertEqual(result.coverage.files_scanned, 2)
+        self.assertEqual(result.coverage.skipped, [Skipped("sub/.git", "vcs_dir", "nested")])
         with chdir(self.root):
             doc = run_json(["./"])
-        self.assertEqual([s["path"] for s in doc["coverage"]["skipped"]], ["mod/.git", "sub/.git"])
+        self.assertEqual([s["path"] for s in doc["coverage"]["skipped"]], ["sub/.git"])
 
 
 @unittest.skipIf(not hasattr(os, "geteuid") or os.geteuid() == 0,

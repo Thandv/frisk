@@ -260,14 +260,14 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 
 - Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
 - Matches: A file frisk did not read as text because it is executable or archived: a native executable by its first bytes (ELF, Mach-O; checked only for a file that is not valid UTF-8 and has no code or text extension and no shebang), a shared library or binary module (.so, .dylib, .dll, .wasm, .exe, .node), compiled Python (.pyc, .pyo), Java bytecode (.jar, .class), or an archive (.zip, .tar, .gz, .tgz; reported as contents unscanned). The file is also listed in coverage.skipped with reason binary.
-- Likely false positive: Prebuilt binaries a project ships on purpose, such as a vendored native extension.
+- Likely false positive: Prebuilt binaries a project ships on purpose, such as a vendored native extension, or a non-UTF-8 data file with NUL bytes and an extension frisk does not know.
 - On a hit: frisk cannot see what the binary does. Build it from reviewed source, or scan the unpacked archive.
 
 <a id="coverage.unreadable"></a>
 ### coverage.unreadable
 
 - Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A file that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError). A non-UTF-8 file is still scanned with the undecodable bytes replaced, so one bad byte cannot hide a payload; only media, executables, archives, opaque data formats (.bin, .dat, .db, .sqlite, .npy, .parquet) and files containing NUL bytes are skipped instead, or a directory that could not be listed (its contents were not scanned). The entry is also listed in coverage.skipped with reason unreadable.
+- Matches: A file that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError). Also a directory that could not be listed (its contents were not scanned). A non-UTF-8 file is still scanned with the undecodable bytes replaced, so one bad byte cannot hide a payload (a UTF-16 file is not matched usefully this way, but still warns); only media, executables, archives, opaque data formats (.bin, .dat, .db, .sqlite, .npy, .parquet) and NUL-containing files with an unlisted extension are not scanned (media and opaque data silently, the others with coverage.binary). The entry is also listed in coverage.skipped with reason unreadable.
 - Likely false positive: A legacy Latin-1 encoded script or document.
 - On a hit: Re-encode the file as UTF-8 and scan again; one invalid byte must not be allowed to hide a payload.
 

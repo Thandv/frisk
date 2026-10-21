@@ -107,6 +107,16 @@ class TestRepeatedTargets(ProjectCase):
                     self.assertEqual((doc["findings"], doc["coverage"]), (once["findings"], once["coverage"]))
             self.assertEqual(len(run_json(["skill", "other"])["findings"]), 2 * len(once["findings"]))
 
+    def test_symlinked_file_inside_a_target_is_not_scanned_twice(self) -> None:
+        (self.proj / "skill" / "l.md").symlink_to(self.proj / "other" / "SKILL.md")
+        with chdir(self.proj):
+            self.assertEqual(run_json(["skill", "skill/l.md"])["findings"], run_json(["skill"])["findings"])
+
+    def test_missing_nested_target_still_errors(self) -> None:
+        with chdir(self.proj), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(main(["skill", "skill/nope"]), 2)
+        self.assertIn("not a path", err.getvalue())
+
     def test_targets_the_parent_scan_does_not_cover_are_kept(self) -> None:
         # FR-E2 review round 2: a name prefix is not containment; .git contents and a
         # symlinked directory are skipped by the parent's walk, so they stay targets.
