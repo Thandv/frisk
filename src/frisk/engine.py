@@ -193,8 +193,7 @@ def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:
                              "file is not valid UTF-8 (UnicodeDecodeError); "
                              "scanned with undecodable bytes replaced")
         text = data.decode("utf-8-sig", errors="replace")
-    # NUL bytes are dropped: shells ignore them, so 'c<NUL>url' must still match as 'curl'.
-    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\0", ""), notes
+    return text.replace("\r\n", "\n").replace("\r", "\n"), notes
 
 
 def _in_target(path: Path, root: Path | None) -> str:
@@ -207,17 +206,32 @@ def scan_file(path: Path, root: Path | None = None) -> ScanResult:
     text, notes = _read_text(path, rel)
     if text is None:
         return notes
+    failed: dict[str, None] = {}  # surface failures, in order, reported once per file
+    findings = _scan_reading(path, text, rel, failed)
+    if "\0" in text:
+        # NUL bytes make two readings: as written (a renderer shows NUL as U+FFFD, so it
+        # cannot close a fence) and with NUL dropped (shells drop it, so 'c<NUL>url' runs as
+        # 'curl'). A finding from either reading counts, once.
+        seen = {(f.line, f.rule, f.description) for f in findings}
+        findings += [f for f in _scan_reading(path, text.replace("\0", ""), rel, failed)
+                     if (f.line, f.rule, f.description) not in seen]
+    for detail in failed:
+        notes.extend(_not_scanned(rel, "surface_error", detail, "coverage.surface_error",
+                                  f"scan surface failed on this file ({detail})"))
+    result = ScanResult(findings, Coverage(files_scanned=1))
+    result.extend(notes)
+    return result.sort()
+
+
+def _scan_reading(path: Path, text: str, rel: str, failed: dict[str, None]) -> list[Finding]:
+    """Run every surface on `text` and match its spans; a failing surface is noted in `failed`."""
     spans: list[Span] = []
     for surface in surfaces.load():
         try:
             spans.extend(surface.extract(path, text))
         except Exception as e:  # noqa: BLE001 - one broken surface must not stop the scan
-            detail = f"{surfaces.name_of(surface)}: {type(e).__name__}"
-            notes.extend(_not_scanned(rel, "surface_error", detail, "coverage.surface_error",
-                                      f"scan surface failed on this file ({detail})"))
-    result = ScanResult(_scan_spans(text, spans, rel), Coverage(files_scanned=1))
-    result.extend(notes)
-    return result.sort()
+            failed[f"{surfaces.name_of(surface)}: {type(e).__name__}"] = None
+    return _scan_spans(text, spans, rel)
 
 
 def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
