@@ -5,7 +5,9 @@ import json
 import os
 import sys
 
-from .engine import Finding, verdict, worst_severity
+from collections import Counter
+
+from .engine import Coverage, ScanResult, verdict, worst_severity
 from .rules import owasp_for
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
@@ -19,7 +21,18 @@ def _c(s: str, key: str) -> str:
     return f"{_C[key]}{s}{_C['reset']}" if _USE_COLOR else s
 
 
-def to_text(findings: list[Finding], target: str) -> str:
+def coverage_line(coverage: Coverage) -> str:
+    """'scanned N files, skipped M (reason: count, ...)' for the text report."""
+    n, skipped = coverage.files_scanned, coverage.skipped
+    line = f"scanned {n} file{'' if n == 1 else 's'}, skipped {len(skipped)}"
+    if skipped:
+        counts = Counter(s.reason for s in skipped)
+        line += " (" + ", ".join(f"{r}: {c}" for r, c in sorted(counts.items())) + ")"
+    return line
+
+
+def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
+    findings = result.findings
     lines: list[str] = []
     for f in findings:
         mark = _c("BLOCK", "block") if f.severity == "block" else _c("warn ", "warn")
@@ -35,13 +48,16 @@ def to_text(findings: list[Finding], target: str) -> str:
     if not findings:
         lines.append(_c(f"frisk: clean — no findings in {target}", "pass"))
     lines.append("")
+    if show_coverage:
+        lines.append(_c(coverage_line(result.coverage), "dim"))
     lines.append(f"{_c('verdict', 'bold')}: {banner}  "
                  f"{blocks} blocking · {warns} warnings · {len(findings)} total  "
                  f"({_c(target, 'dim')})")
     return "\n".join(lines)
 
 
-def to_json(findings: list[Finding], target: str) -> str:
+def to_json(result: ScanResult, target: str) -> str:
+    findings = result.findings
     return json.dumps({
         "target": target,
         "verdict": verdict(findings),
@@ -52,14 +68,16 @@ def to_json(findings: list[Finding], target: str) -> str:
             "total": len(findings),
         },
         "findings": [{**f.as_dict(), "owasp": owasp_for(f.category)} for f in findings],
+        "coverage": result.coverage.as_dict(),
     }, indent=2)
 
 
 _SARIF_LEVEL = {"block": "error", "warn": "warning"}
 
 
-def to_sarif(findings: list[Finding], version: str = "0.1.0") -> str:
+def to_sarif(result: ScanResult, version: str = "0.1.0") -> str:
     """SARIF 2.1.0 so GitHub's code-scanning Security tab renders findings inline."""
+    findings = result.findings
     rule_ids = sorted({f.rule for f in findings})
     rules = [{
         "id": rid,
@@ -92,6 +110,7 @@ def to_sarif(findings: list[Finding], version: str = "0.1.0") -> str:
                 "rules": rules,
             }},
             "results": results,
+            "properties": {"coverage": result.coverage.as_dict()},
         }],
     }
     return json.dumps(doc, indent=2)

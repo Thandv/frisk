@@ -55,7 +55,9 @@ class TestScanCharacterization(unittest.TestCase):
         code, out, _ = run(["--json", str(EXAMPLES)])
         self.assertEqual(code, 1)
         doc = json.loads(out)
-        self.assertEqual(set(doc), {"target", "verdict", "worst_severity", "counts", "findings"})
+        # FR-E2 t3 added "coverage" (was: the other five keys only).
+        self.assertEqual(set(doc), {"target", "verdict", "worst_severity", "counts", "findings", "coverage"})
+        self.assertEqual(doc["coverage"], {"files_scanned": 3, "skipped": []})
         self.assertEqual(doc["target"], str(EXAMPLES))
         self.assertEqual(doc["verdict"], "BLOCK")
         self.assertEqual(doc["worst_severity"], "block")
@@ -231,6 +233,7 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             "",
             f"frisk: clean — no findings in {cfg}",
             "",
+            "scanned 2 files, skipped 0",  # FR-E2 t3: coverage line (server.py and mcp.json)
             f"verdict:   PASS    0 blocking · 0 warnings · 0 total  ({cfg})",
             "",
         ]))
@@ -255,6 +258,7 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             "[BLOCK] rce           bad-srv::run.sh:2  pipe-to-shell remote installer (curl|wget ... | sh)",
             "          | #!/bin/sh\\n" + INSTALLER + "\\n",
             "",
+            "scanned 1 file, skipped 0",  # FR-E2 t3: coverage line
             f"verdict:   BLOCK    1 blocking · 0 warnings · 1 total  ({cfg})",
             "",
         ]))
@@ -272,6 +276,7 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             "",
             f"frisk: clean — no findings in {cfg}",
             "",
+            "scanned 0 files, skipped 0",  # FR-E2 t3: coverage line
             f"verdict:   PASS    0 blocking · 0 warnings · 0 total  ({cfg})",
             "",
         ]))

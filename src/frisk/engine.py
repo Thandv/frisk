@@ -7,7 +7,10 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 from . import surfaces
-from .rules import SKIP_EXTS, CODE_RULES, TEXT_RULES, UNICODE_RULE, hidden_unicode
+from .rules import (
+    ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, RULE_META, TEXT_EXTS,
+    TEXT_RULES, UNICODE_RULE, executable_magic, hidden_unicode,
+)
 from .surfaces import Span
 
 _NEWLINE = re.compile("\n")
@@ -121,14 +124,52 @@ def scan_text(text: str, label: str = "<text>") -> ScanResult:
     return ScanResult(_scan_spans(text, [Span(0, whole, "code"), Span(0, whole, "text")], label))
 
 
+def _not_scanned(rel: str, reason: str, detail: str, rule: str | None = None,
+                 message: str = "") -> ScanResult:
+    """A file that was not pattern-matched: a skipped entry, plus a warn finding if `rule`."""
+    findings = []
+    if rule is not None:
+        category, severity, _ = RULE_META[rule]
+        findings.append(Finding(rel, 1, rule, category, severity, message, ""))
+    return ScanResult(findings, Coverage(skipped=[Skipped(rel, reason, detail)]))
+
+
+def _read_text(path: Path, rel: str) -> str | ScanResult:
+    """The file's text (newlines normalised as text-mode reading does), or why not."""
+    ext = path.suffix.lower()
+    if ext in MEDIA_EXTS:
+        return _not_scanned(rel, "binary", ext)
+    if ext in EXECUTABLE_EXTS:
+        return _not_scanned(rel, "binary", ext, "coverage.binary",
+                            f"executable content not scanned ({ext})")
+    if ext in ARCHIVE_EXTS:
+        return _not_scanned(rel, "binary", ext, "coverage.binary",
+                            f"archive not scanned: contents unscanned ({ext})")
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        name = type(e).__name__
+        return _not_scanned(rel, "unreadable", name, "coverage.unreadable",
+                            f"file could not be read: {name}")
+    magic = executable_magic(data)
+    if magic is not None:
+        return _not_scanned(rel, "binary", magic, "coverage.binary",
+                            f"executable content not scanned ({magic})")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        if ext in CODE_EXTS or ext in TEXT_EXTS or data.startswith(b"#!"):
+            return _not_scanned(rel, "unreadable", "UnicodeDecodeError", "coverage.unreadable",
+                                "file could not be decoded as UTF-8: UnicodeDecodeError")
+        return _not_scanned(rel, "binary", "not UTF-8 text")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def scan_file(path: Path, root: Path | None = None) -> ScanResult:
     rel = str(path.relative_to(root)) if root else str(path)
-    if path.suffix.lower() in SKIP_EXTS:
-        return ScanResult()
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
-        return ScanResult()  # binary or unreadable -> not pattern-scannable
+    text = _read_text(path, rel)
+    if isinstance(text, ScanResult):
+        return text
     coverage = Coverage(files_scanned=1)
     spans: list[Span] = []
     for surface in surfaces.load():
@@ -147,7 +188,12 @@ def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
     result = ScanResult()
     base = root or p
     for f in sorted(p.rglob("*")):
-        if f.is_file() and ".git" not in f.parts:
+        inside = f.relative_to(p).parts
+        if ".git" in inside:
+            if inside.index(".git") == len(inside) - 1:  # the VCS entry itself, once
+                result.coverage.skipped.append(Skipped(str(f.relative_to(base)), "vcs_dir"))
+            continue
+        if f.is_file():
             result.extend(scan_file(f, base))
     return result.sort()
 

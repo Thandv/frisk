@@ -82,16 +82,16 @@ def _cmd_scan(argv: list[str]) -> int:
     findings = result.sort().findings
 
     if args.json:
-        print(to_json(findings, label))
+        print(to_json(result, label))
     elif args.sarif:
-        print(to_sarif(findings, __version__))
+        print(to_sarif(result, __version__))
     elif args.quiet:
         print(f"frisk: {verdict(findings)}  ({label})")
     else:
         if audit_lines:
             print("\n".join(audit_lines))
             print()
-        print(to_text(findings, label))
+        print(to_text(result, label, show_coverage=bool(args.targets or args.mcp_config)))
 
     if args.fail_on == "never":
         return 0

@@ -250,3 +250,23 @@ Run with the text rules.
 - Matches: Zero-width characters (space, joiner, non-joiner, word joiner) or bidirectional controls (marks, embeddings, overrides, isolates) anywhere in the text. A byte-order mark is allowed only as the first character. Only the first occurrence of each character is reported.
 - Likely false positive: Text in right-to-left languages that uses directional marks on purpose.
 - On a hit: Reveal the characters (for example with a hex view); hidden text an agent reads but a human does not see is a classic injection carrier.
+
+## Coverage
+
+Reported for content frisk could not pattern-match, so a scan is never PASS while executable content went unscanned. Media files (images, fonts, audio, video, PDF) are skipped silently and only counted in coverage.
+
+<a id="coverage.binary"></a>
+### coverage.binary
+
+- Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
+- Matches: A file frisk did not read as text because it is executable or archived: a native executable by its first bytes (ELF, Mach-O), a shared library or binary module (.so, .dylib, .dll, .wasm, .exe, .node), compiled Python (.pyc, .pyo), Java bytecode (.jar, .class), or an archive (.zip, .tar, .gz, .tgz; reported as contents unscanned). The file is also listed in coverage.skipped with reason binary.
+- Likely false positive: Prebuilt binaries a project ships on purpose, such as a vendored native extension.
+- On a hit: frisk cannot see what the binary does. Build it from reviewed source, or scan the unpacked archive.
+
+<a id="coverage.unreadable"></a>
+### coverage.unreadable
+
+- Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
+- Matches: A code or text file (by extension, or any file starting with a shebang) that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError). The file is also listed in coverage.skipped with reason unreadable.
+- Likely false positive: A legacy Latin-1 encoded script or document.
+- On a hit: Re-encode the file as UTF-8 and scan again; one invalid byte must not be allowed to hide a payload.

@@ -22,11 +22,30 @@ CODE_EXTS = {
     ".rb", ".pl", ".php", ".ps1", ".bat", ".cmd", ".lua", ".r",
 }
 TEXT_EXTS = {".md", ".markdown", ".txt", ".mdc", ".rst", ".yaml", ".yml", ".json", ".toml"}
-SKIP_EXTS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz",
-    ".tar", ".woff", ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".wasm", ".so",
-    ".dylib", ".pyc",
+# Media: never read, no finding, counted in coverage.skipped as "binary".
+MEDIA_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".pdf", ".woff",
+    ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".wav", ".mov",
 }
+# Executable or archive content frisk cannot scan as text: a coverage.binary warning.
+EXECUTABLE_EXTS = {
+    ".so", ".dylib", ".dll", ".wasm", ".exe", ".node", ".pyc", ".pyo", ".jar", ".class",
+}
+ARCHIVE_EXTS = {".zip", ".tar", ".gz", ".tgz"}
+# Leading bytes of native executables (checked before decoding: an ELF header is valid UTF-8).
+EXECUTABLE_MAGIC = {
+    b"\x7fELF": "ELF",
+    b"\xfe\xed\xfa\xce": "Mach-O",
+    b"\xfe\xed\xfa\xcf": "Mach-O",
+    b"\xce\xfa\xed\xfe": "Mach-O",
+    b"\xcf\xfa\xed\xfe": "Mach-O",
+    b"\xca\xfe\xba\xbe": "Mach-O universal or Java class",
+}
+
+
+def executable_magic(data: bytes) -> str | None:
+    """The executable format named by the file's first four bytes, if any."""
+    return EXECUTABLE_MAGIC.get(data[:4])
 
 FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
@@ -162,6 +181,14 @@ _BOM = chr(0xFEFF)
 # The hidden-Unicode rule: (id, category, severity). Its matcher is hidden_unicode().
 UNICODE_RULE = ("unicode.invisible", "obfuscation", "block")
 
+# Coverage rules: content frisk could not pattern-match. (id, category, severity, description)
+COVERAGE_RULES = [
+    ("coverage.binary", "coverage", "warn",
+     "executable or archive content that cannot be scanned as text"),
+    ("coverage.unreadable", "coverage", "warn",
+     "code or text file that could not be read or decoded as UTF-8"),
+]
+
 
 def hidden_unicode(text: str) -> list[tuple[int, str]]:
     """Return (offset, description) for the first occurrence of each suspect character.
@@ -185,6 +212,7 @@ CATEGORY_OWASP = {
     "injection": "LLM01:2025 Prompt Injection",
     "tool-poisoning": "LLM01:2025 Prompt Injection",
     "obfuscation": "LLM01:2025 Prompt Injection",
+    "coverage": "LLM03:2025 Supply Chain",
 }
 
 
@@ -197,4 +225,5 @@ def owasp_for(category: str) -> str:
 RULE_META: dict[str, tuple[str, str, str]] = {
     **{rid: (cat, sev, desc) for rid, cat, sev, _rx, desc in CODE_RULES + TEXT_RULES},
     UNICODE_RULE[0]: (UNICODE_RULE[1], UNICODE_RULE[2], "suspicious invisible/bidi character"),
+    **{rid: (cat, sev, desc) for rid, cat, sev, desc in COVERAGE_RULES},
 }

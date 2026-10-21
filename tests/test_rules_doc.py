@@ -29,7 +29,8 @@ class TestRulesDoc(unittest.TestCase):
         self.ids = set(rules.RULE_META)
 
     def test_rule_ids_come_from_the_rule_lists(self) -> None:
-        listed = {r[0] for r in rules.CODE_RULES + rules.TEXT_RULES} | {rules.UNICODE_RULE[0]}
+        listed = ({r[0] for r in rules.CODE_RULES + rules.TEXT_RULES + rules.COVERAGE_RULES}
+                  | {rules.UNICODE_RULE[0]})
         self.assertEqual(self.ids, listed)
 
     def test_every_rule_has_exactly_one_anchor(self) -> None:
