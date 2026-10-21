@@ -247,7 +247,7 @@ Run with the text rules.
 ### unicode.invisible
 
 - Severity: `block` · Category: `obfuscation` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
-- Matches: Zero-width characters (space, joiner, non-joiner, word joiner) or bidirectional controls (marks, embeddings, overrides, isolates) anywhere in the text. A byte-order mark is allowed only as the first character. Only the first occurrence of each character is reported.
+- Matches: Zero-width characters (space, joiner, non-joiner, word joiner) or bidirectional controls (marks, embeddings, overrides, isolates) anywhere in the text. A byte-order mark (U+FEFF) is not reported anywhere: a leading one is read as encoding, and one later in the text is a known gap, as are the soft hyphen, the invisible operators and tag characters. Only the first occurrence of each character is reported.
 - Likely false positive: Text in right-to-left languages that uses directional marks on purpose.
 - On a hit: Reveal the characters (for example with a hex view); hidden text an agent reads but a human does not see is a classic injection carrier.
 
