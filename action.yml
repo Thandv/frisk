@@ -6,7 +6,7 @@ branding:
 
 inputs:
   targets:
-    description: "Space-separated paths and/or git URLs to scan."
+    description: "Space-separated paths and/or git URLs to scan. Local paths are reported relative to the workspace (e.g. 'skills' gives 'skills/foo/SKILL.md'), so SARIF annotations land on repository files for any local path, not only '.'. Git-URL targets are reported relative to their clone and do not map to repository files."
     required: false
     default: "."
   fail-on:

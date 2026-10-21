@@ -2,41 +2,89 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from pathlib import Path
 
 from . import __version__
-from .engine import Finding, scan_path, scan_text, verdict, fails
+from .engine import ScanResult, display_prefix, reroot, scan_path, scan_text, verdict, fails
 from .report import to_text, to_json, to_sarif, _c
-from .sources import materialize, parse_mcp_config
+from .sources import is_git_url, materialize, parse_mcp_config
 from . import pin, proxy
 
 
-def _scan_target(target: str) -> list[Finding]:
+def _scan_target(target: str) -> ScanResult:
+    """Scan one target; paths follow docs/adr/0001-finding-paths.md."""
     with materialize(target) as (root, _label):
-        return scan_path(root, root if root.is_dir() else None)
+        result = scan_path(root)
+        if is_git_url(target):
+            return reroot(result, "", "git")  # clone-relative
+        return reroot(result, display_prefix(target, root.is_file()), "local")
 
 
-def _audit_config(path: str) -> tuple[list[Finding], list[str]]:
-    findings: list[Finding] = []
+def _distinct(targets: list[str]) -> list[str]:
+    """Targets in order, without repeats.
+
+    A local path named twice (any spelling; a directory compared by real path, a file by
+    its directory's real path plus its own name, as the directory walk sees it, so two
+    names for one file both count) is scanned once. An
+    existing target inside another target directory is dropped only when that
+    directory's scan already covers it: no .git component between them (scan_path skips
+    .git directories) and, since real paths are compared, a target reached through a
+    symlinked directory never counts as inside. Case-insensitive filesystems are not
+    folded: 'skill' and 'Skill' are scanned twice.
+    """
+    def real(t: str) -> str:
+        # A file is identified by its real directory plus its own name: the parent's walk
+        # reads a symlinked file under the link's name, so it is inside that directory.
+        if os.path.isfile(t):
+            return os.path.join(os.path.realpath(os.path.dirname(os.path.abspath(t))), os.path.basename(t))
+        return os.path.realpath(t)
+
+    local = {t: real(t) for t in targets if not is_git_url(t)}
+    dirs = {r for t, r in local.items() if os.path.isdir(t)}
+    existing = {t for t in local if os.path.exists(t)}  # a missing target still errors
+
+    def covered(path: str) -> bool:
+        for d in dirs:
+            if d != path and path.startswith(d.rstrip(os.sep) + os.sep):
+                parts = Path(os.path.relpath(path, d)).parts
+                if parts[-1] == ".git" and os.path.isfile(path):
+                    parts = parts[:-1]  # a gitfile is scanned by the parent's walk
+                if ".git" not in parts:
+                    return True
+        return False
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in targets:
+        key = local.get(t, t)
+        if key in seen or (t in existing and covered(key)):
+            continue
+        seen.add(key)
+        out.append(t)
+    return out
+
+
+def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
+    result = ScanResult()
     lines: list[str] = [_c(f"MCP config audit: {path}", "bold"), ""]
     servers = parse_mcp_config(path)
     if not servers:
         lines.append("  (no servers found in config)")
-        return findings, lines
+        return result, lines
     for s in servers:
         if s.scannable:
-            fs = scan_path(s.ref)
-            for f in fs:
-                f.path = f"{s.name}::{f.path}"
-            findings.extend(fs)
-            v = verdict(fs)
+            server = reroot(scan_path(s.ref), f"{s.name}::", "mcp")
+            result.extend(server)
+            v = verdict(server.findings)
             tag = _c(f"{v:<5}", {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}[v])
         else:
             tag = _c("SKIP ", "dim")
         lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {s.detail}")
         if not s.scannable:
             lines.append(_c(f"           → {s.ref}", "dim"))
-    return findings, lines
+    return result.sort(), lines
 
 
 # --- scan (default) ---------------------------------------------------------
@@ -64,33 +112,34 @@ def _cmd_scan(argv: list[str]) -> int:
         p.print_help()
         return 2
 
-    findings: list[Finding] = []
+    result = ScanResult()
     audit_lines: list[str] = []
     label = ", ".join(args.targets + args.mcp_config) or "<text>"
     try:
         if args.text is not None:
-            findings.extend(scan_text(args.text, "<text>"))
-        for t in args.targets:
-            findings.extend(_scan_target(t))
+            result.extend(scan_text(args.text, "<text>"))
+        for t in _distinct(args.targets):
+            result.extend(_scan_target(t))
         for cfg in args.mcp_config:
-            fs, lines = _audit_config(cfg)
-            findings.extend(fs)
+            server_result, lines = _audit_config(cfg)
+            result.extend(server_result)
             audit_lines.extend(lines)
     except (FileNotFoundError, RuntimeError, ValueError) as e:
         print(f"frisk: {e}", file=sys.stderr)
         return 2
+    findings = result.sort().findings
 
     if args.json:
-        print(to_json(findings, label))
+        print(to_json(result, label))
     elif args.sarif:
-        print(to_sarif(findings, __version__))
+        print(to_sarif(result, __version__))
     elif args.quiet:
         print(f"frisk: {verdict(findings)}  ({label})")
     else:
         if audit_lines:
             print("\n".join(audit_lines))
             print()
-        print(to_text(findings, label))
+        print(to_text(result, label, show_coverage=bool(args.targets or args.mcp_config)))
 
     if args.fail_on == "never":
         return 0

@@ -5,10 +5,10 @@ workflow template, not agent content, and is out of scope). Paths are relative t
 repo root, so the result does not depend on the working directory.
 
 Each snapshot entry carries `expected_change`: null, or the epic that is expected to
-change that entry. Today one entry is marked "FR-E2": a finding inside a markdown code
-fence is reported at its line within the fence, so the pipe-to-shell installer in
-examples/malicious-skill/SKILL.md shows as line 1 although it sits on file line 11.
-FR-E2 fixes that and updates the snapshot.
+change that entry. FR-E1 marked one entry "FR-E2": a finding inside a markdown code fence
+was reported at its line within the fence (line 1 for the pipe-to-shell installer in
+examples/malicious-skill/SKILL.md). FR-E2 t2 fixed that: the entry now pins file line 11
+and no entry is marked.
 Run: PYTHONPATH=src python3 -m unittest discover -s tests
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ def live_findings() -> list[Row]:
     """Scan every examples/*/ directory; return sorted (path, line, rule, severity)."""
     rows: list[Row] = []
     for directory in sorted(p for p in EXAMPLES.iterdir() if p.is_dir()):
-        for f in scan_path(directory, REPO):
+        for f in scan_path(directory, REPO).findings:
             rows.append((Path(f.path).as_posix(), f.line, f.rule, f.severity))
     return sorted(rows)
 
@@ -72,11 +72,13 @@ class TestExamplesSnapshot(unittest.TestCase):
             self.assertIn(e["expected_change"], (None, "FR-E2"))
             self.assertLessEqual(set(e), set(KEY_FIELDS) | {"expected_change", "note"})
 
-    def test_fence_relative_line_is_recorded_for_fr_e2(self) -> None:
-        marked = [e for e in load_snapshot() if e["expected_change"] == "FR-E2"]
-        self.assertEqual(snapshot_rows(marked),
-                         [("examples/malicious-skill/SKILL.md", 1, "rce.pipe_installer", "block")])
-        self.assertIn("file line 11", marked[0]["note"])
+    def test_fence_finding_is_at_its_file_line(self) -> None:
+        # FR-E2 t2: was (…, 1, …) with expected_change "FR-E2"; the fix moved it to line 11.
+        self.assertEqual([e for e in load_snapshot() if e["expected_change"] is not None], [])
+        fence = [e for e in load_snapshot() if e["rule"] == "rce.pipe_installer"]
+        self.assertEqual(snapshot_rows(fence),
+                         [("examples/malicious-skill/SKILL.md", 11, "rce.pipe_installer", "block")])
+        self.assertIn("file line", fence[0]["note"])
 
 
 if __name__ == "__main__":

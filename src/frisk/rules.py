@@ -21,12 +21,37 @@ CODE_EXTS = {
     ".py", ".sh", ".bash", ".zsh", ".fish", ".js", ".mjs", ".cjs", ".ts",
     ".rb", ".pl", ".php", ".ps1", ".bat", ".cmd", ".lua", ".r",
 }
-TEXT_EXTS = {".md", ".markdown", ".txt", ".mdc", ".rst", ".yaml", ".yml", ".json", ".toml"}
-SKIP_EXTS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz",
-    ".tar", ".woff", ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".wasm", ".so",
-    ".dylib", ".pyc",
+TEXT_EXTS = {
+    ".md", ".markdown", ".txt", ".mdc", ".rst", ".yaml", ".yml", ".json", ".toml",
+    ".html", ".htm", ".xml", ".svg", ".cfg", ".ini", ".conf",
 }
+# Media: never read, no finding, counted in coverage.skipped as "binary".
+MEDIA_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".pdf", ".woff",
+    ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".wav", ".mov",
+}
+# Executable or archive content frisk cannot scan as text: a coverage.binary warning.
+EXECUTABLE_EXTS = {
+    ".so", ".dylib", ".dll", ".wasm", ".exe", ".node", ".pyc", ".pyo", ".jar", ".class",
+}
+ARCHIVE_EXTS = {".zip", ".tar", ".gz", ".tgz"}
+# Opaque data formats: when not valid UTF-8 they are skipped silently (counted as binary).
+OPAQUE_DATA_EXTS = {".bin", ".dat", ".db", ".sqlite", ".sqlite3", ".npy", ".parquet"}
+# Leading bytes of native executables. Checked only for a file that is not valid UTF-8 and
+# has no code/text extension or shebang (see engine._read_text).
+EXECUTABLE_MAGIC = {
+    b"\x7fELF": "ELF",
+    b"\xfe\xed\xfa\xce": "Mach-O",
+    b"\xfe\xed\xfa\xcf": "Mach-O",
+    b"\xce\xfa\xed\xfe": "Mach-O",
+    b"\xcf\xfa\xed\xfe": "Mach-O",
+    b"\xca\xfe\xba\xbe": "Mach-O universal or Java class",
+}
+
+
+def executable_magic(data: bytes) -> str | None:
+    """The executable format named by the file's first four bytes, if any."""
+    return EXECUTABLE_MAGIC.get(data[:4])
 
 FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
@@ -139,7 +164,7 @@ TEXT_RULES = [
 
 # Suspicious invisible / control characters used to hide instructions, keyed by
 # codepoint (never written literally, so this rule cannot flag its own source).
-# Allowed: \t \n \r and a BOM (U+FEFF) only at file start.
+# Not listed, so never reported: \t \n \r and the BOM (U+FEFF).
 SUSPECT_UNICODE = {
     chr(0x200B): "zero-width space",
     chr(0x200C): "zero-width non-joiner",
@@ -157,7 +182,35 @@ SUSPECT_UNICODE = {
     chr(0x2068): "first strong isolate (bidi)",
     chr(0x2069): "pop directional isolate (bidi)",
 }
-_BOM = chr(0xFEFF)
+
+# The hidden-Unicode rule: (id, category, severity). Its matcher is hidden_unicode().
+UNICODE_RULE = ("unicode.invisible", "obfuscation", "block")
+
+# Coverage rules: content frisk could not pattern-match. (id, category, severity, description)
+COVERAGE_RULES = [
+    ("coverage.binary", "coverage", "warn",
+     "executable or archive content that cannot be scanned as text"),
+    ("coverage.unreadable", "coverage", "warn",
+     "file that could not be read or is not valid UTF-8, or a directory that could not be listed"),
+    ("coverage.nested_vcs", "coverage", "warn",
+     "a .git directory below the top of the target, whose contents are not scanned"),
+    ("coverage.surface_error", "coverage", "warn",
+     "a scan surface failed on a file, so part of it may not have been pattern-matched"),
+]
+
+
+def hidden_unicode(text: str) -> list[tuple[int, str]]:
+    """Return (offset, description) for the first occurrence of each suspect character.
+
+    Offsets index into `text`. A BOM (U+FEFF) is not in SUSPECT_UNICODE, so it is never
+    reported; files are decoded with utf-8-sig, which drops a leading one.
+    """
+    hits: list[tuple[int, str]] = []
+    for ch, name in SUSPECT_UNICODE.items():
+        idx = text.find(ch)
+        if idx != -1:
+            hits.append((idx, f"suspicious invisible/bidi character: {name}"))
+    return hits
 
 # Map each finding category to the OWASP Top 10 for LLM Applications (2025) entry
 # it most directly corresponds to — surfaced in JSON/SARIF output for compliance.
@@ -168,8 +221,18 @@ CATEGORY_OWASP = {
     "injection": "LLM01:2025 Prompt Injection",
     "tool-poisoning": "LLM01:2025 Prompt Injection",
     "obfuscation": "LLM01:2025 Prompt Injection",
+    "coverage": "LLM03:2025 Supply Chain",
 }
 
 
 def owasp_for(category: str) -> str:
     return CATEGORY_OWASP.get(category, "")
+
+
+# Every rule id frisk can report -> (category, severity, description). docs/rules.md has
+# one section per id (tests/test_rules_doc.py keeps them in step).
+RULE_META: dict[str, tuple[str, str, str]] = {
+    **{rid: (cat, sev, desc) for rid, cat, sev, _rx, desc in CODE_RULES + TEXT_RULES},
+    UNICODE_RULE[0]: (UNICODE_RULE[1], UNICODE_RULE[2], "suspicious invisible/bidi character"),
+    **{rid: (cat, sev, desc) for rid, cat, sev, desc in COVERAGE_RULES},
+}

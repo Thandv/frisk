@@ -56,13 +56,13 @@ def _advice(v: str) -> str:
 
 def _scan_source(source: str) -> str:
     with materialize(source) as (root, _):
-        findings = scan_path(root, root if root.is_dir() else None)
+        findings = scan_path(root, root if root.is_dir() else None).findings
     return _summary(findings, source)
 
 
 TOOLS = {
     "scan_text": (
-        lambda text: _summary(scan_text(text, "<text>"), "<text>"),
+        lambda text: _summary(scan_text(text, "<text>").findings, "<text>"),
         "Vet a raw string (e.g. an MCP tool description, skill body, or prompt) for "
         "prompt-injection, tool-poisoning, and hidden/invisible-unicode instructions.",
         {"text": {"type": "string"}}, ["text"],
