@@ -1,14 +1,14 @@
 """Output formatters: human text, JSON, and SARIF 2.1.0 (GitHub code scanning)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
-
 from collections import Counter
 
-from .engine import Coverage, ScanResult, verdict, worst_severity
-from .rules import owasp_for
+from .engine import Coverage, Finding, ScanResult, sort_findings, verdict, worst_severity
+from .rules import RULE_META, owasp_for
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 _C = {
@@ -19,6 +19,10 @@ _C = {
 
 def _c(s: str, key: str) -> str:
     return f"{_C[key]}{s}{_C['reset']}" if _USE_COLOR else s
+
+
+# Sized to the longest category any rule can report, so every line aligns.
+_CATEGORY_WIDTH = max(len(category) for category, _, _ in RULE_META.values())
 
 
 def coverage_line(coverage: Coverage) -> str:
@@ -37,7 +41,7 @@ def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
     for f in findings:
         mark = _c("BLOCK", "block") if f.severity == "block" else _c("warn ", "warn")
         loc = _c(f"{f.path}:{f.line}", "dim")
-        lines.append(f"[{mark}] {f.category:<13} {loc}  {f.description}")
+        lines.append(f"[{mark}] {f.category:<{_CATEGORY_WIDTH}} {loc}  {f.description}")
         if f.excerpt:
             lines.append(_c(f"          | {f.excerpt}", "dim"))
     blocks = sum(1 for f in findings if f.severity == "block")
@@ -73,44 +77,88 @@ def to_json(result: ScanResult, target: str) -> str:
 
 
 _SARIF_LEVEL = {"block": "error", "warn": "warning"}
+_SECURITY_SEVERITY = {"block": "8.5", "warn": "5.0"}
+_INFO_URI = "https://github.com/Thandv/frisk"
+_HELP_URI = _INFO_URI + "/blob/main/docs/rules.md#"
 
 
-def to_sarif(result: ScanResult, version: str = "0.1.0") -> str:
-    """SARIF 2.1.0 so GitHub's code-scanning Security tab renders findings inline."""
-    findings = result.findings
-    rule_ids = sorted({f.rule for f in findings})
-    rules = [{
-        "id": rid,
-        "name": rid,
-        "shortDescription": {"text": next(f.description for f in findings if f.rule == rid)},
-        "properties": {
-            "category": next(f.category for f in findings if f.rule == rid),
-            "owasp": owasp_for(next(f.category for f in findings if f.rule == rid)),
-        },
-    } for rid in rule_ids]
-    results = [{
-        "ruleId": f.rule,
-        "level": _SARIF_LEVEL.get(f.severity, "note"),
-        "message": {"text": f.description + (f"  ¦ {f.excerpt}" if f.excerpt else "")},
-        "locations": [{
-            "physicalLocation": {
-                "artifactLocation": {"uri": f.path},
-                "region": {"startLine": max(1, f.line)},
-            }
-        }],
-    } for f in findings]
+def _sarif_path(path: str) -> str:
+    """A local path as a SARIF uri: POSIX, and relative to cwd if it was absolute."""
+    if os.path.isabs(path):
+        path = os.path.relpath(path)
+    return path.replace(os.sep, "/")
+
+
+def _location(f: Finding) -> dict:
+    """The SARIF location for a finding's origin (docs/adr/0001-finding-paths.md)."""
+    if f.origin in ("text", "mcp"):
+        return {"logicalLocations": [{"fullyQualifiedName": f.path}]}
+    artifact = {"uri": _sarif_path(f.path) if f.origin == "local" else f.path}
+    if f.origin == "git":
+        artifact["uriBaseId"] = "SRCROOT"
+    return {"physicalLocation": {"artifactLocation": artifact,
+                                 "region": {"startLine": max(1, f.line)}}}
+
+
+def fingerprint(rule: str, path: str, source_line: str, occurrence: int) -> str:
+    """frisk/v1: sha256 of rule, path, the whitespace-normalised source line and the
+    occurrence index among results with the same first three, NUL-separated. The line
+    number is deliberately absent, so inserting lines above a finding keeps it."""
+    parts = (rule, path, " ".join(source_line.split()), str(occurrence))
+    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+
+
+def to_sarif(result: ScanResult, version: str) -> str:
+    """SARIF 2.1.0 so GitHub's code-scanning Security tab renders findings inline.
+
+    Deterministic: rules sorted by id, results by (path, line, rule), keys sorted, no
+    timestamps, and no absolute paths for local targets.
+    """
+    findings = sort_findings(result.findings)
+    rules = []
+    for rid in sorted({f.rule for f in findings}):
+        category, severity, description = RULE_META[rid]
+        rules.append({
+            "id": rid,
+            "name": rid,
+            "shortDescription": {"text": description},
+            "helpUri": _HELP_URI + rid,
+            "properties": {
+                "category": category,
+                "owasp": owasp_for(category),
+                "security-severity": _SECURITY_SEVERITY.get(severity, "2.0"),
+            },
+        })
+    seen: Counter[tuple[str, str, str]] = Counter()
+    results = []
+    for f in findings:
+        location = _location(f)
+        physical = location.get("physicalLocation")
+        path = physical["artifactLocation"]["uri"] if physical else f.path
+        key = (f.rule, path, " ".join(f.source_line.split()))
+        results.append({
+            "ruleId": f.rule,
+            "level": _SARIF_LEVEL.get(f.severity, "note"),
+            "message": {"text": f.description + (f"  ¦ {f.excerpt}" if f.excerpt else "")},
+            "locations": [location],
+            "partialFingerprints": {"frisk/v1": fingerprint(*key, seen[key])},
+        })
+        seen[key] += 1
+    coverage = result.coverage.as_dict()
+    for entry in coverage["skipped"]:
+        entry["path"] = _sarif_path(entry["path"])
     doc = {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
             "tool": {"driver": {
                 "name": "frisk",
-                "informationUri": "https://github.com/Thandv/frisk",
+                "informationUri": _INFO_URI,
                 "version": version,
                 "rules": rules,
             }},
             "results": results,
-            "properties": {"coverage": result.coverage.as_dict()},
+            "properties": {"coverage": coverage},
         }],
     }
-    return json.dumps(doc, indent=2)
+    return json.dumps(doc, indent=2, sort_keys=True)

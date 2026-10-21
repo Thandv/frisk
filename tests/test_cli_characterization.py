@@ -255,7 +255,8 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             "",
             "  [BLOCK] bad-srv                local  local source via bash",
             "",
-            "[BLOCK] rce           bad-srv::run.sh:2  pipe-to-shell remote installer (curl|wget ... | sh)",
+            # FR-E2 t5: the category column is 14 wide (longest category), was 13.
+            "[BLOCK] rce            bad-srv::run.sh:2  pipe-to-shell remote installer (curl|wget ... | sh)",
             "          | #!/bin/sh\\n" + INSTALLER + "\\n",
             "",
             "scanned 1 file, skipped 0",  # FR-E2 t3: coverage line

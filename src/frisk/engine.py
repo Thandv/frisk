@@ -16,6 +16,7 @@ from .surfaces import Span
 _NEWLINE = re.compile("\n")
 
 SEVERITY_ORDER = {None: 0, "warn": 1, "block": 2}
+_INTERNAL_FIELDS = ("origin", "source_line")
 
 
 @dataclass
@@ -27,9 +28,13 @@ class Finding:
     severity: str
     description: str
     excerpt: str
+    # Not part of the JSON finding: where the path points (docs/adr/0001-finding-paths.md:
+    # "local", "git", "mcp" or "text"), and the full source line, for SARIF fingerprints.
+    origin: str = "local"
+    source_line: str = ""
 
     def as_dict(self) -> dict:
-        return asdict(self)
+        return {k: v for k, v in asdict(self).items() if k not in _INTERNAL_FIELDS}
 
 
 @dataclass
@@ -99,7 +104,9 @@ def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Fin
 
     def add(idx: int, rid: str, cat: str, sev: str, desc: str, excerpt: str) -> None:
         line = bisect_right(starts, span.start + idx)
-        out.append(Finding(rel, line, rid, cat, sev, desc, excerpt))
+        end = starts[line] - 1 if line < len(starts) else len(text)
+        out.append(Finding(rel, line, rid, cat, sev, desc, excerpt,
+                           source_line=text[starts[line - 1]:end]))
 
     for rid, cat, sev, rx, desc in (CODE_RULES if span.kind == "code" else TEXT_RULES):
         for m in rx.finditer(seg):
@@ -121,7 +128,10 @@ def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
 def scan_text(text: str, label: str = "<text>") -> ScanResult:
     """Scan a raw string as both code and prose (used by the MCP server / --text)."""
     whole = len(text)
-    return ScanResult(_scan_spans(text, [Span(0, whole, "code"), Span(0, whole, "text")], label))
+    findings = _scan_spans(text, [Span(0, whole, "code"), Span(0, whole, "text")], label)
+    for f in findings:
+        f.origin = "text"
+    return ScanResult(findings)
 
 
 def _not_scanned(rel: str, reason: str, detail: str, rule: str | None = None,
@@ -221,14 +231,16 @@ def display_prefix(target: str, is_file: bool) -> str:
     return base + "/"
 
 
-def reroot(result: ScanResult, prefix: str) -> ScanResult:
+def reroot(result: ScanResult, prefix: str, origin: str) -> ScanResult:
     """The one place display paths are made: prefix every finding and skipped path.
 
     Finding paths, coverage.skipped paths and coverage.* finding paths all pass through
-    here, so they always follow the same rule (docs/adr/0001-finding-paths.md).
+    here, so they always follow the same rule (docs/adr/0001-finding-paths.md). `origin`
+    ("local", "git" or "mcp") tells SARIF which location form the path takes.
     """
     for f in result.findings:
         f.path = prefix + f.path
+        f.origin = origin
     for s in result.coverage.skipped:
         s.path = prefix + s.path
     return result.sort()

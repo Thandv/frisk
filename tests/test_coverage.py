@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import re
 import tempfile
 import unittest
@@ -178,7 +179,10 @@ class TestReports(CoverageCase):
         self.assertEqual(text_cov, (1, 4, {"binary": 2, "unreadable": 1, "vcs_dir": 1}))
         self.assertEqual(triple(json_cov), text_cov)
         self.assertEqual(triple(sarif_cov), text_cov)
-        self.assertEqual(json_cov, sarif_cov)
+        # Same entries; SARIF makes the absolute local target's paths cwd-relative (ADR 0001, FR-E2 t5).
+        self.assertEqual([{**e, "path": os.path.relpath(e["path"])} for e in json_cov["skipped"]],
+                         sarif_cov["skipped"])
+        self.assertTrue(all(Path(e["path"]).is_absolute() for e in json_cov["skipped"]))
 
     def test_cli_totals_coverage_across_targets(self) -> None:
         self.put("one/a.md", b"a\n")

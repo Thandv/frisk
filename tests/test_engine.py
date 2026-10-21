@@ -81,7 +81,7 @@ class TestExamplesTree(unittest.TestCase):
 
 class TestSarif(unittest.TestCase):
     def test_sarif_is_valid(self):
-        doc = json.loads(to_sarif(scan_text("os.system('x')")))
+        doc = json.loads(to_sarif(scan_text("os.system('x')"), "0.0.0-test"))
         self.assertEqual(doc["version"], "2.1.0")
         self.assertEqual(doc["runs"][0]["tool"]["driver"]["name"], "frisk")
         self.assertTrue(doc["runs"][0]["results"])

@@ -16,8 +16,8 @@ def _scan_target(target: str) -> ScanResult:
     with materialize(target) as (root, _label):
         result = scan_path(root)
         if is_git_url(target):
-            return reroot(result, "")  # clone-relative
-        return reroot(result, display_prefix(target, root.is_file()))
+            return reroot(result, "", "git")  # clone-relative
+        return reroot(result, display_prefix(target, root.is_file()), "local")
 
 
 def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
@@ -29,7 +29,7 @@ def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
         return result, lines
     for s in servers:
         if s.scannable:
-            server = reroot(scan_path(s.ref), f"{s.name}::")
+            server = reroot(scan_path(s.ref), f"{s.name}::", "mcp")
             result.extend(server)
             v = verdict(server.findings)
             tag = _c(f"{v:<5}", {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}[v])
