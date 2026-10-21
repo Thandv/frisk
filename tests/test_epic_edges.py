@@ -4,7 +4,8 @@ Each edge states the behaviour we hold to be correct. Where today's behaviour is
 correct it is asserted exactly; a real defect is a test of the CORRECT behaviour marked
 @unittest.expectedFailure with a `# DEFECT-n:` line above it. Unclosed, ~~~ and
 longer-backtick fences are markdown forms planned for FR-E3a; they are recorded here
-as defects so the fixer can defer them knowingly.
+as defects so the fixer can defer them knowingly. FR-E2 t9 fixed DEFECT-4..6 and
+marked DEFECT-1..3 DEFERRED (still expected failures) for FR-E3a.
 
 Payloads are assembled at runtime (no malicious literal is committed), hosts use the
 .invalid TLD, nothing is executed and nothing touches the network.
@@ -129,19 +130,22 @@ class TestFenceEdges(TempDir):
                 self.assertEqual(rows(findings), [(line, "rce.pipe_installer")])
                 self.assertEqual(findings[0].source_line.strip(), INSTALLER)
 
-    # DEFECT-1: an unclosed ``` fence is not scanned as code (CommonMark: it runs to EOF).
+    # DEFERRED (DEFECT-1; markdown fence forms belong to FR-E3a's markdown surface): an unclosed ```
+    #   fence is not scanned as code (CommonMark: it runs to EOF).
     @unittest.expectedFailure
     def test_unclosed_fence_runs_to_end_of_file(self) -> None:
         findings = self.scan_bytes("a.md", ("a\n```sh\n" + INSTALLER + "\nmore\n").encode("utf-8"))
         self.assertEqual(rows(findings), [(3, "rce.pipe_installer")])
 
-    # DEFECT-2: a ~~~ fence is not scanned as code (only ``` is recognised).
+    # DEFERRED (DEFECT-2; markdown fence forms belong to FR-E3a's markdown surface): a ~~~ fence is
+    #   not scanned as code (only ``` is recognised).
     @unittest.expectedFailure
     def test_tilde_fence(self) -> None:
         findings = self.scan_bytes("a.md", ("a\n~~~sh\n" + INSTALLER + "\n~~~\n").encode("utf-8"))
         self.assertEqual(rows(findings), [(3, "rce.pipe_installer")])
 
-    # DEFECT-3: a ```` fence holding a ``` example is mis-paired, so its code is not scanned.
+    # DEFERRED (DEFECT-3; markdown fence forms belong to FR-E3a's markdown surface): a ```` fence
+    #   holding a ``` example is mis-paired, so its code is not scanned.
     # (Not on the edge list; found while probing fence pairing.)
     @unittest.expectedFailure
     def test_longer_fence_containing_a_shorter_one(self) -> None:
@@ -169,8 +173,8 @@ class TestByteOrderMark(TempDir):
         findings = self.scan_bytes("a.md", text.encode("utf-8"))
         self.assertEqual(rows(findings), [(1, "inject.ignore_prev"), (3, "rce.pipe_installer")])
 
-    # DEFECT-4: the BOM is kept as content: a line-1 ^-anchored rule misses and excerpts carry U+FEFF.
-    @unittest.expectedFailure
+    # Fixed in FR-E2 t9 (was DEFECT-4: the BOM is kept as content: a line-1 ^-anchored rule misses
+    #   and excerpts carry U+FEFF.)
     def test_bom_file_scans_exactly_like_the_same_file_without_it(self) -> None:
         for name, body in (("a.sh", NET_TOOL + "\n"), ("a.md", OVERRIDE + "\n")):
             with self.subTest(name=name):
@@ -240,16 +244,19 @@ class TestUnreadable(TempDir):
                     self.assertEqual(doc["coverage"]["files_scanned"], 1 if target == "proj" else 0)
                     self.assertEqual(run(["--fail-on", "warn", target])[0], 1)
 
-    # DEFECT-5: a subdirectory that cannot be listed vanishes from the scan with no coverage entry.
+    # Fixed in FR-E2 t9 (was DEFECT-5: a subdirectory that cannot be listed vanishes from the scan
+    #   with no coverage entry.)
     # (Not on the edge list; adjacent to the unreadable-file edge.)
-    @unittest.expectedFailure
     def test_unreadable_directory_is_reported(self) -> None:
         locked = self.root / "locked"
         locked.mkdir()
         (locked / "x.md").write_text(OVERRIDE + "\n", encoding="utf-8")
         self.lock(locked, 0o755)
-        skipped = scan_path(self.root).coverage.skipped
-        self.assertEqual([(s.path, s.reason) for s in skipped], [("locked", "unreadable")])
+        result = scan_path(self.root)
+        self.assertEqual([(s.path, s.reason) for s in result.coverage.skipped], [("locked", "unreadable")])
+        # t9: like an unreadable file, it also warns, so the verdict cannot be PASS.
+        self.assertEqual([(f.path, f.rule, f.severity) for f in result.findings],
+                         [("locked", "coverage.unreadable", "warn")])
 
 
 # --- paths ------------------------------------------------------------------
@@ -302,12 +309,12 @@ class TestTargetSpellings(ProjectCase):
             self.assertEqual(self.sarif_paths(run_sarif(["skill", "other/"]))[0],
                              [("other/SKILL.md", 2), ("other/lib.so", 1), ("skill/SKILL.md", 2), ("skill/lib.so", 1)])
 
-    # DEFECT-6: a target named twice is scanned twice: every finding, count and skipped entry doubles.
-    @unittest.expectedFailure
+    # Fixed in FR-E2 t9 (was DEFECT-6: a target named twice is scanned twice: every finding, count
+    #   and skipped entry doubles.)
     def test_same_target_twice_reports_once(self) -> None:
         with chdir(self.root):
             once = run_json(["skill"])
-            for argv in (["skill", "skill"], ["skill", "./skill/"]):
+            for argv in (["skill", "skill"], ["skill", "./skill/"], ["skill", str(self.root / "skill")]):
                 with self.subTest(argv=argv):
                     twice = run_json(argv)
                     for key in ("findings", "counts", "coverage"):

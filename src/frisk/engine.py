@@ -1,6 +1,7 @@
 """Static scan engine. Zero-execution: reads bytes, matches regex, returns findings."""
 from __future__ import annotations
 
+import os
 import re
 from bisect import bisect_right
 from dataclasses import dataclass, asdict, field
@@ -166,7 +167,7 @@ def _read_text(path: Path, rel: str) -> str | ScanResult:
         return _not_scanned(rel, "binary", magic, "coverage.binary",
                             f"executable content not scanned ({magic})")
     try:
-        text = data.decode("utf-8")
+        text = data.decode("utf-8-sig")  # a leading BOM is encoding, not content
     except UnicodeDecodeError:
         if ext in CODE_EXTS or ext in TEXT_EXTS or data.startswith(b"#!"):
             return _not_scanned(rel, "unreadable", "UnicodeDecodeError", "coverage.unreadable",
@@ -202,6 +203,7 @@ def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
         return scan_file(p, root or p.parent)
     result = ScanResult()
     base = root or p
+    _check_listable(p, base, result)
     for f in sorted(p.rglob("*")):
         inside = f.relative_to(p).parts
         if ".git" in inside:
@@ -210,7 +212,20 @@ def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
             continue
         if f.is_file():
             result.extend(scan_file(f, base))
+        elif f.is_dir():
+            _check_listable(f, base, result)
     return result.sort()
+
+
+def _check_listable(directory: Path, base: Path, result: ScanResult) -> None:
+    """rglob silently skips a directory it cannot list; record it as unreadable instead."""
+    try:
+        with os.scandir(directory):
+            pass
+    except OSError as e:
+        name = type(e).__name__
+        result.extend(_not_scanned(_in_target(directory, base), "unreadable", name,
+                                   "coverage.unreadable", f"directory could not be listed: {name}"))
 
 
 def display_prefix(target: str, is_file: bool) -> str:

@@ -83,8 +83,9 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   went unscanned. Media (images, fonts, audio, video, PDF) and other non-UTF-8 files
   are skipped silently.
 - `unreadable`: a code or text file (by extension, or any file starting with `#!`)
-  that cannot be read or is not valid UTF-8 raises a `coverage.unreadable` warning
-  naming the error, so one invalid byte cannot hide a payload.
+  that cannot be read or is not valid UTF-8, or a directory that cannot be listed,
+  raises a `coverage.unreadable` warning naming the error, so one invalid byte or one
+  locked directory cannot hide a payload.
 - `vcs_dir`: a `.git` directory, listed once and not scanned.
 - `surface_error`: one of frisk's scan surfaces failed on a file (`detail` names it);
   the rest of that file and every other file are still scanned.

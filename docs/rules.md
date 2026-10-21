@@ -267,6 +267,6 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 ### coverage.unreadable
 
 - Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A code or text file (by extension, or any file starting with a shebang) that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError). The file is also listed in coverage.skipped with reason unreadable.
+- Matches: A code or text file (by extension, or any file starting with a shebang) that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError), or a directory that could not be listed (its contents were not scanned). The entry is also listed in coverage.skipped with reason unreadable.
 - Likely false positive: A legacy Latin-1 encoded script or document.
 - On a hit: Re-encode the file as UTF-8 and scan again; one invalid byte must not be allowed to hide a payload.

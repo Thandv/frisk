@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from . import __version__
@@ -18,6 +19,18 @@ def _scan_target(target: str) -> ScanResult:
         if is_git_url(target):
             return reroot(result, "", "git")  # clone-relative
         return reroot(result, display_prefix(target, root.is_file()), "local")
+
+
+def _distinct(targets: list[str]) -> list[str]:
+    """Targets in order, dropping one that names an already-listed local path or URL."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in targets:
+        key = t if is_git_url(t) else os.path.abspath(t)
+        if key not in seen:
+            seen.add(key)
+            out.append(t)
+    return out
 
 
 def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
@@ -72,7 +85,7 @@ def _cmd_scan(argv: list[str]) -> int:
     try:
         if args.text is not None:
             result.extend(scan_text(args.text, "<text>"))
-        for t in args.targets:
+        for t in _distinct(args.targets):
             result.extend(_scan_target(t))
         for cfg in args.mcp_config:
             server_result, lines = _audit_config(cfg)
