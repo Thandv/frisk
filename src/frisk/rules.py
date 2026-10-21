@@ -190,3 +190,11 @@ CATEGORY_OWASP = {
 
 def owasp_for(category: str) -> str:
     return CATEGORY_OWASP.get(category, "")
+
+
+# Every rule id frisk can report -> (category, severity, description). docs/rules.md has
+# one section per id (tests/test_rules_doc.py keeps them in step).
+RULE_META: dict[str, tuple[str, str, str]] = {
+    **{rid: (cat, sev, desc) for rid, cat, sev, _rx, desc in CODE_RULES + TEXT_RULES},
+    UNICODE_RULE[0]: (UNICODE_RULE[1], UNICODE_RULE[2], "suspicious invisible/bidi character"),
+}

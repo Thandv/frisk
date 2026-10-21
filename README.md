@@ -36,6 +36,9 @@ verdict:   BLOCK    4 blocking · 1 warnings · 5 total
 | **Tool poisoning** (MCP) | hidden directives in tool descriptions: "do not tell the user", `<IMPORTANT>` blocks, read-then-send |
 | **Obfuscation** | zero-width spaces & bidi-override unicode used to hide instructions |
 
+Every rule id, its severity, what it matches and what to do about a hit:
+[docs/rules.md](docs/rules.md).
+
 ## Install
 
 ```bash
