@@ -22,14 +22,18 @@ def _scan_target(target: str) -> ScanResult:
 
 
 def _distinct(targets: list[str]) -> list[str]:
-    """Targets in order, dropping one that names an already-listed local path or URL."""
+    """Targets in order, without repeats: a local path named twice (in any spelling) or one
+    inside another local target directory is dropped, since its files are already scanned."""
+    local = {t: os.path.abspath(t) for t in targets if not is_git_url(t)}
+    dirs = {a for t, a in local.items() if os.path.isdir(t)}
     seen: set[str] = set()
     out: list[str] = []
     for t in targets:
-        key = t if is_git_url(t) else os.path.abspath(t)
-        if key not in seen:
-            seen.add(key)
-            out.append(t)
+        key = local.get(t, t)
+        if key in seen or any(key.startswith(d.rstrip(os.sep) + os.sep) for d in dirs if d != key):
+            continue
+        seen.add(key)
+        out.append(t)
     return out
 
 

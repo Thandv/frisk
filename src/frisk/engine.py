@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 from bisect import bisect_right
 from dataclasses import dataclass, asdict, field
@@ -145,35 +146,45 @@ def _not_scanned(rel: str, reason: str, detail: str, rule: str | None = None,
     return ScanResult(findings, Coverage(skipped=[Skipped(rel, reason, detail)]))
 
 
-def _read_text(path: Path, rel: str) -> str | ScanResult:
-    """The file's text (newlines normalised as text-mode reading does), or why not."""
+def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:
+    """The file's text (newlines normalised as text-mode reading does), plus coverage notes.
+
+    Text is None when the file cannot be pattern-matched at all. A text-like file that is
+    not valid UTF-8 is still scanned, with undecodable bytes replaced, and also warns:
+    one invalid byte must not hide the rest of the file.
+    """
     ext = path.suffix.lower()
     if ext in MEDIA_EXTS:
-        return _not_scanned(rel, "binary", ext)
+        return None, _not_scanned(rel, "binary", ext)
     if ext in EXECUTABLE_EXTS:
-        return _not_scanned(rel, "binary", ext, "coverage.binary",
-                            f"executable content not scanned ({ext})")
+        return None, _not_scanned(rel, "binary", ext, "coverage.binary",
+                                  f"executable content not scanned ({ext})")
     if ext in ARCHIVE_EXTS:
-        return _not_scanned(rel, "binary", ext, "coverage.binary",
-                            f"archive not scanned: contents unscanned ({ext})")
+        return None, _not_scanned(rel, "binary", ext, "coverage.binary",
+                                  f"archive not scanned: contents unscanned ({ext})")
     try:
         data = path.read_bytes()
     except OSError as e:
         name = type(e).__name__
-        return _not_scanned(rel, "unreadable", name, "coverage.unreadable",
-                            f"file could not be read: {name}")
-    magic = executable_magic(data)
-    if magic is not None:
-        return _not_scanned(rel, "binary", magic, "coverage.binary",
-                            f"executable content not scanned ({magic})")
+        return None, _not_scanned(rel, "unreadable", name, "coverage.unreadable",
+                                  f"file could not be read: {name}")
+    notes = ScanResult()
     try:
         text = data.decode("utf-8-sig")  # a leading BOM is encoding, not content
     except UnicodeDecodeError:
-        if ext in CODE_EXTS or ext in TEXT_EXTS or data.startswith(b"#!"):
-            return _not_scanned(rel, "unreadable", "UnicodeDecodeError", "coverage.unreadable",
-                                "file could not be decoded as UTF-8: UnicodeDecodeError")
-        return _not_scanned(rel, "binary", "not UTF-8 text")
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+        # Valid UTF-8 is always scanned, whatever its first bytes; only content that does
+        # not decode is checked for executable magic.
+        magic = executable_magic(data)
+        if magic is not None:
+            return None, _not_scanned(rel, "binary", magic, "coverage.binary",
+                                      f"executable content not scanned ({magic})")
+        if not (ext in CODE_EXTS or ext in TEXT_EXTS or not ext or data.startswith(b"#!")):
+            return None, _not_scanned(rel, "binary", "not UTF-8 text")
+        notes = _not_scanned(rel, "unreadable", "UnicodeDecodeError", "coverage.unreadable",
+                             "file is not valid UTF-8 (UnicodeDecodeError); "
+                             "scanned with undecodable bytes replaced")
+        text = data.decode("utf-8-sig", errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n"), notes
 
 
 def _in_target(path: Path, root: Path | None) -> str:
@@ -183,18 +194,20 @@ def _in_target(path: Path, root: Path | None) -> str:
 
 def scan_file(path: Path, root: Path | None = None) -> ScanResult:
     rel = _in_target(path, root)
-    text = _read_text(path, rel)
-    if isinstance(text, ScanResult):
-        return text
-    coverage = Coverage(files_scanned=1)
+    text, notes = _read_text(path, rel)
+    if text is None:
+        return notes
     spans: list[Span] = []
     for surface in surfaces.load():
         try:
             spans.extend(surface.extract(path, text))
         except Exception as e:  # noqa: BLE001 - one broken surface must not stop the scan
-            coverage.skipped.append(Skipped(rel, "surface_error",
-                                            f"{surfaces.name_of(surface)}: {type(e).__name__}"))
-    return ScanResult(_scan_spans(text, spans, rel), coverage)
+            detail = f"{surfaces.name_of(surface)}: {type(e).__name__}"
+            notes.extend(_not_scanned(rel, "surface_error", detail, "coverage.surface_error",
+                                      f"scan surface failed on this file ({detail})"))
+    result = ScanResult(_scan_spans(text, spans, rel), Coverage(files_scanned=1))
+    result.extend(notes)
+    return result.sort()
 
 
 def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
@@ -231,19 +244,18 @@ def _check_listable(directory: Path, base: Path, result: ScanResult) -> None:
 def display_prefix(target: str, is_file: bool) -> str:
     """The prefix that turns a local target's in-target paths into the paths shown.
 
-    ADR 0001: a directory is the target as given minus leading './' and trailing '/'
-    ('.' adds nothing); a single file is reported as the argument verbatim, so its
+    ADR 0001: a directory is the target as given, normalised (no './', '//', '/.' or
+    trailing '/'; '.' adds nothing); a single file is reported as the argument verbatim, so its
     prefix is the argument up to the file name.
     """
     if is_file:
         return target[:len(target) - len(Path(target).name)]
-    base = target
-    while base.startswith("./"):
-        base = base[2:]
-    base = base.rstrip("/")
-    if base in ("", "."):
-        return "/" if target.startswith("/") else ""
-    return base + "/"
+    base = posixpath.normpath(target.replace(os.sep, "/"))
+    if base.startswith("//"):  # POSIX keeps a leading '//'; frisk treats it as '/'
+        base = "/" + base.lstrip("/")
+    if base == ".":
+        return ""
+    return base if base.endswith("/") else base + "/"
 
 
 def reroot(result: ScanResult, prefix: str, origin: str) -> ScanResult:

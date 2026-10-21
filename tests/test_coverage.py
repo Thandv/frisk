@@ -61,10 +61,23 @@ class TestBinary(CoverageCase):
         self.assertEqual(result.coverage.skipped, [Skipped("tool", "binary", "Mach-O")])
         self.assertEqual(result.coverage.files_scanned, 0)
 
-    def test_elf_header_warns_although_it_is_valid_utf8(self) -> None:
-        result = self.only("run.txt", ELF_HEADER + b"\n")
+    def test_elf_header_warns(self) -> None:
+        result = self.only("run", ELF_HEADER + b"\x02\xff\x00")
         self.assertEqual([f.rule for f in result.findings], ["coverage.binary"])
-        self.assertEqual(result.coverage.skipped, [Skipped("run.txt", "binary", "ELF")])
+        self.assertEqual(result.coverage.skipped, [Skipped("run", "binary", "ELF")])
+
+    def test_magic_bytes_on_valid_utf8_text_do_not_hide_it(self) -> None:
+        # FR-E2 review: the ELF magic is valid UTF-8, so text starting with it is scanned.
+        for name in ("run.sh", "SKILL.md", "notes"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as d:
+                (Path(d) / name).write_bytes(ELF_HEADER + b"\n" + OVERRIDE.encode() + b"\n")
+                result = scan_path(d)
+                self.assertEqual([(f.line, f.rule) for f in result.findings], [(2, "inject.ignore_prev")])
+                self.assertEqual(verdict(result.findings), "BLOCK")
+
+    def test_universal_macho_or_java_class_magic_warns(self) -> None:
+        result = self.only("fat", bytes([0xCA, 0xFE, 0xBA, 0xBE, 0x00]))
+        self.assertEqual(result.coverage.skipped, [Skipped("fat", "binary", "Mach-O universal or Java class")])
 
     def test_lone_pyc_warns(self) -> None:
         result = self.only("mod.pyc", b"\x00\x01anything")
@@ -95,7 +108,7 @@ class TestBinary(CoverageCase):
         self.assertEqual(result.coverage.skipped, [Skipped("logo.png", "binary", ".png")])
 
     def test_verdict_is_never_pass_while_executable_content_was_skipped(self) -> None:
-        cases = {"a.so": b"", "b": MACHO_HEADER, "c": ELF_HEADER, "d.jar": b"", "e.zip": b""}
+        cases = {"a.so": b"", "b": MACHO_HEADER, "c": ELF_HEADER + b"\xff", "d.jar": b"", "e.zip": b""}
         for name, data in cases.items():
             with self.subTest(file=name), tempfile.TemporaryDirectory() as d:
                 (Path(d) / name).write_bytes(data)
@@ -113,6 +126,17 @@ class TestUnreadable(CoverageCase):
         self.assertEqual((f.path, f.rule, f.severity), ("evil.py", "coverage.unreadable", "warn"))
         self.assertIn("UnicodeDecodeError", f.description)
         self.assertEqual(result.coverage.skipped, [Skipped("evil.py", "unreadable", "UnicodeDecodeError")])
+
+    def test_one_invalid_byte_does_not_hide_a_payload(self) -> None:
+        # FR-E2 review: the file is scanned with the bad byte replaced, and still warns.
+        for name in ("evil.py", "SKILL.md", "Makefile", "install"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as d:
+                (Path(d) / name).write_bytes(LATIN1 + OVERRIDE.encode() + b"\n")
+                result = scan_path(d)
+                self.assertEqual([(f.line, f.rule) for f in result.findings],
+                                 [(1, "coverage.unreadable"), (2, "inject.ignore_prev")])
+                self.assertEqual(result.coverage.files_scanned, 1)
+                self.assertEqual(verdict(result.findings), "BLOCK")
 
     def test_same_bytes_in_a_bin_file_are_silent_but_counted(self) -> None:
         result = self.only("blob.bin", LATIN1)
@@ -143,6 +167,12 @@ class TestUnreadable(CoverageCase):
         self.assertEqual(result.coverage.files_scanned, 2)
         self.assertEqual(result.coverage.skipped, [Skipped("b.md", "unreadable", "PermissionError")])
 
+    def test_any_oserror_is_contained(self) -> None:
+        self.put("a.md", b"fine\n")
+        with mock.patch("pathlib.Path.read_bytes", side_effect=IsADirectoryError(21, "Is a directory")):
+            result = scan_path(self.root)
+        self.assertEqual(result.coverage.skipped, [Skipped("a.md", "unreadable", "IsADirectoryError")])
+
 
 class TestVcsDir(CoverageCase):
     def test_git_dir_is_recorded_once_and_not_scanned(self) -> None:
@@ -154,6 +184,11 @@ class TestVcsDir(CoverageCase):
         self.assertEqual(result.findings, [])
         self.assertEqual(result.coverage.skipped, [Skipped(".git", "vcs_dir"), Skipped("pkg/.git", "vcs_dir")])
         self.assertEqual(result.coverage.files_scanned, 1)
+
+    def test_target_inside_a_git_dir_is_scanned(self) -> None:
+        self.put(".git/hooks/pre-commit", ("#!/bin/sh\n# " + OVERRIDE + "\n").encode())
+        result = scan_path(self.root / ".git" / "hooks")
+        self.assertEqual([(f.path, f.rule) for f in result.findings], [("pre-commit", "inject.ignore_prev")])
 
 
 class TestReports(CoverageCase):
@@ -176,7 +211,8 @@ class TestReports(CoverageCase):
 
         json_cov = json.loads(run(["--json", target])[1])["coverage"]
         sarif_cov = json.loads(run(["--sarif", target])[1])["runs"][0]["properties"]["coverage"]
-        self.assertEqual(text_cov, (1, 4, {"binary": 2, "unreadable": 1, "vcs_dir": 1}))
+        # evil.py is scanned lossily and also listed as unreadable (FR-E2 review).
+        self.assertEqual(text_cov, (2, 4, {"binary": 2, "unreadable": 1, "vcs_dir": 1}))
         self.assertEqual(triple(json_cov), text_cov)
         self.assertEqual(triple(sarif_cov), text_cov)
         # Same entries; SARIF makes the absolute local target's paths cwd-relative (ADR 0001, FR-E2 t5).

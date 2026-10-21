@@ -183,7 +183,21 @@ class TestTargetKinds(unittest.TestCase):
         self.assertNotIn(str(root), raw)
         doc = json.loads(raw)
         self.assertEqual(uris(doc), ["skill/a.md", "skill/x.so"])
+        payload = "\0".join(["inject.ignore_prev", "skill/a.md", OVERRIDE, "0"])
+        self.assertEqual(doc["runs"][0]["results"][0]["partialFingerprints"]["frisk/v1"],
+                         hashlib.sha256(payload.encode()).hexdigest())
         self.assertEqual([e["path"] for e in doc["runs"][0]["properties"]["coverage"]["skipped"]], ["skill/x.so"])
+
+    def test_unresolved_absolute_target_inside_cwd_is_not_climbed_out_of(self) -> None:
+        # FR-E2 review: on macOS the temp dir is reached through a symlink (/var ->
+        # /private/var); cwd resolves, the target as typed does not.
+        with tempfile.TemporaryDirectory() as d:
+            typed = Path(d)
+            (typed / "skill").mkdir()
+            (typed / "skill" / "a.md").write_text(OVERRIDE + "\n", encoding="utf-8")
+            with chdir(typed):
+                doc = sarif([str(typed / "skill")])
+        self.assertEqual(uris(doc), ["skill/a.md"])
 
     def test_version_is_required(self) -> None:
         self.assertIs(inspect.signature(to_sarif).parameters["version"].default, inspect.Parameter.empty)

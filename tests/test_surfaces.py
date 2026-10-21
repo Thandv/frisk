@@ -150,7 +150,8 @@ class TestSurfaceFailureIsContained(unittest.TestCase):
             with mock.patch.object(fences, "extract", side_effect=flaky):
                 result = scan_path(root)
         a = [(f.line, f.rule) for f in result.findings if f.path == "a.md"]
-        self.assertEqual(a, [(1, "inject.ignore_prev")])  # plain still ran; the fence did not
+        # plain still ran, the fence did not, and the failure warns (FR-E2 review)
+        self.assertEqual(a, [(1, "coverage.surface_error"), (1, "inject.ignore_prev")])
         self.assertEqual(result.coverage.skipped, [Skipped("a.md", "surface_error", "fences: RuntimeError")])
         self.assertEqual(result.coverage.files_scanned, 2)
         self.assertEqual([f for f in result.findings if f.path == "b.md"], clean_b)

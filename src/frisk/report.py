@@ -83,9 +83,18 @@ _HELP_URI = _INFO_URI + "/blob/main/docs/rules.md#"
 
 
 def _sarif_path(path: str) -> str:
-    """A local path as a SARIF uri: POSIX, and relative to cwd if it was absolute."""
+    """A local path as a SARIF uri: POSIX, and relative to cwd if it was absolute.
+
+    The plain relpath is used unless it climbs out of cwd while the resolved paths do
+    not (e.g. macOS /var vs /private/var), so a file inside cwd never gets a '../' uri.
+    """
     if os.path.isabs(path):
-        path = os.path.relpath(path)
+        rel = os.path.relpath(path)
+        if rel.startswith(os.pardir):
+            real = os.path.relpath(os.path.realpath(path), os.path.realpath(os.curdir))
+            if not real.startswith(os.pardir):
+                rel = real
+        path = rel
     return path.replace(os.sep, "/")
 
 
@@ -100,11 +109,16 @@ def _location(f: Finding) -> dict:
                                  "region": {"startLine": max(1, f.line)}}}
 
 
-def fingerprint(rule: str, path: str, source_line: str, occurrence: int) -> str:
-    """frisk/v1: sha256 of rule, path, the whitespace-normalised source line and the
-    occurrence index among results with the same first three, NUL-separated. The line
-    number is deliberately absent, so inserting lines above a finding keeps it."""
-    parts = (rule, path, " ".join(source_line.split()), str(occurrence))
+def normalise_line(source_line: str) -> str:
+    """The source line as fingerprinted: trimmed, internal whitespace collapsed to one space."""
+    return " ".join(source_line.split())
+
+
+def fingerprint(rule: str, path: str, line_text: str, occurrence: int) -> str:
+    """frisk/v1: sha256 of rule, path, the normalised source line and the occurrence index
+    among results with the same first three, NUL-separated. The line number is deliberately
+    absent, so inserting lines above a finding keeps it."""
+    parts = (rule, path, line_text, str(occurrence))
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
 
 
@@ -135,7 +149,7 @@ def to_sarif(result: ScanResult, version: str) -> str:
         location = _location(f)
         physical = location.get("physicalLocation")
         path = physical["artifactLocation"]["uri"] if physical else f.path
-        key = (f.rule, path, " ".join(f.source_line.split()))
+        key = (f.rule, path, normalise_line(f.source_line))
         results.append({
             "ruleId": f.rule,
             "level": _SARIF_LEVEL.get(f.severity, "note"),

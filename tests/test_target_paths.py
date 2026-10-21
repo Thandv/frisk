@@ -97,6 +97,17 @@ class TestLocalDirectories(ProjectCase):
         self.assertEqual(skipped, ["skill/.git", "skill/lib.so", "other/.git", "other/lib.so"])
 
 
+class TestRepeatedTargets(ProjectCase):
+    def test_nested_target_is_not_scanned_twice(self) -> None:
+        with chdir(self.proj):
+            once = run_json(["skill"])
+            for argv in (["skill", "skill/SKILL.md"], ["skill/SKILL.md", "skill"], ["skill", "./skill"]):
+                with self.subTest(argv=argv):
+                    doc = run_json(argv)
+                    self.assertEqual((doc["findings"], doc["coverage"]), (once["findings"], once["coverage"]))
+            self.assertEqual(len(run_json(["skill", "other"])["findings"]), 2 * len(once["findings"]))
+
+
 class TestSingleFile(ProjectCase):
     def test_file_path_equals_the_argument(self) -> None:
         with chdir(self.proj):
@@ -117,6 +128,9 @@ class TestDisplayPrefix(unittest.TestCase):
             ("examples/", False): "examples/", ("./examples", False): "examples/",
             ("/abs/x", False): "/abs/x/", ("/", False): "/", ("../up", False): "../up/",
             ("a/b.md", True): "a/", ("./a/b.md", True): "./a/", ("b.md", True): "",
+            # FR-E2 review: directories are normalised, so no '//' or '/.' leaks into paths.
+            (".//examples/x", False): "examples/x/", ("examples//x", False): "examples/x/",
+            ("examples/x/.", False): "examples/x/", ("//abs", False): "/abs/",
         }
         for (target, is_file), want in cases.items():
             with self.subTest(target=target):

@@ -28,8 +28,8 @@ clone, `name::` for an MCP server).
 | Target kind | (a) finding path, text and JSON | (b) `coverage.skipped[].path` and `coverage.*` findings | (c) SARIF location | (d) "every uri exists on disk relative to cwd" holds |
 |---|---|---|---|---|
 | local dir `.` (also `./`) | in-target path, no prefix: `foo/SKILL.md` | same rule as (a) | `uri` = (a); no `uriBaseId` | yes |
-| local dir `examples`, `examples/`, `./examples` | the target minus leading `./` and trailing `/`, then `/`, then the in-target path: `examples/foo/SKILL.md` for all three spellings | same rule as (a) | `uri` = (a) | yes |
-| local dir, absolute (`/abs/examples`) | `/abs/examples/foo/SKILL.md` (the target as given) | same rule as (a) | `uri` = (a) made relative to cwd (`os.path.relpath`, POSIX), e.g. `examples/foo/SKILL.md` or `../x/SKILL.md` | yes |
+| local dir `examples`, `examples/`, `./examples` | the target normalised (`posixpath.normpath`: no leading `./`, no `//`, `/.` or trailing `/`), then `/`, then the in-target path: `examples/foo/SKILL.md` for all three spellings | same rule as (a) | `uri` = (a) | yes |
+| local dir, absolute (`/abs/examples`) | `/abs/examples/foo/SKILL.md` (the target as given) | same rule as (a) | `uri` = (a) made relative to cwd (`os.path.relpath`, POSIX; if that climbs out of cwd but the resolved paths do not, the resolved form), e.g. `examples/foo/SKILL.md` or `../x/SKILL.md` | yes |
 | single local file (`examples/foo/SKILL.md`, `./a.py`) | the argument verbatim | same rule as (a) | `uri` = (a); an absolute argument is made relative to cwd as above | yes |
 | git URL (`https://host/o/r.git`) | clone-relative path: `foo/SKILL.md` | same rule as (a) | `uri` = (a) with `uriBaseId: "SRCROOT"` | no: the clone is deleted after the scan |
 | `--mcp-config` server entry | `name::` + server-relative path: `my-server::tools.py` (a server given as one file: `name::file.py`) | same rule as (a) | no physical location; a `logicalLocations` entry with `fullyQualifiedName` = (a) | no |

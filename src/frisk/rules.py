@@ -21,7 +21,10 @@ CODE_EXTS = {
     ".py", ".sh", ".bash", ".zsh", ".fish", ".js", ".mjs", ".cjs", ".ts",
     ".rb", ".pl", ".php", ".ps1", ".bat", ".cmd", ".lua", ".r",
 }
-TEXT_EXTS = {".md", ".markdown", ".txt", ".mdc", ".rst", ".yaml", ".yml", ".json", ".toml"}
+TEXT_EXTS = {
+    ".md", ".markdown", ".txt", ".mdc", ".rst", ".yaml", ".yml", ".json", ".toml",
+    ".html", ".htm", ".xml", ".svg", ".cfg", ".ini", ".conf",
+}
 # Media: never read, no finding, counted in coverage.skipped as "binary".
 MEDIA_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".pdf", ".woff",
@@ -158,7 +161,7 @@ TEXT_RULES = [
 
 # Suspicious invisible / control characters used to hide instructions, keyed by
 # codepoint (never written literally, so this rule cannot flag its own source).
-# Allowed: \t \n \r and a BOM (U+FEFF) only at file start.
+# Not listed, so never reported: \t \n \r and the BOM (U+FEFF).
 SUSPECT_UNICODE = {
     chr(0x200B): "zero-width space",
     chr(0x200C): "zero-width non-joiner",
@@ -176,7 +179,6 @@ SUSPECT_UNICODE = {
     chr(0x2068): "first strong isolate (bidi)",
     chr(0x2069): "pop directional isolate (bidi)",
 }
-_BOM = chr(0xFEFF)
 
 # The hidden-Unicode rule: (id, category, severity). Its matcher is hidden_unicode().
 UNICODE_RULE = ("unicode.invisible", "obfuscation", "block")
@@ -187,18 +189,20 @@ COVERAGE_RULES = [
      "executable or archive content that cannot be scanned as text"),
     ("coverage.unreadable", "coverage", "warn",
      "code or text file that could not be read or decoded as UTF-8, or a directory that could not be listed"),
+    ("coverage.surface_error", "coverage", "warn",
+     "a scan surface failed on a file, so part of it may not have been pattern-matched"),
 ]
 
 
 def hidden_unicode(text: str) -> list[tuple[int, str]]:
     """Return (offset, description) for the first occurrence of each suspect character.
 
-    Offsets index into `text`. A BOM is allowed only as the very first character.
+    Offsets index into `text`. A BOM (U+FEFF) is not in SUSPECT_UNICODE, so it is never
+    reported; files are decoded with utf-8-sig, which drops a leading one.
     """
-    start = 1 if text[:1] == _BOM else 0
     hits: list[tuple[int, str]] = []
     for ch, name in SUSPECT_UNICODE.items():
-        idx = text.find(ch, start)
+        idx = text.find(ch)
         if idx != -1:
             hits.append((idx, f"suspicious invisible/bidi character: {name}"))
     return hits

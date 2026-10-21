@@ -8,7 +8,8 @@ repository files only when `targets` was `.`.
 Paths now follow docs/adr/0001-finding-paths.md, in text, `--json` and `--sarif`
 output and in `coverage.skipped`:
 
-- a local directory: the target as given (minus a leading `./` and trailing `/`) joined
+- a local directory: the target as given, normalised (no leading `./`, no `//`, `/.` or
+  trailing `/`), joined
   with the in-target path, e.g. `frisk skills/` → `skills/foo/SKILL.md`; `.` is unchanged;
 - a single file: exactly the argument;
 - a git URL: relative to the clone (unchanged);
