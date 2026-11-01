@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -139,6 +140,61 @@ class WheelScriptTest(ReviewCase):
         self.assertEqual(code, 0)
         self.assertIn("  [PASS ] tool", out)
         self.assertIn("package-cached", out)
+
+
+
+class HomeByRealPathTest(ReviewCase):
+    """$HOME, or a directory above it, is never a server's source, also when it is reached
+    through a symlink (a link committed in a repo, or a $HOME that is itself a link): the
+    walk-up must not scan all of HOME, nor print excerpts of its files."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.home / ".git").mkdir()  # a dotfiles repo: the walk-up's marker
+        self.secret = "home-" + "only-" + "51f3"
+        (self.home / "notes.sh").write_text("# " + INSTALLER + " " + self.secret + "\n", encoding="utf-8")
+        (self.home / "data.txt").write_text("plain data\n", encoding="utf-8")
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        os.symlink(self.home, self.repo / "link")
+
+    def audit(self, servers: dict) -> str:
+        code, out, _ = run(["--mcp-config", self.config({"mcpServers": servers})])
+        return out
+
+    def test_a_link_to_home_is_not_a_root(self) -> None:
+        link = str(self.repo / "link")
+        for label, spec in (("dir arg", {"command": "node", "args": [link]}),
+                            ("non-script file arg's dir", {"command": "node", "args": [link + "/data.txt"]}),
+                            ("uv --directory", {"command": "uv", "args": ["--directory", link, "run", "x.py"]})):
+            with self.subTest(label):
+                out = self.audit({"s": spec})
+                self.assertNotIn(self.secret, out)
+                self.assertNotIn("notes.sh:1", out)
+
+    def test_a_script_in_home_reached_through_a_link_is_scanned_alone(self) -> None:
+        out = self.audit({"s": {"command": "bash", "args": [str(self.repo / "link" / "notes.sh")]}})
+        self.assertIn("s::notes.sh:1", out)  # the script itself is still scanned, as for $HOME as named
+        self.assertIn("scanned 1 file", out)
+
+    def test_a_home_that_is_a_link_still_stops_the_walk_up(self) -> None:
+        project = self.home / "work" / "app"
+        project.mkdir(parents=True)
+        (project / "server.js").write_text("console.log(1)\n", encoding="utf-8")
+        linked_home = self.tmp / "home-link"
+        os.symlink(self.home, linked_home)
+        fake_home(self, linked_home)  # $HOME names the link; the config names the real directory
+        out = self.audit({"s": {"command": "node", "args": [str(project / "server.js")]}})
+        self.assertNotIn(self.secret, out)
+        self.assertIn("scanned 1 file", out)  # the script's own directory, not $HOME
+
+    def test_a_project_below_home_is_still_scanned(self) -> None:
+        project = self.home / "work" / "app"
+        project.mkdir(parents=True)
+        (project / "server.js").write_text(INSTALLER + "\n", encoding="utf-8")
+        out = self.audit({"s": {"command": "node", "args": [str(self.repo / "link" / "work" / "app" / "server.js")]}})
+        self.assertIn("s::server.js:1", out)
+        self.assertNotIn(self.secret, out)
 
 
 if __name__ == "__main__":

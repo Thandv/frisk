@@ -11,3 +11,7 @@
   frisk scans only the package, so such a server used to PASS with a pipe-to-shell
   installer in the script that actually runs. Wrappers generated for the package's own
   entry points (`entry_points.txt`) are accepted as before.
+- `$HOME` and the directories above it are recognised with symlinks resolved. The guard
+  compared paths as written, so a symlink to `$HOME` (one committed in a repo, or a `$HOME`
+  that is itself a link) made the walk-up or a directory argument scan all of `$HOME`,
+  printing excerpts of whatever matched there.

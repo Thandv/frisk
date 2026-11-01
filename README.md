@@ -215,7 +215,8 @@ Relative paths resolve against the server's `cwd` in the config or, for a projec
 a `.claude.json` without one, against its project directory (Claude Code starts it there);
 never against the directory you run frisk from. A top-level server with a relative script
 and no absolute `cwd` is `unknown`.
-`$HOME`, or a directory above it, is never scanned as a server's source.
+`$HOME`, or a directory above it, is never scanned as a server's source, also when it is
+reached through a symlink (paths are compared with symlinks resolved).
 
 A skipped server's location is printed without secrets: a URL shows only its scheme,
 host, port and path (no `user:password@`, query string or fragment), and env values and

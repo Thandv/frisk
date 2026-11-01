@@ -383,8 +383,10 @@ def _project_root(script: Path) -> Path:
 
 
 def _at_or_above_home(path: Path) -> bool:
-    home = Path.home()
-    return path == home or path in home.parents
+    """Whether `path` really is $HOME or a directory above it: both sides are compared with
+    symlinks resolved, so a link to $HOME, or $HOME reached through a link, still counts."""
+    real, home = Path(os.path.realpath(path)), Path(os.path.realpath(Path.home()))
+    return real == home or real in home.parents
 
 
 def parse_mcp_config(path: str | Path) -> list[ServerRef]:
