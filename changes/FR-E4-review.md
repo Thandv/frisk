@@ -21,3 +21,6 @@
   and in error messages (a project key). A lone surrogate in a server name (valid JSON) is
   shown as `\ud800`; it used to stop the text and `--sarif` reports with a traceback and
   `frisk lock` with exit 2.
+- A skipped server whose `command` holds a whole command line (`npx -y pkg --api-key …`,
+  `docker run -e TOKEN=… img`) is shown by its program alone (`npx …`); its arguments,
+  and any token among them, used to be printed in every output format.

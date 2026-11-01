@@ -124,11 +124,15 @@ def display_ref(s: ServerRef) -> str:
     path; userinfo, query and fragment, where tokens live, are dropped. A URL without a
     scheme and host, with a port that is not a number, or with an '@' outside its host part
     shows as '<unparsable URL>': there an unencoded '#', '?' or '/' in a password has cut
-    the host part short. Any other ref is shown with $HOME as ~. Env values and headers are
+    the host part short. A server frisk does not scan whose ref holds whitespace (a whole
+    command line pasted into 'command', whose arguments may carry a token) shows only its
+    first word and ' …'. Any other ref is shown with $HOME as ~. Env values and headers are
     never read into a ServerRef, so they cannot reach the output.
     """
     if s.kind == "remote" or "://" in s.ref:
         return _safe_url(s.ref)
+    if not s.scannable and len(s.ref.split()) > 1:
+        return home_label(s.ref.split()[0]) + " …"
     return home_label(s.ref)
 
 
