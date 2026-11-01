@@ -81,6 +81,14 @@ class TestBuildRecipes(TempDir):
         self.assertEqual(self.rows("justfile", "set shell := [\"bash\", \"-c\"]\n\ninstall:\n    " + INSTALLER + "\n"),
                          [4])
 
+    def test_every_documented_build_file_name_is_scanned(self) -> None:
+        # Review: these name variants were documented but no test pinned them.
+        for name, text in (("GNUmakefile", "all:\n\t" + INSTALLER + "\n"), ("rules.mk", "all:\n\t" + INSTALLER + "\n"),
+                           ("app.dockerfile", "FROM base\nRUN " + INSTALLER + "\n"),
+                           (".justfile", "install:\n    " + INSTALLER + "\n")):
+            with self.subTest(name):
+                self.assertEqual(self.rows(name, text), [2])
+
 
 class TestPackageJsonScripts(TempDir):
     def test_postinstall_blocks_at_its_raw_line(self) -> None:

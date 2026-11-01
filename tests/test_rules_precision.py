@@ -92,7 +92,7 @@ class TestDiskWrites(RuleCase):
     attacks = ("dd if=/dev/zero of=/dev/sda", "dd if=img of=/dev/disk2 bs=1m", "mkfs.ext4 /dev/sdb1",
                "mkfs -t ext4 /dev/sdb", "cat img > /dev/sda")
     legit = ("dd if=/dev/zero of=disk.img bs=1M", "dd if=img of=/dev/null", "dd if=img of=/dev/zero",
-             "dd if=img of=/dev/stdout", "dd if=img of=/dev/fd/1", "mkfs.ext4 disk.img")
+             "dd if=img of=/dev/stdout", "dd if=img of=/dev/stderr", "dd if=img of=/dev/fd/1", "mkfs.ext4 disk.img")
 
     def test_device_writes_block_file_and_sink_writes_pass(self) -> None:
         self.assert_cases()

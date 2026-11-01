@@ -76,6 +76,10 @@ class TestWarnClasses(unittest.TestCase):
             with self.subTest(label):
                 self.assertEqual(rows("one\ntwo\nth" + ch + "ree\n"), [(3, WARN, "warn")])
 
+    def test_each_class_is_reported_once_at_its_first_reportable_use(self) -> None:
+        text = "a\n" + chr(0x00AD) + "\n" + chr(0x00AD) + "\n" + MAN + ZWJ + WOMAN + "\nx" + ZWJ + "y\n" + ZWJ + "\n"
+        self.assertEqual(rows(text), [(2, WARN, "warn"), (5, BLOCK, "block")])
+
     def test_legitimate_uses_pass(self) -> None:
         for label, text in (("VS-16 after a heart", "love " + HEART + VS16 + "\n"),
                             ("single supplementary variation selector", "a" + chr(0xE0100) + "b\n"),
