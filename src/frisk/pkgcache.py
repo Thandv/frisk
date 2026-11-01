@@ -107,15 +107,42 @@ def _python(envs: list[tuple[Path, Path]], name: str) -> list[Cached]:
 
 
 def _dist_source(site: Path, info: Path) -> Path:
-    """The distribution's one top-level package or module, from its RECORD."""
+    """The distribution's one top-level package or module, from its RECORD.
+
+    A file it installs into the environment's bin/ is either the wrapper an installer
+    generates for one of its entry points (pip and uv drop a wheel script of the same name),
+    or a wheel's own script, which uvx and pipx run as a command and which is not part of
+    that package: frisk does not scan it, so the distribution is unusable.
+    """
     tops = set()
+    entry_points = None
     for line in _read(info / "RECORD").splitlines():
-        top = line.split(",", 1)[0].split("/", 1)[0]
+        parts = line.split(",", 1)[0].split("/")
+        if parts[0] == ".." and parts[-2:-1] == ["bin"]:
+            entry_points = _entry_points(info) if entry_points is None else entry_points
+            if parts[-1] not in entry_points:
+                raise CacheError(f"{info.name}: installs a script that is not one of its entry points")
+        top = parts[0]
         if top and not top.startswith("..") and top != "__pycache__" and not top.endswith((".dist-info", ".data")):
             tops.add(top)
     if len(tops) != 1 or next(iter(tops)).endswith(".pth"):
         raise CacheError(f"{info.name}: its code is not one package directory or module")
     return site / tops.pop()
+
+
+def _entry_points(info: Path) -> set[str]:
+    """The console and GUI script names in the distribution's entry_points.txt."""
+    names: set[str] = set()
+    if not os.path.isfile(info / "entry_points.txt"):
+        return names
+    section = ""
+    for line in _read(info / "entry_points.txt").splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            section = line.strip("[]").strip()
+        elif section in ("console_scripts", "gui_scripts") and "=" in line:
+            names.add(line.split("=", 1)[0].strip())
+    return names
 
 
 def _requires(metadata: Path) -> tuple[str, ...]:

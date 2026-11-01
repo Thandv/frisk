@@ -195,9 +195,10 @@ How each server's source is found, the way the client launches it:
   config (`pkg@1.2.3`, `pkg==1.2.3`) must match the cached one exactly; with no pin, it is
   scanned only when one version is cached. Otherwise the server is skipped with `not in local
   cache; frisk does not download`: frisk never downloads and never runs npm, npx, uv or pip.
-  A cache entry that is unreadable or malformed, leads outside its cache (a symlink), or
-  whose code is not one package directory or module (an editable install) skips only that
-  server. Packages run by `npm`, `pnpm`, `bunx` or `pip`
+  A cache entry that is unreadable or malformed, leads outside its cache (a symlink),
+  whose code is not one package directory or module (an editable install), or that
+  installs a script of its own into the tool's `bin/` (which `uvx` or `pipx` would run;
+  only entry-point wrappers are accepted) skips only that server. Packages run by `npm`, `pnpm`, `bunx` or `pip`
   are not looked up. The cache locations can be overridden with `FRISK_NPX_CACHE` (the
   `_npx` directory), `FRISK_UV_TOOLS`, `FRISK_UV_CACHE` (uv's cache directory) and
   `FRISK_PIPX_VENVS`.

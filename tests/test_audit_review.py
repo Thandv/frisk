@@ -87,5 +87,59 @@ class BothServerMapsTest(ReviewCase):
                 self.assertEqual([s.name for s in parse_mcp_config(self.config({key: {"a": clean}}))], ["a"])
 
 
+
+class WheelScriptTest(ReviewCase):
+    """uvx and pipx run a command from the environment's bin/. A wheel's own script there
+    (not an installer-generated entry-point wrapper) is not part of the package frisk scans,
+    so the server must not PASS on the package alone."""
+
+    def tool(self, root: Path, name: str, scripts: dict[str, str], entry_points: str | None) -> None:
+        env = root / name
+        site = env / "lib" / "python3.12" / "site-packages"
+        (site / name).mkdir(parents=True)
+        (site / name / "__init__.py").write_text("def main():\n    return 0\n", encoding="utf-8")
+        info = site / f"{name}-1.0.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(f"Name: {name}\nVersion: 1.0\n\n", encoding="utf-8")
+        if entry_points is not None:
+            (info / "entry_points.txt").write_text(entry_points, encoding="utf-8")
+        (env / "bin").mkdir()
+        record = [f"{name}/__init__.py,,", f"{name}-1.0.dist-info/METADATA,,"]
+        for script, text in scripts.items():
+            (env / "bin" / script).write_text(text, encoding="utf-8")
+            record.append(f"../../../bin/{script},,")
+        (info / "RECORD").write_text("\n".join(record) + "\n", encoding="utf-8")
+
+    def audit(self, runner: list[str], name: str) -> tuple[int, str]:
+        cfg = self.config({"mcpServers": {"tool": {"command": runner[0], "args": [*runner[1:], name]}}})
+        code, out, _ = run(["--mcp-config", cfg])
+        return code, out
+
+    def test_a_wheel_script_that_is_not_an_entry_point_is_not_passed(self) -> None:
+        payload = "#!/bin/sh\n" + INSTALLER + "\n"
+        roots = {"uvx": self.home / ".local" / "share" / "uv" / "tools",
+                 "pipx": self.home / ".local" / "pipx" / "venvs"}
+        for runner, root in roots.items():
+            for i, (label, entry_points) in enumerate((("no entry_points.txt", None),
+                                                       ("another entry point", "[console_scripts]\nother = x:main\n"))):
+                with self.subTest(runner=runner, case=label):
+                    name = f"acme_srv_{runner}_{i}"
+                    self.tool(root, name, {name: payload}, entry_points)
+                    code, out = self.audit([runner] if runner == "uvx" else ["pipx", "run"], name)
+                    self.assertIn("local cache entry unusable", out)
+                    self.assertIn("installs a script that is not one of its entry points", out)
+                    self.assertIn("verdict:   WARN", out)
+                    self.assertNotIn("PASS", out)
+
+    def test_an_entry_point_wrapper_is_still_scanned(self) -> None:
+        wrapper = "#!/usr/bin/env python3\nimport sys\nfrom acme_ok import main\nsys.exit(main())\n"
+        self.tool(self.home / ".local" / "share" / "uv" / "tools", "acme_ok", {"acme_ok": wrapper},
+                  "[console_scripts]\nacme_ok = acme_ok:main\n\n[gui_scripts]\n")
+        code, out = self.audit(["uvx"], "acme_ok")
+        self.assertEqual(code, 0)
+        self.assertIn("  [PASS ] tool", out)
+        self.assertIn("package-cached", out)
+
+
 if __name__ == "__main__":
     unittest.main()

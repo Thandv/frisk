@@ -84,6 +84,9 @@ class CacheCase(unittest.TestCase):
         if record is None:
             record = "".join(f"{module}/{rel},sha256=x,1\n" for rel in files)
             record += f"{info.name}/METADATA,,\n{info.name}/RECORD,,\n../../../bin/{dist},sha256=x,1\n"
+            # FR-E4 review: bin/{dist} is the wrapper for the package's entry point, which a real
+            # distribution declares (a bin/ script that is no entry point is refused).
+            (info / "entry_points.txt").write_text(f"[console_scripts]\n{dist} = {module}:main\n", encoding="utf-8")
         (info / "RECORD").write_text(record, encoding="utf-8")
         return site / module
 
