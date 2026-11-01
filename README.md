@@ -177,12 +177,13 @@ or `url`) is reported as `invalid`, and the other servers are still audited. `--
 Claude Code's `~/.claude.json` works too (`frisk ~/.claude.json`): its top-level servers and
 every project's `mcpServers` are audited. A config that holds both `mcpServers` (Claude Code,
 Cursor, Claude Desktop) and `servers` (VS Code) is audited whole, since each client runs its
-own map; a name found in both is listed twice, the second as `name (servers)`. A project server is named `server (project)`,
-with your home directory shown as `~`, for example `db (~/work/app)`. A config whose top
-level, `mcpServers`, `projects` or a project entry is not a JSON object stops with exit
-code 2 rather than being audited in part, and so does a config frisk cannot read (no
-permission, or a directory): `frisk: <error>`, the same for a config named as a target and
-for `--mcp-config` (and for `frisk lock` and `frisk verify`).
+own map; a name found in both is listed twice, the second as `name (servers)`. A project
+server is named `server (project)`, with your home directory shown as `~`, for example
+`db (~/work/app)`. A config whose top level, `mcpServers`, `servers`, `projects` or a
+project entry is not a JSON object stops with exit code 2 rather than being audited in part,
+and so does a config frisk cannot read (no permission, or a directory): `frisk: <error>`,
+the same for a config named as a target and for `--mcp-config` (and for `frisk lock` and
+`frisk verify`).
 
 How each server's source is found, the way the client launches it:
 
@@ -198,10 +199,10 @@ How each server's source is found, the way the client launches it:
   A cache entry that is unreadable or malformed, leads outside its cache (a symlink),
   whose code is not one package directory or module (an editable install), or that
   installs a script of its own into the tool's `bin/` (which `uvx` or `pipx` would run;
-  only entry-point wrappers are accepted) skips only that server. Packages run by `npm`, `pnpm`, `bunx` or `pip`
-  are not looked up. The cache locations can be overridden with `FRISK_NPX_CACHE` (the
-  `_npx` directory), `FRISK_UV_TOOLS`, `FRISK_UV_CACHE` (uv's cache directory) and
-  `FRISK_PIPX_VENVS`.
+  only entry-point wrappers are accepted) skips only that server. Packages run by `npm`,
+  `pnpm`, `bunx` or `pip` are not looked up. The cache locations can be overridden with
+  `FRISK_NPX_CACHE` (the `_npx` directory), `FRISK_UV_TOOLS`, `FRISK_UV_CACHE` (uv's cache
+  directory) and `FRISK_PIPX_VENVS`.
 - `uv run` is local source, rooted at `--directory`/`--project`, else at the project of the
   script it runs, else at the config's `cwd`.
 - For an interpreter (`python`, `node`, `bun`, `deno`, `ruby`, `bash`, `sh`, with any version
@@ -265,9 +266,12 @@ So the rest of the file can change (Claude Code rewrites `~/.claude.json` all th
 a rotated secret is not drift, while a changed command, argument, URL or env name (`~
 changed: how it starts`), changed server code, a different cached version, or a cache entry
 that is gone is DRIFT. Lockfiles written by older versions keep verifying with the checks
-they were written with; a config that an older frisk pinned as a whole file verifies while
-the file is unchanged, and afterwards `frisk verify` reports one error, `MCP config pinned
-as a whole file by an older frisk: run frisk lock again to pin each server`.
+they were written with, with two exceptions. A config that an older frisk pinned as a whole
+file verifies while the file is unchanged, and afterwards `frisk verify` reports one error,
+`MCP config pinned as a whole file by an older frisk: run frisk lock again to pin each
+server`. A package server whose older pin had taken an option's value or a subcommand as
+the package name (`uv run --directory …`, `uvx --python 3.12 …`, `pipx run …`,
+`npx --registry …`) reports DRIFT once with no changed file: run `frisk lock` again.
 
 For **continuous** monitoring, commit your `.frisk-lock.json` and drop
 [`examples/continuous-verify.yml`](examples/continuous-verify.yml) into your repo —
