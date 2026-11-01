@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from .engine import ScanResult, coverage_warning, display_prefix, reroot, scan_path, scan_text, verdict, fails
-from .report import AuditRecord, audit_text, to_text, to_json, to_sarif, _c
+from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
 from .sources import display_ref, is_git_url, looks_like_mcp_config, materialize, parse_mcp_config
 from . import pin, proxy
 from .debug import setup_debug
@@ -194,18 +194,19 @@ def _cmd_verify(argv: list[str]) -> int:
         print(json.dumps(report, indent=2))
     else:
         for r in report:
+            entry = printable(r["entry"])
             if r["status"] == "ok":
-                print(f"  [{_c('ok   ', 'pass')}] {r['entry']}")
+                print(f"  [{_c('ok   ', 'pass')}] {entry}")
             elif r["status"] == "error":
-                print(f"  [{_c('error', 'warn')}] {r['entry']}  {r.get('detail','')}")
+                print(f"  [{_c('error', 'warn')}] {entry}  {printable(r.get('detail', ''))}")
             else:
-                print(f"  [{_c('DRIFT', 'block')}] {r['entry']}")
+                print(f"  [{_c('DRIFT', 'block')}] {entry}")
                 for f in r.get("changed", []):
-                    print(_c(f"           ~ changed: {f}", "block"))
+                    print(_c(f"           ~ changed: {printable(f)}", "block"))
                 for f in r.get("added", []):
-                    print(_c(f"           + added:   {f}", "warn"))
+                    print(_c(f"           + added:   {printable(f)}", "warn"))
                 for f in r.get("removed", []):
-                    print(_c(f"           - removed: {f}", "warn"))
+                    print(_c(f"           - removed: {printable(f)}", "warn"))
         drift = sum(1 for r in report if r["status"] != "ok")
         v = _c("DRIFT DETECTED", "block") if pin.has_drift(report) else _c("no drift", "pass")
         print(f"\nverify: {v}  ({drift} of {len(report)} entries changed)")

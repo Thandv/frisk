@@ -9,7 +9,7 @@ from collections import Counter
 from typing import NamedTuple
 
 from .engine import Coverage, Finding, ScanResult, sort_findings, verdict, worst_severity
-from .rules import RULE_META, owasp_for
+from .rules import RULE_META, SUSPECT_UNICODE, owasp_for
 from .sources import ServerRef, display_ref
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
@@ -22,6 +22,23 @@ _VERDICT_COLOR = {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}
 
 def _c(s: str, key: str) -> str:
     return f"{_C[key]}{s}{_C['reset']}" if _USE_COLOR else s
+
+
+def _escape(cp: int) -> str:
+    return f"\\x{cp:02x}" if cp < 0x100 else f"\\u{cp:04x}" if cp < 0x10000 else f"\\U{cp:08x}"
+
+
+# C0 and C1 control characters, DEL, and the hidden Unicode frisk reports (bidi, zero-width,
+# tag characters, ...): a config or a scanned tree could use them to rewrite the terminal.
+_ESCAPES = {cp: _escape(cp) for cp in [*range(0x20), *range(0x7F, 0xA0),
+                                         *(cp for lo, hi, _n, _s in SUSPECT_UNICODE for cp in range(lo, hi + 1))]}
+
+
+def printable(text: str) -> str:
+    """Text as the text report prints it: control and hidden characters shown as escapes
+    (\\x1b, \\u202e). Every config-derived string and finding path goes through it; JSON and
+    SARIF escape them as JSON does."""
+    return text.translate(_ESCAPES)
 
 
 class AuditRecord(NamedTuple):
@@ -38,15 +55,15 @@ class AuditRecord(NamedTuple):
 def audit_text(path: str, records: list[AuditRecord]) -> str:
     """The text audit of one config: a header, one line per server in config order, then
     how many servers were not scanned."""
-    lines = [_c(f"MCP config audit: {path}", "bold"), ""]
+    lines = [_c(f"MCP config audit: {printable(path)}", "bold"), ""]
     if not records:
         lines.append("  (no servers found in config)")
     for rec in records:
         s = rec.server
         tag = _c("SKIP ", "dim") if rec.verdict is None else _c(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
-        lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {_reason(s)}")
+        lines.append(f"  [{tag}] {printable(s.name):<22} {_c(s.kind, 'dim')}  {printable(_reason(s))}")
         if rec.verdict is None:
-            lines.append(_c(f"           → {display_ref(s)}", "dim"))
+            lines.append(_c(f"           → {printable(display_ref(s))}", "dim"))
     if records:
         total, skipped = len(records), sum(1 for rec in records if rec.verdict is None)
         noun = "server" if total == 1 else "servers"
@@ -89,7 +106,7 @@ def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
     lines: list[str] = []
     for f in findings:
         mark = _c("BLOCK", "block") if f.severity == "block" else _c("warn ", "warn")
-        loc = _c(f"{f.path}:{f.line}", "dim")
+        loc = _c(f"{printable(f.path)}:{f.line}", "dim")
         lines.append(f"[{mark}] {f.category:<{_CATEGORY_WIDTH}} {loc}  {f.description}")
         if f.excerpt:
             lines.append(_c(f"          | {f.excerpt}", "dim"))

@@ -213,7 +213,11 @@ A skipped server's location is printed without secrets: a URL shows only its sch
 host, port and path (no `user:password@`, query string or fragment), and env values and
 headers are never read. A URL whose host part cannot be told apart from its password
 (an unencoded `#`, `?` or `/` in the password, a port that is not a number, or an `@` after
-the host) is shown as `<unparsable URL>`.
+the host) is shown as `<unparsable URL>`. In the text report (and `frisk verify`'s), control
+characters and the hidden Unicode frisk reports, in a server name, a cached package's
+version or dependencies, a location or a finding path, are shown as escapes (`\x1b`,
+`\u202e`), so a config cannot rewrite what your terminal shows; `--json` and `--sarif`
+escape them as JSON does.
 
 ### Detect rug pulls (pin what you approved, catch silent changes)
 

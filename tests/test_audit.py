@@ -195,6 +195,57 @@ class NoLeakTest(AuditCase):
                 self.assertNotIn(CANARY, run([*flags, "--mcp-config", cfg])[1])
 
 
+class ControlCharacterTest(AuditCase):
+    """FR-E4 fix DEFECT-3: config- and cache-derived text reaches the text report escaped."""
+
+    # One of each class: C0 (ESC, CR, BEL, backspace, tab), DEL, C1 (CSI), bidi override,
+    # zero-width space, a tag character and a soft hyphen.
+    RAW = [chr(c) for c in (0x1B, 0x0D, 0x07, 0x08, 0x09, 0x7F, 0x9B, 0x202E, 0x200B, 0xE0041, 0xAD)]
+    SHOWN = ["\\x1b", "\\x0d", "\\x07", "\\x08", "\\x09", "\\x7f", "\\x9b",
+             "\\u202e", "\\u200b", "\\U000e0041", "\\xad"]
+
+    def assert_escaped(self, text: str) -> None:
+        for raw in self.RAW:
+            self.assertNotIn(raw, text, f"U+{ord(raw):04X}")
+        for shown in self.SHOWN:
+            self.assertIn(shown, text)
+
+    def test_server_names_and_locations(self) -> None:
+        mark = "".join(self.RAW)
+        cfg = self.config({"far" + mark: {"url": "https://a.example.invalid/p" + mark},
+                           "cmd" + mark: {"command": "/nonexistent.invalid/bin/srv" + mark}})
+        code, out = run(["--mcp-config", cfg])
+        self.assert_escaped(out.split("\n\n")[1])  # the server lines and their → locations
+        self.assert_escaped(out.split("\n\n")[3])  # the coverage.unscanned finding paths
+        doc = json.loads(run(["--json", "--mcp-config", cfg])[1])
+        self.assertEqual([s["name"] for s in doc["servers"]], ["far" + mark, "cmd" + mark])  # JSON keeps the text
+
+    def test_cached_package_version_and_dependencies(self) -> None:
+        mark = "".join(self.RAW)
+        pkg = self.home / ".npm" / "_npx" / "0123456789abcdef"
+        (pkg / "node_modules" / "acme-tool").mkdir(parents=True)
+        (pkg / "package.json").write_text(json.dumps({"dependencies": {"acme-tool": "^1.0.0"}}), encoding="utf-8")
+        (pkg / "node_modules" / "acme-tool" / "package.json").write_text(
+            json.dumps({"version": "1.0.0" + mark, "dependencies": {"dep" + mark: "^1"}}), encoding="utf-8")
+        out = run(["--mcp-config", self.config({"tool": {"command": "npx", "args": ["acme-tool"]}})])[1]
+        line = next(x for x in out.splitlines() if x.startswith("  [PASS ] tool"))
+        self.assertEqual(line.count("\\x1b"), 2)  # the version and the dependency name
+        self.assert_escaped(out)
+
+    def test_verify_output(self) -> None:
+        mark = "".join(self.RAW)
+        cfg = self.config({"far" + mark: {"url": "https://a.example.invalid/p"}})
+        lockfile = str(self.tmp / "lock.json")
+        self.assertEqual(run(["lock", "--mcp-config", cfg, "--lockfile", lockfile])[0], 0)
+        out = run(["verify", "--lockfile", lockfile])[1]
+        self.assert_escaped(out)
+
+    def test_plain_text_is_untouched(self) -> None:
+        from frisk.report import printable
+        text = "café 👍 → ~/work/app (db) " + chr(0x1F468) + chr(0x200D) + chr(0x1F469)
+        self.assertEqual(printable(text), text.replace(chr(0x200D), "\\u200d"))
+
+
 class ReadmeAuditSampleTest(AuditCase):
     def test_readme_sample_is_real_output(self) -> None:
         # The README's audit sample, rebuilt from a fixture config: run from the config's

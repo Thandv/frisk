@@ -261,10 +261,9 @@ class DefectTest(HomeCase):
         self.assertEqual((code, out), (2, ""))
         self.assertTrue(err.startswith("frisk: "), err)
 
-    # DEFECT-3: control characters in a server name (or a cached package's version) reach
-    #   the text report as is, so a crafted .mcp.json can rewrite what the terminal shows
-    #   (for example erase a SKIP line and print a fake PASS).
-    @unittest.expectedFailure
+    # Fixed by "FR-E4 fix: DEFECT-3" (was DEFECT-3: control characters in a server name, or
+    #   a cached package's version, reached the text report as is, so a crafted .mcp.json
+    #   could rewrite what the terminal shows, for example erase a SKIP line).
     def test_control_characters_in_a_server_name_are_not_printed(self) -> None:
         name = "x" + chr(27) + "[2K\r  [PASS ] fine"
         out = run(["--mcp-config", self.config({"mcpServers": {name: {"url": "https://a.example.invalid/mcp"}}})])[1]
