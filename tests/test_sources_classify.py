@@ -41,8 +41,10 @@ class TestClassifyTable(unittest.TestCase):
              ServerRef("s", "remote", "https://mcp.example.invalid/sse", False, REMOTE_DETAIL)),
             ("serverUrl", {"serverUrl": "https://mcp.example.invalid/mcp"},
              ServerRef("s", "remote", "https://mcp.example.invalid/mcp", False, REMOTE_DETAIL)),
-            ("url wins over command", {"url": "https://a.example.invalid", "command": "npx"},
-             ServerRef("s", "remote", "https://a.example.invalid", False, REMOTE_DETAIL)),
+            # FR-E4 owner decision (N1): the command is classified and scanned, and the url is kept
+            # to be reported as not scanned (was: the url won and the command was never read).
+            ("command beside a url", {"url": "https://a.example.invalid", "command": "npx"},
+             ServerRef("s", "package", "npx", False, NOT_CACHED, url="https://a.example.invalid")),
             ("absolute local script", {"command": "python3", "args": [script]},
              ServerRef("s", "local", d, True, "local source via python3")),
             ("interpreter by absolute path", {"command": "/opt/bin/python3", "args": [script]},

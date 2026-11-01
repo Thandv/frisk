@@ -113,6 +113,9 @@ class ServerRef:
     unscanned_deps: tuple[str, ...] = ()
     # sha256 of how the server is started, for frisk lock (see _launch_digest); never printed.
     launch: str = ""
+    # A remote URL the entry names beside its command: the command is what gets classified and
+    # scanned; the URL is not scanned and is shown only through display_url.
+    url: str = ""
 
 
 def display_ref(s: ServerRef) -> str:
@@ -130,7 +133,7 @@ def display_ref(s: ServerRef) -> str:
     never read into a ServerRef, so they cannot reach the output.
     """
     if s.kind == "remote" or "://" in s.ref:
-        return _safe_url(s.ref)
+        return display_url(s.ref)
     if not s.scannable and len(s.ref.split()) > 1:
         return home_label(s.ref.split()[0]) + " …"
     return home_label(s.ref)
@@ -144,7 +147,8 @@ def home_label(path: str) -> str:
     return "~" + path[len(home):] if path.startswith(home + os.sep) else path
 
 
-def _safe_url(url: str) -> str:
+def display_url(url: str) -> str:
+    """A URL as printed: the rules display_ref states for URL refs."""
     try:
         parts = urlsplit(url)
         _ = parts.port  # raises ValueError for a port that is not a number, such as 'user:pass' cut short
@@ -160,15 +164,23 @@ def _classify(name: str, spec: object, project: Path | None = None) -> ServerRef
     """How the server really launches. Paths resolve against the spec's 'cwd', else the
     directory of the .claude.json project the server belongs to (Claude Code starts it
     there), never against frisk's own working directory. An entry frisk cannot read is
-    'invalid' and affects no other server."""
+    'invalid' and affects no other server. An entry with a command and a url is classified
+    by its command (a client that reads the command runs it) and keeps the url, which the
+    audit reports as not scanned: neither side is dropped."""
     problem = _invalid(spec)
     if problem or not isinstance(spec, dict):  # isinstance only narrows the type
         return ServerRef(name, "invalid", "?", scannable=False, detail=problem)
-    url = spec.get("url") or spec.get("serverUrl")
-    if url:
+    url = spec.get("url") or spec.get("serverUrl") or ""
+    cmd = (spec.get("command") or "").strip()
+    if url and not cmd:
         return ServerRef(name, "remote", url, scannable=False,
                          detail="remote HTTP/SSE server — behavior not statically verifiable")
-    cmd = (spec.get("command") or "").strip()
+    ref = _classify_command(name, spec, cmd, project)
+    ref.url = url
+    return ref
+
+
+def _classify_command(name: str, spec: dict, cmd: str, project: Path | None) -> ServerRef:
     args = [str(a) for a in spec.get("args") or []]
     cwd = _cwd(spec, project)
     base = os.path.basename(cmd)
@@ -429,7 +441,7 @@ def _launch_digest(spec: object) -> str:
     shape: object = spec
     if isinstance(spec, dict):
         url = spec.get("url") or spec.get("serverUrl")
-        shown = _safe_url(url) if isinstance(url, str) else url
+        shown = display_url(url) if isinstance(url, str) else url
         launch = {key: spec.get(key) for key in ("command", "args", "cwd", "type")}
         launch["url"] = url if shown == "<unparsable URL>" else shown
         for key in ("env", "headers"):

@@ -187,7 +187,9 @@ the same for a config named as a target and for `--mcp-config` (and for `frisk l
 
 How each server's source is found, the way the client launches it:
 
-- A remote `url` is not scanned.
+- A remote `url` is not scanned. An entry with both a `command` and a `url` (whatever its
+  `type`) is classified and scanned by its command, so it can BLOCK, and it also warns
+  that it names a remote URL: neither side is dropped.
 - A package run by `npx`, `uvx`, `uv tool run` or `pipx run` is scanned (kind
   `package-cached`) when it is already in your local cache: `~/.npm/_npx/<hash>/node_modules/<pkg>`
   (a package npx was asked to run, not one of its dependencies), `~/.local/share/uv/tools/<pkg>`,

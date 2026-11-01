@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 from .engine import Coverage, Finding, ScanResult, sort_findings, verdict, worst_severity
 from .rules import RULE_META, SUSPECT_UNICODE, owasp_for
-from .sources import ServerRef, display_ref
+from .sources import ServerRef, display_ref, display_url
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 _C = {
@@ -75,11 +75,14 @@ def audit_text(path: str, records: list[AuditRecord]) -> str:
 
 
 def _reason(s: ServerRef) -> str:
-    """The server's detail, plus the dependencies of a cached package, which were not scanned."""
-    deps = s.unscanned_deps
-    if not deps:
-        return s.detail
-    return f"{s.detail}; {len(deps)} dependenc{'y' if len(deps) == 1 else 'ies'} not scanned: {', '.join(deps)}"
+    """The server's detail, plus what was not scanned with it: a cached package's
+    dependencies, and a remote URL the entry names beside its command."""
+    reason, deps = s.detail, s.unscanned_deps
+    if deps:
+        reason += f"; {len(deps)} dependenc{'y' if len(deps) == 1 else 'ies'} not scanned: {', '.join(deps)}"
+    if s.url:
+        reason += f"; the entry also names the remote URL {display_url(s.url)}, which is not scanned"
+    return reason
 
 
 def _audit_servers(records: list[AuditRecord]) -> list[dict]:

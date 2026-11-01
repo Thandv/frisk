@@ -9,7 +9,7 @@ from pathlib import Path
 from . import __version__
 from .engine import ScanResult, coverage_warning, display_prefix, reroot, scan_path, scan_text, verdict, fails
 from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
-from .sources import display_ref, is_git_url, materialize, parse_mcp_config, split_configs
+from .sources import display_ref, display_url, is_git_url, materialize, parse_mcp_config, split_configs
 from . import pin, proxy
 from .debug import setup_debug
 
@@ -72,16 +72,20 @@ def _audit_config(path: str) -> list[AuditRecord]:
 
     A server frisk does not scan (remote, an uncached package, an unresolved or invalid
     entry) carries a coverage.unscanned warning at 'name::<its ref>', so no audit with a
-    skipped server is ever PASS.
+    skipped server is ever PASS. So does a remote URL an entry names beside its command
+    (the command is scanned as usual), at 'name::<the URL>'.
     """
     records: list[AuditRecord] = []
     for s in parse_mcp_config(path):
         if s.scannable:
-            server = reroot(scan_path(s.ref), f"{s.name}::", "mcp")
-            records.append(AuditRecord(s, server, verdict(server.findings)))
+            result = scan_path(s.ref)
         else:
-            note = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
-            records.append(AuditRecord(s, reroot(note, f"{s.name}::", "mcp"), None))
+            result = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
+        if s.url:
+            result.extend(coverage_warning(display_url(s.url), "coverage.unscanned",
+                                           "MCP server entry also names a remote URL, which is not scanned"))
+        server = reroot(result, f"{s.name}::", "mcp")
+        records.append(AuditRecord(s, server, verdict(server.findings) if s.scannable else None))
     return records
 
 
