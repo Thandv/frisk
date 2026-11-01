@@ -287,15 +287,18 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             cfg.write_text("{}", encoding="utf-8")
             code, out, _ = run(["--mcp-config", str(cfg)])
         self.assertEqual(code, 0)
+        keys = "'mcpServers' and 'servers', at the top level and in each 'projects' entry"
+        # FR-E4 owner decision (N5): a config with no servers warns, naming the file and the keys
+        # frisk reads (was: "(no servers found in config)", "frisk: clean" and PASS).
         self.assertEqual(out, "\n".join([
             f"MCP config audit: {cfg}",
             "",
-            "  (no servers found in config)",
+            f"  no MCP servers found (frisk reads {keys})",
             "",
-            f"frisk: clean — no findings in {cfg}",
+            f"[warn ] coverage       {cfg}:1  no MCP servers found in {cfg} (frisk reads {keys})",
             "",
             "scanned 0 files, skipped 0",  # FR-E2 t3: coverage line
-            f"verdict:   PASS    0 blocking · 0 warnings · 0 total  ({cfg})",
+            f"verdict:   WARN    0 blocking · 1 warnings · 1 total  ({cfg})",
             "",
         ]))
 

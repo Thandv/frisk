@@ -36,3 +36,12 @@
   the Python package 'acme_mcp', which frisk does not scan`), so WARN, never PASS. The
   wrapper file itself is still read, so a payload hidden in it BLOCKs. Larger scripts, and
   scripts that call a function they define themselves, are scanned as before.
+- **A config with no servers warns (N5).** A config in which frisk found no servers printed
+  `(no servers found in config)`, `frisk: clean` and PASS, also when it was a format frisk
+  does not read. New warn rule `coverage.no_servers`: such a config is WARN with `no MCP
+  servers found in <file> (frisk reads 'mcpServers' and 'servers', at the top level and in
+  each 'projects' entry)`, as a target and with `--mcp-config`, in every output format
+  (`--fail-on warn` exits 1). No config format was added: VS Code's `settings.json`
+  (`mcp.servers`), Zed's `context_servers` and a misspelt `mcpservers` are still not read,
+  and now say so. The text report also escapes a finding's description, which can now
+  carry a file name.

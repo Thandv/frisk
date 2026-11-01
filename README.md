@@ -121,7 +121,8 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   other file are still scanned.
 
 In an MCP config audit, each server frisk could not scan also raises a
-`coverage.unscanned` warning ([below](#audit-everything-youve-already-installed)).
+`coverage.unscanned` warning, and a config in which it finds no servers raises
+`coverage.no_servers` ([below](#audit-everything-youve-already-installed)).
 
 ### SARIF for code scanning
 
@@ -173,6 +174,13 @@ or `url`) is reported as `invalid`, and the other servers are still audited. `--
 `servers`, one entry per audited server: `name`, `kind`, `status` (`scanned` or `skipped`),
 `reason` (the detail shown above, with a cached package's unscanned dependencies) and
 `verdict` (`null` when skipped).
+
+A config in which frisk finds no servers is not clean either: it is WARN with
+`coverage.no_servers`, `no MCP servers found in <file> (frisk reads 'mcpServers' and
+'servers', at the top level and in each 'projects' entry)`. frisk reads only those keys:
+other formats, such as VS Code's `settings.json` (`mcp.servers`) or Zed's
+`context_servers`, and a misspelt key such as `mcpservers` are not audited, and the warning
+makes that visible.
 
 Claude Code's `~/.claude.json` works too (`frisk ~/.claude.json`): its top-level servers and
 every project's `mcpServers` are audited. A config that holds both `mcpServers` (Claude Code,

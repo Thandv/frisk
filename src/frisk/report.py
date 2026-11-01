@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 from .engine import Coverage, Finding, ScanResult, sort_findings, verdict, worst_severity
 from .rules import RULE_META, SUSPECT_UNICODE, owasp_for
-from .sources import ServerRef, display_ref, display_url
+from .sources import SERVER_KEYS, ServerRef, display_ref, display_url
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 _C = {
@@ -59,7 +59,7 @@ def audit_text(path: str, records: list[AuditRecord]) -> str:
     how many servers were not scanned."""
     lines = [_c(f"MCP config audit: {printable(path)}", "bold"), ""]
     if not records:
-        lines.append("  (no servers found in config)")
+        lines.append(f"  no MCP servers found (frisk reads {SERVER_KEYS})")
     for rec in records:
         s = rec.server
         tag = _c("SKIP ", "dim") if rec.verdict is None else _c(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
@@ -112,7 +112,7 @@ def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
     for f in findings:
         mark = _c("BLOCK", "block") if f.severity == "block" else _c("warn ", "warn")
         loc = _c(f"{printable(f.path)}:{f.line}", "dim")
-        lines.append(f"[{mark}] {f.category:<{_CATEGORY_WIDTH}} {loc}  {f.description}")
+        lines.append(f"[{mark}] {f.category:<{_CATEGORY_WIDTH}} {loc}  {printable(f.description)}")
         if f.excerpt:
             lines.append(_c(f"          | {printable(f.excerpt)}", "dim"))
     blocks = sum(1 for f in findings if f.severity == "block")

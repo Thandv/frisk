@@ -98,6 +98,8 @@ _PIPX_VALUE_FLAGS = {"--spec", "--python", "--pip-args", "--index-url"}
 _UNRESOLVED = "could not resolve a local source to scan"
 _RELATIVE = "relative path and no absolute 'cwd' in the config: cannot tell which file runs"
 _NOT_CACHED = "not in local cache; frisk does not download"
+# Where parse_mcp_config looks for servers; other config formats are not read.
+SERVER_KEYS = "'mcpServers' and 'servers', at the top level and in each 'projects' entry"
 # Env variables that make a runtime load code (options, module and library paths, preloads,
 # startup files): frisk lock pins their values (as hashes); every other env value may be a
 # secret and is never read. Any DYLD_* variable counts too.

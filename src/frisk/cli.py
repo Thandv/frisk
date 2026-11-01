@@ -9,7 +9,8 @@ from pathlib import Path
 from . import __version__
 from .engine import ScanResult, coverage_warning, display_prefix, reroot, scan_path, scan_text, verdict, fails
 from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
-from .sources import display_ref, display_url, is_git_url, materialize, parse_mcp_config, split_configs
+from .sources import (SERVER_KEYS, display_ref, display_url, home_label, is_git_url, materialize, parse_mcp_config,
+                      split_configs)
 from . import pin, proxy
 from .debug import setup_debug
 
@@ -130,6 +131,11 @@ def _cmd_scan(argv: list[str]) -> int:
             result.extend(_scan_target(t))
         for cfg in configs:
             records = _audit_config(cfg)
+            if not records:  # nothing was audited: never PASS
+                where = home_label(cfg)
+                note = coverage_warning(where, "coverage.no_servers", f"no MCP servers found in {where} (frisk reads "
+                                        f"{SERVER_KEYS})")
+                result.extend(reroot(note, "", "mcp"))
             for rec in records:
                 result.extend(rec.result)
             servers.extend(records)

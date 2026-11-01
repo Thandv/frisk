@@ -155,7 +155,8 @@ class ServersJsonTest(AuditCase):
     def test_servers_key_only_when_a_config_was_audited(self) -> None:
         self.assertNotIn("servers", json.loads(run(["--json", "--text", "hello"])[1]))
         doc = json.loads(run(["--json", "--mcp-config", self.config({})])[1])
-        self.assertEqual((doc["servers"], doc["verdict"]), ([], "PASS"))
+        # FR-E4 owner decision (N5): a config with no servers warns (was PASS).
+        self.assertEqual((doc["servers"], doc["verdict"]), ([], "WARN"))
         doc = json.loads(run(["--json", "--mcp-config", self.config({"far": REMOTE}, "a.json"),
                               "--mcp-config", self.config({"pkg": UNCACHED}, "b.json")])[1])
         self.assertEqual([s["name"] for s in doc["servers"]], ["far", "pkg"])
@@ -340,6 +341,63 @@ class WrapperTest(AuditCase):
                 cfg = self.config({"own": {"command": str(script)}})
                 self.assertIn("  [PASS ] own                    local  local executable/script\n",
                               run(["--mcp-config", cfg])[1])
+
+
+class NoServersTest(AuditCase):
+    """FR-E4 owner decision (N5): a config in which frisk finds no servers is WARN, naming the
+    file and the keys it read, never PASS. Other config formats are not added."""
+
+    KEYS = "'mcpServers' and 'servers', at the top level and in each 'projects' entry"
+    SHAPES = {
+        "empty": {},
+        "empty map": {"mcpServers": {}},
+        "VS Code settings.json": {"mcp": {"servers": {"s": {"command": "node", "args": ["x.js"]}}}},
+        "Zed context_servers": {"context_servers": {"s": {"command": {"path": "node"}}}},
+        "misspelt key": {"mcpservers": {"s": {"url": "https://s.example.invalid/m"}}},
+        "empty projects": {"projects": {"/p": {"mcpServers": {}}}},
+    }
+
+    def write(self, data: dict, name: str = "mcp.json") -> str:
+        path = self.tmp / name
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return str(path)
+
+    def test_every_shape_warns_in_every_format(self) -> None:
+        for label, data in self.SHAPES.items():
+            for argv in (["--mcp-config"], []):  # a config named mcp.json is audited as a target too
+                with self.subTest(label, target=not argv):
+                    cfg = self.write(data)
+                    code, out = run([*argv, cfg])
+                    self.assertEqual(code, 0)
+                    self.assertIn(f"  no MCP servers found (frisk reads {self.KEYS})\n", out)
+                    self.assertIn(f"[warn ] coverage       {cfg}:1  no MCP servers found in {cfg} "
+                                  f"(frisk reads {self.KEYS})\n", out)
+                    self.assertIn("verdict:   WARN    0 blocking · 1 warnings · 1 total", out)
+                    for fmt, flags in FORMATS.items():
+                        self.assertNotIn("PASS", run([*flags, *argv, cfg])[1], fmt)
+                        self.assertNotIn("clean", run([*flags, *argv, cfg])[1], fmt)
+                    self.assertEqual(run(["--fail-on", "warn", *argv, cfg])[0], 1)
+
+    def test_the_json_and_sarif_name_the_file(self) -> None:
+        cfg = self.write({"mcpServers": {}}, "settings.json")
+        doc = json.loads(run(["--json", "--mcp-config", cfg])[1])
+        self.assertEqual((doc["verdict"], doc["servers"]), ("WARN", []))
+        self.assertEqual([(f["rule"], f["path"], f["owasp"]) for f in doc["findings"]],
+                         [("coverage.no_servers", cfg, "LLM03:2025 Supply Chain")])
+        sarif = json.loads(run(["--sarif", "--mcp-config", cfg])[1])
+        (result,) = sarif["runs"][0]["results"]
+        self.assertEqual((result["ruleId"], result["locations"]),
+                         ("coverage.no_servers", [{"logicalLocations": [{"fullyQualifiedName": cfg}]}]))
+
+    def test_a_config_under_home_is_named_with_a_tilde(self) -> None:
+        cfg = self.home / ".claude.json"
+        cfg.write_text(json.dumps({"projects": {}}), encoding="utf-8")
+        doc = json.loads(run(["--json", str(cfg)])[1])
+        self.assertEqual([f["path"] for f in doc["findings"]], ["~/.claude.json"])
+
+    def test_a_config_with_servers_has_no_such_warning(self) -> None:
+        doc = json.loads(run(["--json", "--mcp-config", self.write({"mcpServers": {"r": REMOTE}})])[1])
+        self.assertNotIn("coverage.no_servers", [f["rule"] for f in doc["findings"]])
 
 
 class ControlCharacterTest(AuditCase):

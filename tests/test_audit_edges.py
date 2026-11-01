@@ -154,7 +154,9 @@ class ConfigShapeTest(HomeCase):
         doc = json.loads(run(["--json", cfg])[1])
         self.assertEqual([s["name"] for s in doc["servers"]], ["a"])
         cfg = self.config({"projects": {}})
-        self.assertIn("  (no servers found in config)\n", run([cfg])[1])
+        # FR-E4 owner decision (N5): the audit says what it read (was "(no servers found in config)").
+        self.assertIn("  no MCP servers found (frisk reads 'mcpServers' and 'servers', at the top level and in "
+                      "each 'projects' entry)\n", run([cfg])[1])
 
     def test_malformed_claude_json_stops_the_run_before_any_report(self) -> None:
         # Not "the other configs are still audited": an input frisk cannot read stops the
