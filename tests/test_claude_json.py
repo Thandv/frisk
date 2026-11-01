@@ -163,6 +163,34 @@ class MalformedConfigTest(ClaudeJsonCase):
         self.assertTrue(err.startswith("frisk: Expecting property name"), err)
 
 
+class UnreadableConfigTest(ClaudeJsonCase):
+    """FR-E4 fix DEFECT-2: a config frisk cannot read stops with 'frisk: <error>' and exit 2,
+    never a traceback, the same whether it is named as a target or with --mcp-config."""
+
+    def test_a_directory_given_as_a_config(self) -> None:
+        folder = self.tmp / "folder.json"
+        folder.mkdir()
+        for argv, prefix in ((["--mcp-config", str(folder)], "frisk: "),
+                             (["lock", "--mcp-config", str(folder), "--lockfile", str(self.tmp / "l.json")],
+                              "frisk lock: "),
+                             (["verify", "--lockfile", str(folder)], "frisk verify: ")):
+            with self.subTest(argv[0]):
+                code, out, err = run(argv)
+                self.assertEqual((code, out), (2, ""))
+                self.assertTrue(err.startswith(prefix + "[Errno 21] Is a directory: "), err)
+
+    @unittest.skipIf(not hasattr(os, "geteuid") or os.geteuid() == 0,
+                     "root reads files regardless of permission bits")
+    def test_an_unreadable_claude_json_named_as_a_target(self) -> None:
+        os.chmod(self.cfg, 0)
+        self.addCleanup(os.chmod, self.cfg, 0o600)
+        for argv in ([str(self.cfg)], ["--mcp-config", str(self.cfg)], ["--json", str(self.cfg)]):
+            with self.subTest(argv=argv):
+                code, out, err = run(argv)
+                self.assertEqual((code, out), (2, ""))
+                self.assertEqual(err, f"frisk: [Errno 13] Permission denied: '{self.cfg}'\n")
+
+
 class LockTest(ClaudeJsonCase):
     def test_lock_gives_one_entry_per_project_server(self) -> None:
         lockfile = self.tmp / "lock.json"

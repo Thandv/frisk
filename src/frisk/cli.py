@@ -131,7 +131,7 @@ def _cmd_scan(argv: list[str]) -> int:
                 result.extend(rec.result)
             servers.extend(records)
             audits.append(audit_text(cfg, records))
-    except (FileNotFoundError, RuntimeError, ValueError) as e:
+    except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
         print(f"frisk: {e}", file=sys.stderr)
         return 2
     findings = result.sort().findings
@@ -169,7 +169,7 @@ def _cmd_lock(argv: list[str]) -> int:
     try:
         lock = pin.build_lock(args.targets, args.mcp_config)
         pin.write_lock(lock, args.lockfile)
-    except (FileNotFoundError, RuntimeError, ValueError) as e:
+    except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
         print(f"frisk lock: {e}", file=sys.stderr)
         return 2
     n = len(lock["entries"])
@@ -185,7 +185,7 @@ def _cmd_verify(argv: list[str]) -> int:
     args = p.parse_args(argv)
     try:
         report = pin.verify_lock(pin.read_lock(args.lockfile))
-    except (FileNotFoundError, RuntimeError, ValueError) as e:
+    except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
         print(f"frisk verify: {e}", file=sys.stderr)
         return 2
 

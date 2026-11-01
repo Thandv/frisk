@@ -252,11 +252,8 @@ class DefectTest(HomeCase):
             url = "https://user:" + CANARY + sep + "x@auth.example.invalid/mcp"
             self.assertNotIn(CANARY, display_ref(ServerRef("s", "remote", url, False)))
 
-    # DEFECT-2: an MCP config that cannot be read (a directory here; also a file without
-    #   read permission) stops frisk with a traceback instead of 'frisk: ...' and exit 2.
-    #   For a config named as a target this is new in FR-E4 t4: such a target used to be
-    #   text-scanned with a coverage.unreadable warning.
-    @unittest.expectedFailure
+    # Fixed by "FR-E4 fix: DEFECT-2" (was DEFECT-2: an MCP config that cannot be read, a
+    #   directory here or a file without read permission, stopped frisk with a traceback).
     def test_an_unreadable_config_exits_2_with_a_message(self) -> None:
         folder = self.tmp / "folder.json"
         folder.mkdir()

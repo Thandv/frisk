@@ -175,7 +175,9 @@ Claude Code's `~/.claude.json` works too (`frisk ~/.claude.json`): its top-level
 every project's `mcpServers` are audited. A project server is named `server (project)`,
 with your home directory shown as `~`, for example `db (~/work/app)`. A config whose top
 level, `mcpServers`, `projects` or a project entry is not a JSON object stops with exit
-code 2 rather than being audited in part.
+code 2 rather than being audited in part, and so does a config frisk cannot read (no
+permission, or a directory): `frisk: <error>`, the same for a config named as a target and
+for `--mcp-config` (and for `frisk lock` and `frisk verify`).
 
 How each server's source is found, the way the client launches it:
 
