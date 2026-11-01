@@ -18,3 +18,11 @@
   the value. Every other env value stays unpinned, so rotating a secret is still not drift.
   A lock entry written before this change for a server that sets one of these variables
   reports DRIFT once with that line: lock again. Other entries verify as before.
+- **URLs are shown by their host only (N3).** Every URL frisk prints from a config, in the
+  text report, `--json`, `--sarif`, `-q`, `frisk verify` and debug lines, is now
+  `scheme://host[:port]`, plus `/…` when anything followed the host
+  (`https://mcp.example.com/…`). The path used to be shown, and some hosted MCP providers put
+  the access key in it (`/mcp/<key>/sse`), as do session parameters (`;jsessionid=…`). A URL
+  whose host part holds anything but a host name or address is `<unparsable URL>`, as are
+  the DEFECT-1 shapes. `frisk lock` still pins the path (without credentials, query or
+  fragment), so a changed endpoint is still drift and existing lockfiles verify as before.

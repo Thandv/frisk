@@ -109,7 +109,8 @@ class NoFalsePassTest(AuditCase):
         doc = json.loads(run(["--json", "--mcp-config", self.config({"far": REMOTE, "pkg": UNCACHED})])[1])
         self.assertEqual([(f["path"], f["line"], f["rule"], f["severity"], f["owasp"], f["description"])
                           for f in doc["findings"]], [
-            ("far::https://mcp.example.invalid/sse", 1, "coverage.unscanned", "warn", "LLM03:2025 Supply Chain",
+            # FR-E4 owner decision (N3): a URL shows its host only (was: its path too)
+            ("far::https://mcp.example.invalid/…", 1, "coverage.unscanned", "warn", "LLM03:2025 Supply Chain",
              "MCP server not scanned (remote)"),
             ("pkg::acme-uncached", 1, "coverage.unscanned", "warn", "LLM03:2025 Supply Chain",
              "MCP server not scanned (package)"),
@@ -122,7 +123,7 @@ class NoFalsePassTest(AuditCase):
         self.assertEqual((rule["id"], rule["properties"]["owasp"]), ("coverage.unscanned", "LLM03:2025 Supply Chain"))
         (result,) = doc["runs"][0]["results"]
         self.assertEqual(result["locations"],
-                         [{"logicalLocations": [{"fullyQualifiedName": "far::https://mcp.example.invalid/sse"}]}])
+                         [{"logicalLocations": [{"fullyQualifiedName": "far::https://mcp.example.invalid/…"}]}])
 
 
 class ServersJsonTest(AuditCase):

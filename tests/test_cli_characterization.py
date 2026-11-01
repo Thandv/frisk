@@ -234,7 +234,8 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             "  [SKIP ] pkg-srv                package  not in local cache; frisk does not download",
             "           → acme-weather-mcp",
             "  [SKIP ] remote-srv             remote  remote HTTP/SSE server — behavior not statically verifiable",
-            "           → https://mcp.example.invalid/sse",
+            # FR-E4 owner decision (N3): a URL shows its host only (was: its path too)
+            "           → https://mcp.example.invalid/…",
             "  [SKIP ] ghost-srv              unknown  could not resolve a local source to scan",
             "           → /nonexistent.invalid/bin/ghost",
             # FR-E4 t6: a summary line, and one coverage.unscanned warning per skipped server, so
@@ -245,7 +246,7 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             "",
             "[warn ] coverage       ghost-srv::/nonexistent.invalid/bin/ghost:1  MCP server not scanned (unknown)",
             "[warn ] coverage       pkg-srv::acme-weather-mcp:1  MCP server not scanned (package)",
-            "[warn ] coverage       remote-srv::https://mcp.example.invalid/sse:1  MCP server not scanned (remote)",
+            "[warn ] coverage       remote-srv::https://mcp.example.invalid/…:1  MCP server not scanned (remote)",
             "",
             "scanned 2 files, skipped 0",  # FR-E2 t3: coverage line (server.py and mcp.json)
             f"verdict:   WARN    0 blocking · 3 warnings · 3 total  ({cfg})",

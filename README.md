@@ -151,14 +151,14 @@ MCP config audit: claude_desktop_config.json
   [PASS ] notes-server           local  local source via python3
   [PASS ] weather                package-cached  npm package acme-weather 1.4.2 from local cache ~/.npm/_npx/9f86d081884c7d65/node_modules/acme-weather; 1 dependency not scanned: zod
   [SKIP ] some-remote            remote  remote HTTP/SSE server — behavior not statically verifiable
-           → https://mcp.example.invalid/sse
+           → https://mcp.example.invalid/…
   [SKIP ] npm-tool               package  not in local cache; frisk does not download
            → some-npm-mcp
 
   2 of 4 servers not scanned
 
 [warn ] coverage       npm-tool::some-npm-mcp:1  MCP server not scanned (package)
-[warn ] coverage       some-remote::https://mcp.example.invalid/sse:1  MCP server not scanned (remote)
+[warn ] coverage       some-remote::https://mcp.example.invalid/…:1  MCP server not scanned (remote)
 
 scanned 3 files, skipped 0
 verdict:   WARN    0 blocking · 2 warnings · 2 total  (claude_desktop_config.json)
@@ -221,12 +221,16 @@ and no absolute `cwd` is `unknown`.
 `$HOME`, or a directory above it, is never scanned as a server's source, also when it is
 reached through a symlink (paths are compared with symlinks resolved).
 
-A skipped server's location is printed without secrets: a URL shows only its scheme,
-host, port and path (no `user:password@`, query string or fragment), a whole command line
+A skipped server's location is printed without secrets: every URL frisk prints from a
+config (text, `--json`, `--sarif`, `-q`, `frisk verify`, debug lines) shows only its scheme,
+host and port, plus `/…` when anything followed the host (`https://mcp.example.com/…`): no
+path, parameters such as `;jsessionid=`, query string, fragment or `user:password@`, since
+some providers put the access key in the path. A whole command line
 pasted into `command` shows only its program (`npx …`), and env values and headers are
 never read. A URL whose host part cannot be told apart from its password
-(an unencoded `#`, `?` or `/` in the password, a port that is not a number, or an `@` after
-the host) is shown as `<unparsable URL>`. In the text report (and `frisk verify`'s), control
+(an unencoded `#`, `?` or `/` in the password, a port that is not a number, an `@` after
+the host, or anything but a host name or address before the path) is shown as
+`<unparsable URL>`. In the text report (and `frisk verify`'s), control
 characters and the hidden Unicode frisk reports, in a server name, a cached package's
 version or dependencies, a location, a finding path, a finding's excerpt (the scanned line
 itself), the target names and error messages, are shown as escapes (`\x1b`, `\u202e`), so

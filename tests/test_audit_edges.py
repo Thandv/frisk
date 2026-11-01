@@ -108,12 +108,13 @@ class OwnerShapedHomeTest(HomeCase):
                 f"  [PASS ] weather                package-cached  npm package acme-weather 1.4.2 from local cache "
                 f"{cache}; 1 dependency not scanned: zod",
                 "  [SKIP ] search                 remote  remote HTTP/SSE server — behavior not statically verifiable",
-                "           → https://search.example.invalid/mcp",
+                # FR-E4 owner decision (N3): a URL shows its host only (was: its path too)
+                "           → https://search.example.invalid/…",
                 "  [SKIP ] fetch                  package  not in local cache; frisk does not download",
                 "           → acme-fetch",
                 "  [PASS ] db (~/work/app)        local  local source via node",
                 "  [SKIP ] notes (~/work/app)     remote  remote HTTP/SSE server — behavior not statically verifiable",
-                "           → https://notes.example.invalid/sse",
+                "           → https://notes.example.invalid/…",
             ]),
             "  3 of 6 servers not scanned",
         ])

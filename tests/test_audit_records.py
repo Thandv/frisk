@@ -97,7 +97,8 @@ class AuditTextTest(unittest.TestCase):
             "",
             "  [PASS ] ok                     local  local source via node",
             "  [SKIP ] far                    remote  remote server",
-            "           → " + REMOTE,
+            # FR-E4 owner decision (N3): a URL shows its host only (was: its path too)
+            "           → https://mcp.example.invalid/…",
             "",
             "  1 of 2 servers not scanned",  # FR-E4 t6: the summary line
         ]))

@@ -15,11 +15,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from frisk import report
+from _home import fake_home
+from frisk import pin, report
 from frisk.cli import main
 from frisk.engine import ScanResult
 from frisk.report import AuditRecord, audit_text
-from frisk.sources import ServerRef, display_ref
+from frisk.sources import ServerRef, display_ref, display_url
 
 CANARY = "c4n" + "ary-" + "51f0" + "e2d7"
 
@@ -36,13 +37,15 @@ def ref(kind: str, value: str) -> ServerRef:
 
 
 class DisplayRefTest(unittest.TestCase):
-    def test_url_keeps_scheme_host_port_and_path(self) -> None:
+    def test_url_keeps_scheme_host_and_port_only(self) -> None:
+        # FR-E4 owner decision (N3): no path either (was: scheme, host, port and path).
         url = "https://user:" + CANARY + "@h.example.invalid:8443/a/b;p?token=" + CANARY + "#" + CANARY
-        self.assertEqual(display_ref(ref("remote", url)), "https://h.example.invalid:8443/a/b;p")
+        self.assertEqual(display_ref(ref("remote", url)), "https://h.example.invalid:8443/…")
 
-    def test_plain_url_is_unchanged(self) -> None:
-        self.assertEqual(display_ref(ref("remote", "https://mcp.example.invalid/sse")),
-                         "https://mcp.example.invalid/sse")
+    def test_a_url_with_nothing_after_its_host_is_shown_whole(self) -> None:
+        for url in ("https://mcp.example.invalid", "https://mcp.example.invalid/"):
+            with self.subTest(url=url):
+                self.assertEqual(display_ref(ref("remote", url)), "https://mcp.example.invalid")
 
     def test_unparsable_remote_ref_is_not_shown(self) -> None:
         for value in ("http://[::1/sse?token=" + CANARY, "mcp.example.invalid/sse?token=" + CANARY,
@@ -52,7 +55,8 @@ class DisplayRefTest(unittest.TestCase):
 
     def test_a_package_given_as_a_url_is_redacted_too(self) -> None:
         spec = "https://u:" + CANARY + "@registry.example.invalid/pkg.tgz?sig=" + CANARY
-        self.assertEqual(display_ref(ref("package", spec)), "https://registry.example.invalid/pkg.tgz")
+        # FR-E4 owner decision (N3): a URL shows its host only (was: its path too)
+        self.assertEqual(display_ref(ref("package", spec)), "https://registry.example.invalid/…")
 
     def test_paths_commands_and_package_names_are_unchanged(self) -> None:
         for kind, value in (("unknown", "/nonexistent.invalid/bin/srv"), ("package", "@acme/weather-mcp@1.2.3"),
@@ -90,8 +94,9 @@ class AuditOutputTest(unittest.TestCase):
     def test_text_output_has_no_canary_and_keeps_scheme_host_path(self) -> None:
         out = run(["--mcp-config", str(self.cfg)])
         self.assertNotIn(CANARY, out)
-        for shown in ("https://q.example.invalid/sse", "https://u.example.invalid/mcp", "https://f.example.invalid/mcp",
-                      "https://h.example.invalid/mcp", "/nonexistent.invalid/bin/srv", "https://r.example.invalid/p.tgz"):
+        # FR-E4 owner decision (N3): URLs show their host only (was: their path too).
+        for shown in ("https://q.example.invalid/…", "https://u.example.invalid/…", "https://f.example.invalid/…",
+                      "https://h.example.invalid/…", "/nonexistent.invalid/bin/srv", "https://r.example.invalid/…"):
             with self.subTest(shown=shown):
                 self.assertIn("→ " + shown + "\n", out)
 
@@ -110,8 +115,8 @@ class UserinfoDelimiterTest(unittest.TestCase):
         "query": ("https://user:" + CANARY + "?x@query.example.invalid/mcp", "<unparsable URL>"),
         "slash": ("https://user:" + CANARY + "/x@slash.example.invalid/mcp", "<unparsable URL>"),
         "bare-token-slash": ("https://" + CANARY + "/x@token.example.invalid/mcp", "<unparsable URL>"),
-        "pct-at": ("https://user%40corp:" + CANARY + "@pct.example.invalid/mcp", "https://pct.example.invalid/mcp"),
-        "ipv6": ("https://user:" + CANARY + "@[::1]:8443/sse?t=" + CANARY, "https://[::1]:8443/sse"),
+        "pct-at": ("https://user%40corp:" + CANARY + "@pct.example.invalid/mcp", "https://pct.example.invalid/…"),
+        "ipv6": ("https://user:" + CANARY + "@[::1]:8443/sse?t=" + CANARY, "https://[::1]:8443/…"),
         "ipv6-hash": ("https://user:" + CANARY + "#x@[::1]/sse", "<unparsable URL>"),
     }
 
@@ -132,8 +137,8 @@ class UserinfoDelimiterTest(unittest.TestCase):
             with self.subTest(flags=flags):
                 self.assertNotIn(CANARY, run([*flags, "--mcp-config", str(self.cfg)]))
         text = run(["--mcp-config", str(self.cfg)])
-        self.assertIn("→ https://[::1]:8443/sse\n", text)
-        self.assertIn("→ https://pct.example.invalid/mcp\n", text)
+        self.assertIn("→ https://[::1]:8443/…\n", text)
+        self.assertIn("→ https://pct.example.invalid/…\n", text)
         self.assertEqual(text.count("→ <unparsable URL>\n"), 5)
 
     def test_other_forms_that_hide_the_host_are_unparsable(self) -> None:
@@ -141,6 +146,85 @@ class UserinfoDelimiterTest(unittest.TestCase):
                     "https://host.example.invalid/@scope/pkg"):  # an '@' after the host is ambiguous: hidden
             with self.subTest(url=url):
                 self.assertEqual(display_ref(ref("remote", url)), "<unparsable URL>")
+
+
+class HostOnlyTest(unittest.TestCase):
+    """FR-E4 owner decision (N3): every URL frisk prints from a config is scheme://host[:port]
+    plus '/…'; no path, parameters, query, fragment or credentials, in any output channel."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        fake_home(self)
+        script = self.root / "srv" / "server.py"
+        script.parent.mkdir()
+        script.write_text('print("hi")\n', encoding="utf-8")
+        self.cfg = self.root / "mcp.json"
+        self.servers = {
+            "path-token": {"url": "https://mcp.example.invalid/v1/" + CANARY + "/sse"},
+            "jsessionid": {"url": "https://mcp.example.invalid/sse;jsessionid=" + CANARY},
+            "host-param": {"url": "https://mcp.example.invalid;jsessionid=" + CANARY + "/sse"},
+            "port-path": {"serverUrl": "https://mcp.example.invalid:8443/" + CANARY},
+            "pkg-url": {"command": "npx", "args": ["-y", "https://r.example.invalid/" + CANARY + "/p.tgz"]},
+            "beside": {"command": "python3", "args": [str(script)], "url": "https://b.example.invalid/" + CANARY},
+        }
+        self.cfg.write_text(json.dumps({"mcpServers": self.servers}), encoding="utf-8")
+        self.lockfile = str(self.root / "lock.json")
+
+    def outputs(self, argv: list[str]) -> tuple[str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, {"FRISK_DEBUG": "1"}), mock.patch("frisk.report._USE_COLOR", False), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            main(argv)
+        return out.getvalue(), err.getvalue()
+
+    def test_the_forms(self) -> None:
+        for url, shown in (
+            ("https://mcp.example.invalid/v1/" + CANARY + "/sse", "https://mcp.example.invalid/…"),
+            ("https://mcp.example.invalid/sse;jsessionid=" + CANARY, "https://mcp.example.invalid/…"),
+            ("https://mcp.example.invalid?k=" + CANARY, "https://mcp.example.invalid/…"),
+            ("https://mcp.example.invalid#" + CANARY, "https://mcp.example.invalid/…"),
+            ("HTTPS://Mcp.Example.invalid:8443/x", "https://Mcp.Example.invalid:8443/…"),
+            ("https://xn--mnchen-3ya.example.invalid/x", "https://xn--mnchen-3ya.example.invalid/…"),
+            ("https://m\u00fcnchen.example.invalid/x", "https://m\u00fcnchen.example.invalid/…"),
+            ("https://[::1]:8443/" + CANARY, "https://[::1]:8443/…"),
+            ("https://mcp.example.invalid;jsessionid=" + CANARY + "/sse", "<unparsable URL>"),
+            ("https://mcp.example.invalid%3B" + CANARY + "/sse", "<unparsable URL>"),
+        ):
+            with self.subTest(url=url.replace(CANARY, "<canary>")):
+                self.assertEqual(display_url(url), shown)
+
+    def test_no_channel_prints_a_path_or_parameter(self) -> None:
+        for argv in ([], ["--json"], ["--sarif"], ["-q"]):
+            with self.subTest(argv=argv):
+                out, err = self.outputs([*argv, "--mcp-config", str(self.cfg)])
+                self.assertNotIn(CANARY, out + err)
+        text = self.outputs(["--mcp-config", str(self.cfg)])[0]
+        for shown in ("https://mcp.example.invalid/…", "https://mcp.example.invalid:8443/…",
+                      "https://r.example.invalid/…", "https://b.example.invalid/…", "<unparsable URL>"):
+            self.assertIn(shown, text)
+
+    def test_the_lock_hashes_the_same_url_as_before(self) -> None:
+        # The launch digest keeps the path but no credentials, query or fragment, exactly the
+        # string earlier builds hashed, so lockfiles written before host-only display verify.
+        import hashlib
+        from frisk.sources import _launch_digest
+        shape = {"command": None, "args": None, "cwd": None, "type": None, "url": "https://h.example.invalid/v1/sse",
+                 "env": "NoneType", "headers": "NoneType"}
+        expected = hashlib.sha256(json.dumps(shape, sort_keys=True).encode("utf-8")).hexdigest()
+        self.assertEqual(_launch_digest({"url": "https://u:p@h.example.invalid/v1/sse?k=1#f"}), expected)
+
+    def test_lock_and_verify_print_no_path_and_still_pin_it(self) -> None:
+        out, err = self.outputs(["lock", "--mcp-config", str(self.cfg), "--lockfile", self.lockfile])
+        self.assertNotIn(CANARY, out + err + Path(self.lockfile).read_text(encoding="utf-8"))
+        moved = dict(self.servers, **{"path-token": {"url": "https://mcp.example.invalid/v2/" + CANARY + "/sse"}})
+        self.cfg.write_text(json.dumps({"mcpServers": moved}), encoding="utf-8")
+        for argv in (["verify"], ["verify", "--json"]):
+            out, err = self.outputs([*argv, "--lockfile", self.lockfile])
+            self.assertNotIn(CANARY, out + err)
+        (row,) = [r for r in pin.verify_lock(pin.read_lock(self.lockfile)) if r["status"] != "ok"]
+        self.assertEqual((row["entry"], row["launch"]), (f"{self.cfg}::path-token", "changed"))
 
 
 if __name__ == "__main__":

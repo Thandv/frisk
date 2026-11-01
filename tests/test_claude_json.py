@@ -153,7 +153,8 @@ class ProjectServersTest(ClaudeJsonCase):
         _, out, _ = run([str(self.cfg)])
         self.assertIn("  [PASS ] db (~/work/b)          local  local source via python3\n", out)
         self.assertIn("  [SKIP ] db (~/work/a)          remote  ", out)
-        self.assertIn("           → https://db.example.invalid/mcp\n", out)
+        # FR-E4 owner decision (N3): a URL shows its host only (was: its path too)
+        self.assertIn("           → https://db.example.invalid/…\n", out)
         self.assertIn("           → ~/bin/missing\n", out)  # a path under HOME is shown with ~
         server_lines = out.split("\n\n")[1]
         self.assertIn(f"  [SKIP ] tool ({self.outside}) remote", server_lines)  # outside HOME: as is

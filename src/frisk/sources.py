@@ -21,7 +21,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from . import pkgcache
 from .debug import log as _root_log, ms_since
@@ -134,11 +134,9 @@ def display_ref(s: ServerRef) -> str:
     shows a ref only through this function, and so must any later output of server
     locations (project labels, cache paths; both are built with the same home_label).
 
-    A URL (any remote ref, or a ref containing '://') keeps its scheme, host, port and
-    path; userinfo, query and fragment, where tokens live, are dropped. A URL without a
-    scheme and host, with a port that is not a number, or with an '@' outside its host part
-    shows as '<unparsable URL>': there an unencoded '#', '?' or '/' in a password has cut
-    the host part short. A server frisk does not scan whose ref holds whitespace (a whole
+    A URL (any remote ref, or a ref containing '://') is shown by its scheme, host and port
+    only (display_url): its path, parameters, query, fragment and credentials, where access
+    keys live, are never printed. A server frisk does not scan whose ref holds whitespace (a whole
     command line pasted into 'command', whose arguments may carry a token) shows only its
     first word and ' …'. Any other ref is shown with $HOME as ~. Env values and headers are
     never read into a ServerRef, so they cannot reach the output.
@@ -159,16 +157,30 @@ def home_label(path: str) -> str:
 
 
 def display_url(url: str) -> str:
-    """A URL as printed: the rules display_ref states for URL refs."""
+    """A URL as every output prints it: 'scheme://host[:port]', plus '/…' when a path,
+    parameters (';jsessionid=…'), query or fragment followed, none of which is shown (some
+    providers put the access key in the path). '<unparsable URL>' when the host part cannot
+    be told from a password, or holds anything but a host name or address."""
+    parts = _split_url(url)
+    host = parts.netloc.rpartition("@")[2] if parts is not None else ""
+    if parts is None or not all(ch.isalnum() or ch in "-._:[]" for ch in host):
+        return "<unparsable URL>"
+    elided = parts.path.strip("/") or parts.query or parts.fragment
+    return f"{parts.scheme}://{host}" + ("/…" if elided else "")
+
+
+def _split_url(url: str) -> SplitResult | None:
+    """The URL's parts, or None when its host part cannot be told from a password: no
+    scheme or host, a port that is not a number, or an '@' outside the host part (an
+    unencoded '#', '?' or '/' in a password has cut the host part short)."""
     try:
         parts = urlsplit(url)
         _ = parts.port  # raises ValueError for a port that is not a number, such as 'user:pass' cut short
     except ValueError:  # also an unclosed IPv6 bracket
-        return "<unparsable URL>"
-    host = parts.netloc.rpartition("@")[2]
-    if not parts.scheme or not host or ("@" in url and "@" not in parts.netloc):
-        return "<unparsable URL>"
-    return f"{parts.scheme}://{host}{parts.path}"
+        return None
+    if not parts.scheme or not parts.netloc.rpartition("@")[2] or ("@" in url and "@" not in parts.netloc):
+        return None
+    return parts
 
 
 def _classify(name: str, spec: object, project: Path | None = None) -> ServerRef:
@@ -455,15 +467,15 @@ def _code_env(spec: object) -> dict[str, str]:
 
 def _launch_digest(spec: object) -> str:
     """sha256 of how a server is started: command, args, cwd, type, its URL without
-    credentials, query or fragment, and the NAMES of its env vars and headers. Their values
-    are left out, so rotating a secret is not a change (a URL frisk cannot split is hashed
-    whole)."""
+    credentials, query or fragment (the path counts: a changed endpoint is a change), and the
+    NAMES of its env vars and headers. Their values are left out, so rotating a secret is not
+    a change (a URL frisk cannot split is hashed whole)."""
     shape: object = spec
     if isinstance(spec, dict):
         url = spec.get("url") or spec.get("serverUrl")
-        shown = display_url(url) if isinstance(url, str) else url
+        parts = _split_url(url) if isinstance(url, str) else None
         launch = {key: spec.get(key) for key in ("command", "args", "cwd", "type")}
-        launch["url"] = url if shown == "<unparsable URL>" else shown
+        launch["url"] = f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}" if parts else url
         for key in ("env", "headers"):
             value = spec.get(key)
             launch[key] = sorted(value) if isinstance(value, dict) else type(value).__name__
