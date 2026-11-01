@@ -225,10 +225,19 @@ def scan_file(path: Path, root: Path | None = None) -> ScanResult:
     if "\0" in text:
         # NUL bytes make two readings: as written (a renderer shows NUL as U+FFFD, so it
         # cannot close a fence) and with NUL dropped (shells drop it, so 'c<NUL>url' runs as
-        # 'curl'). A finding from either reading counts, once.
-        seen = {(f.line, f.rule, f.description) for f in findings}
-        findings += [f for f in _scan_reading(path, text.replace("\0", ""), rel, failed)
-                     if (f.line, f.rule, f.description) not in seen]
+        # 'curl'). A finding from either reading counts, once, at the higher of its two
+        # severities: one reading may see as capped inline code what the other sees as a
+        # code block.
+        first: dict[tuple[int, str, str], list[Finding]] = {}
+        for f in findings:
+            first.setdefault((f.line, f.rule, f.description), []).append(f)
+        for f in _scan_reading(path, text.replace("\0", ""), rel, failed):
+            same = first.get((f.line, f.rule, f.description))
+            if same is None:
+                findings.append(f)
+                continue
+            for g in same:
+                g.severity = max(g.severity, f.severity, key=SEVERITY_ORDER.__getitem__)
     for detail in failed:
         notes.extend(_not_scanned(rel, "surface_error", detail, "coverage.surface_error",
                                   f"scan surface failed on this file ({detail})"))
