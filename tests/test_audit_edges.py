@@ -270,9 +270,8 @@ class DefectTest(HomeCase):
         self.assertNotIn(chr(27), out)
         self.assertNotIn("\r", out)
 
-    # DEFECT-4: a config named both as a target and with --mcp-config is audited twice:
-    #   two audit blocks, and every finding and warning counted twice.
-    @unittest.expectedFailure
+    # Fixed by "FR-E4 fix: DEFECT-4" (was DEFECT-4: a config named both as a target and with
+    #   --mcp-config was audited twice, every finding and warning counted twice).
     def test_a_config_named_twice_is_audited_once(self) -> None:
         cfg = self.config({"mcpServers": {"a": {"url": "https://a.example.invalid/mcp"}}})
         out = run([cfg, "--mcp-config", cfg])[1]

@@ -417,6 +417,19 @@ def _object(obj: dict, key: str, where: str | Path) -> dict:
     return value
 
 
+def each_config_once(paths: list[str]) -> list[str]:
+    """MCP config paths in the order given, each file once: spellings that resolve to the
+    same file (relative, absolute, through a symlink) count as one."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for p in paths:
+        key = os.path.realpath(p)
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+    return unique
+
+
 def looks_like_mcp_config(path: str | Path) -> bool:
     p = Path(path)
     if p.name in MCP_CONFIG_NAMES:

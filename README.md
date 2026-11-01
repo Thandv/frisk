@@ -87,7 +87,9 @@ Every readable file under the target is scanned; scripts, build files and `packa
 scripts get the code rules too (see [What it detects](#what-it-detects)). A target that is
 an MCP config file (`.claude.json`, `.mcp.json`, `mcp.json`, `claude_desktop_config.json`,
 or any `.json` file with a top-level `mcpServers`) is audited like `--mcp-config`
-([below](#audit-everything-youve-already-installed)) instead of being text-scanned.
+([below](#audit-everything-youve-already-installed)) instead of being text-scanned. Each
+config file is audited once, however often and however it is named (compared by resolved
+path).
 
 ### What was not scanned (coverage)
 

@@ -108,6 +108,22 @@ class AuditedAsConfigTest(ClaudeJsonCase):
                 self.assertIn("inject.ignore_prev", run(["--json", str(path)])[1])
                 self.assertEqual(code, 1)
 
+    def test_a_config_named_twice_is_audited_once(self) -> None:
+        # FR-E4 fix DEFECT-4: compared by resolved path; the label still lists what was typed.
+        link = self.tmp / "link.json"
+        link.symlink_to(self.cfg)
+        once = json.loads(run(["--json", str(self.cfg)])[1])
+        for argv in ([str(self.cfg), "--mcp-config", str(self.cfg)],
+                     ["--mcp-config", str(self.cfg), "--mcp-config", str(self.cfg)],
+                     [str(self.cfg), str(link)],
+                     ["--mcp-config", str(link), "--mcp-config", str(self.home / "work" / ".." / ".claude.json")]):
+            with self.subTest(argv=argv):
+                self.assertEqual(run(argv)[1].count("MCP config audit: "), 1)
+                doc = json.loads(run(["--json", *argv])[1])
+                for key in ("counts", "findings", "servers", "coverage"):
+                    self.assertEqual(doc[key], once[key], key)
+                self.assertEqual(doc["target"], ", ".join(a for a in argv if a != "--mcp-config"))
+
 
 class ProjectServersTest(ClaudeJsonCase):
     def test_project_servers_have_distinct_home_relative_labels(self) -> None:
