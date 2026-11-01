@@ -208,8 +208,10 @@ How each server's source is found, the way the client launches it:
   own directory). With no script argument, the first existing path argument is scanned.
 - Any other command given as a path is scanned as that file; its arguments are data.
 
-Relative paths resolve against the server's `cwd` in the config, never against the
-directory you run frisk from; with no absolute `cwd`, a relative script is `unknown`.
+Relative paths resolve against the server's `cwd` in the config or, for a project server in
+a `.claude.json` without one, against its project directory (Claude Code starts it there);
+never against the directory you run frisk from. A top-level server with a relative script
+and no absolute `cwd` is `unknown`.
 `$HOME`, or a directory above it, is never scanned as a server's source.
 
 A skipped server's location is printed without secrets: a URL shows only its scheme,

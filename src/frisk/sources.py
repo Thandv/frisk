@@ -149,10 +149,11 @@ def _safe_url(url: str) -> str:
     return f"{parts.scheme}://{host}{parts.path}"
 
 
-def _classify(name: str, spec: object) -> ServerRef:
-    """How the server really launches. Paths resolve against the spec's absolute 'cwd',
-    never against frisk's own working directory. An entry frisk cannot read is 'invalid'
-    and affects no other server."""
+def _classify(name: str, spec: object, project: Path | None = None) -> ServerRef:
+    """How the server really launches. Paths resolve against the spec's 'cwd', else the
+    directory of the .claude.json project the server belongs to (Claude Code starts it
+    there), never against frisk's own working directory. An entry frisk cannot read is
+    'invalid' and affects no other server."""
     problem = _invalid(spec)
     if problem or not isinstance(spec, dict):  # isinstance only narrows the type
         return ServerRef(name, "invalid", "?", scannable=False, detail=problem)
@@ -162,7 +163,7 @@ def _classify(name: str, spec: object) -> ServerRef:
                          detail="remote HTTP/SSE server — behavior not statically verifiable")
     cmd = (spec.get("command") or "").strip()
     args = [str(a) for a in spec.get("args") or []]
-    cwd = _cwd(spec)
+    cwd = _cwd(spec, project)
     base = os.path.basename(cmd)
     if base == "uv":
         return _classify_uv(name, args, cwd)
@@ -307,13 +308,13 @@ def _leading_options(args: list[str], value_flags: set[str]) -> tuple[dict[str, 
     return opts, args[i:]
 
 
-def _cwd(spec: dict) -> Path | None:
-    """The spec's working directory if it is absolute (after ~); a relative one is unusable."""
+def _cwd(spec: dict, project: Path | None) -> Path | None:
+    """The directory the server starts in: the spec's 'cwd' (after ~; a relative one is
+    taken from the project directory), else the project directory; None when unknown."""
     cwd = spec.get("cwd")
     if not isinstance(cwd, str) or not cwd:
-        return None
-    path = Path(cwd).expanduser()
-    return Path(os.path.normpath(path)) if path.is_absolute() else None
+        return project
+    return _resolve(cwd, project)
 
 
 def _resolve(arg: str, cwd: Path | None) -> Path | None:
@@ -398,7 +399,9 @@ def parse_mcp_config(path: str | Path) -> list[ServerRef]:
         label = home_label(key)
         if not isinstance(project, dict):
             raise ValueError(f"{path}: project {label} is not a JSON object")
-        refs.extend(_classify(f"{name} ({label})", spec)
+        directory = Path(key).expanduser()
+        base = Path(os.path.normpath(directory)) if directory.is_absolute() else None
+        refs.extend(_classify(f"{name} ({label})", spec, base)
                     for name, spec in _servers(project, f"{path}: project {label}").items())
     return refs
 
