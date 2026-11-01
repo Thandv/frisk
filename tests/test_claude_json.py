@@ -124,6 +124,22 @@ class AuditedAsConfigTest(ClaudeJsonCase):
                     self.assertEqual(doc[key], once[key], key)
                 self.assertEqual(doc["target"], ", ".join(a for a in argv if a != "--mcp-config"))
 
+    def test_a_config_inside_a_directory_target_is_still_audited(self) -> None:
+        # FR-E4 fix DEFECT-5: the directory is scanned as files and the config is audited.
+        proj = self.tmp / "proj"
+        proj.mkdir()
+        (proj / "notes.md").write_text(OVERRIDE + "\n", encoding="utf-8")
+        cfg = proj / ".mcp.json"
+        cfg.write_text(json.dumps({"mcpServers": {"far": {"url": "https://x.example.invalid/mcp"}}}), encoding="utf-8")
+        for argv in ([str(proj), str(cfg)], [str(cfg), str(proj)]):
+            with self.subTest(argv=argv):
+                out = run(argv)[1]
+                self.assertEqual(out.count(f"MCP config audit: {cfg}\n"), 1)
+                doc = json.loads(run(["--json", *argv])[1])
+                self.assertEqual(sorted(f["rule"] for f in doc["findings"]),
+                                 ["coverage.unscanned", "inject.ignore_prev"])
+                self.assertEqual([s["name"] for s in doc["servers"]], ["far"])
+
 
 class ProjectServersTest(ClaudeJsonCase):
     def test_project_servers_have_distinct_home_relative_labels(self) -> None:

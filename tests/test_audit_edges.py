@@ -277,10 +277,9 @@ class DefectTest(HomeCase):
         out = run([cfg, "--mcp-config", cfg])[1]
         self.assertEqual(out.count("MCP config audit: "), 1)
 
-    # DEFECT-5: a config file named as a target inside another target directory is dropped
-    #   by the duplicate-target rule (the directory's scan covers it), so it is text-scanned
-    #   as part of the directory and never audited.
-    @unittest.expectedFailure
+    # Fixed by "FR-E4 fix: DEFECT-5" (was DEFECT-5: a config file named as a target inside
+    #   another target directory was dropped by the duplicate-target rule, so it was
+    #   text-scanned as part of the directory and never audited).
     def test_a_config_target_inside_a_directory_target_is_audited(self) -> None:
         (self.tmp / "proj").mkdir()
         cfg = self.config({"mcpServers": {"a": {"url": "https://a.example.invalid/mcp"}}}, "proj/.mcp.json")

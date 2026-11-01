@@ -89,7 +89,8 @@ an MCP config file (`.claude.json`, `.mcp.json`, `mcp.json`, `claude_desktop_con
 or any `.json` file with a top-level `mcpServers`) is audited like `--mcp-config`
 ([below](#audit-everything-youve-already-installed)) instead of being text-scanned. Each
 config file is audited once, however often and however it is named (compared by resolved
-path).
+path), and it is audited even when a directory you also name holds it (that directory is
+scanned as files, as always).
 
 ### What was not scanned (coverage)
 

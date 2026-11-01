@@ -417,9 +417,20 @@ def _object(obj: dict, key: str, where: str | Path) -> dict:
     return value
 
 
-def each_config_once(paths: list[str]) -> list[str]:
-    """MCP config paths in the order given, each file once: spellings that resolve to the
-    same file (relative, absolute, through a symlink) count as one."""
+def split_configs(targets: list[str], configs: list[str]) -> tuple[list[str], list[str]]:
+    """(the targets that are not MCP config files, every MCP config to audit per server).
+
+    A target that is an MCP config file joins the configs, ahead of the --mcp-config ones,
+    so it is audited even when another target directory also holds it (that directory's
+    scan reads it as a plain file). Each config file is kept once.
+    """
+    named = [t for t in targets if os.path.isfile(t) and looks_like_mcp_config(t)]
+    return [t for t in targets if t not in named], _each_config_once(named + configs)
+
+
+def _each_config_once(paths: list[str]) -> list[str]:
+    """Config paths in the order given, each file once: spellings that resolve to the same
+    file (relative, absolute, through a symlink) count as one."""
     seen: set[str] = set()
     unique: list[str] = []
     for p in paths:

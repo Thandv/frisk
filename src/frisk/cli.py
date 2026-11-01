@@ -9,8 +9,7 @@ from pathlib import Path
 from . import __version__
 from .engine import ScanResult, coverage_warning, display_prefix, reroot, scan_path, scan_text, verdict, fails
 from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
-from .sources import (display_ref, each_config_once, is_git_url, looks_like_mcp_config, materialize,
-                      parse_mcp_config)
+from .sources import display_ref, is_git_url, materialize, parse_mcp_config, split_configs
 from . import pin, proxy
 from .debug import setup_debug
 
@@ -119,13 +118,10 @@ def _cmd_scan(argv: list[str]) -> int:
     try:
         if args.text is not None:
             result.extend(scan_text(args.text, "<text>"))
-        configs: list[str] = []
-        for t in _distinct(args.targets):
-            if os.path.isfile(t) and looks_like_mcp_config(t):
-                configs.append(t)  # audited, never text-scanned: its env values must not show
-            else:
-                result.extend(_scan_target(t))
-        configs = each_config_once(configs + args.mcp_config)
+        # A config named as a target is audited, never text-scanned: its env values must not show.
+        targets, configs = split_configs(args.targets, args.mcp_config)
+        for t in _distinct(targets):
+            result.extend(_scan_target(t))
         for cfg in configs:
             records = _audit_config(cfg)
             for rec in records:
