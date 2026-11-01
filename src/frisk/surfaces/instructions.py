@@ -10,9 +10,11 @@ from . import Span
 _NAMES = {"skill.md", "claude.md", "agents.md", ".cursorrules"}
 
 
-def extract(path: Path, text: str) -> list[Span]:
+def is_instruction_file(path: Path) -> bool:
     name, ext = path.name.lower(), path.suffix.lower()
-    if (name in _NAMES or ext == ".mdc"
-            or (ext == ".md" and path.parent.name.lower() in ("agents", "commands"))):
-        return [Span(0, len(text), "instruction")]
-    return []
+    return (name in _NAMES or ext == ".mdc"
+            or (ext == ".md" and path.parent.name.lower() in ("agents", "commands")))
+
+
+def extract(path: Path, text: str) -> list[Span]:
+    return [Span(0, len(text), "instruction")] if is_instruction_file(path) else []

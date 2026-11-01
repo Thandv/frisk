@@ -95,7 +95,8 @@ def _excerpt(text: str, idx: int, span: int = 80) -> str:
     return snippet.strip()[:120]
 
 
-_RULES_FOR_KIND = {"code": CODE_RULES, "instruction": INSTRUCTION_RULES}
+_RULES_FOR_KIND = {"code": CODE_RULES, "md_inline_code": CODE_RULES, "instruction": INSTRUCTION_RULES}
+_WARN_CAPPED_KINDS = {"md_inline_code"}  # a block finding from these spans reports as warn
 
 
 def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Finding],
@@ -118,7 +119,10 @@ def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Fin
         out.append(Finding(rel, line, rid, cat, sev, desc, excerpt,
                            source_line=text[starts[line - 1]:end]))
 
+    capped = span.kind in _WARN_CAPPED_KINDS
     for rid, cat, sev, rx, desc in _RULES_FOR_KIND.get(span.kind, TEXT_RULES):
+        if capped and sev == "block":
+            sev = "warn"
         for m in rx.finditer(seg):
             add(m.start(), rid, cat, sev, desc, _excerpt(seg, m.start()))
     if span.kind not in _RULES_FOR_KIND:  # every text kind
@@ -131,7 +135,8 @@ def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
     starts = _line_starts(text)
     out: list[Finding] = []
     seen: set[tuple[int, str]] = set()
-    for span in spans:
+    # Capped spans go last, so a match also found by an uncapped span keeps its severity.
+    for span in sorted(spans, key=lambda s: s.kind in _WARN_CAPPED_KINDS):
         _scan_span(text, span, starts, rel, out, seen)
     return sort_findings(out)
 

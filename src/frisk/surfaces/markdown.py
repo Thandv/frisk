@@ -3,7 +3,10 @@ which renderers hide, are marked as their own text span (kind md_html_comment).
 
 Code forms: fenced blocks (``` or ~~~, any length, unclosed ones run to the end of the
 file; see fences.fence_blocks), indented code blocks (4 spaces or a tab after a blank
-line, outside a list) and inline code spans. The whole file is text-scanned by plain.
+line, outside a list) and inline code spans. Inline code in an ordinary document (not an
+agent-instruction file, see instructions.py) is its own kind, md_inline_code: code rules
+run on it but cap at warn, so a README that mentions `eval()` does not block. The whole
+file is text-scanned by plain.
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ from pathlib import Path
 from ..rules import MARKDOWN_EXTS, is_code
 from . import Span
 from .fences import fence_blocks
+from .instructions import is_instruction_file
 
 _COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)  # an unclosed comment hides the rest
 _LINE = re.compile(r"[^\n]*\n|[^\n]+")
@@ -92,6 +96,7 @@ def extract(path: Path, text: str) -> list[Span]:
     spans += [Span(s, e, "md_html_comment") for s, e in comments]
     indented = [blk for a, b in _gaps(hidden, len(text)) for blk in _indented_blocks(text, a, b)]
     spans += [Span(s, e, "code") for s, e in indented]
+    inline = "code" if is_instruction_file(path) else "md_inline_code"
     for a, b in _gaps(sorted(hidden + indented), len(text)):
-        spans += [Span(s, e, "code") for s, e in _inline_code(text, a, b)]
+        spans += [Span(s, e, inline) for s, e in _inline_code(text, a, b)]
     return spans

@@ -53,7 +53,8 @@ Code rules (RCE, exfiltration, destructive) run on scripts — by extension (`.p
 `.js`/`.ts`/`.tsx`/`.jsx`, `.ps1`, `.vbs`, `.applescript` and more) or by a `#!` first line,
 whatever the name — and on the shell commands inside other files: fenced code blocks
 (` ``` ` or `~~~`, unclosed ones to the end of the file), markdown indented code blocks and
-inline code,
+inline code (in an ordinary document such as a README, inline code at most warns; it blocks
+in agent-instruction files, and code blocks block everywhere),
 Makefile recipes, Dockerfile `RUN` instructions, justfile recipes and `package.json`
 `scripts`. Text rules (injection, tool poisoning, hidden Unicode) run on every file,
 including markdown HTML comments that a renderer hides.
