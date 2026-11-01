@@ -9,8 +9,8 @@ from pathlib import Path
 from . import __version__
 from .engine import ScanResult, coverage_warning, display_prefix, reroot, scan_path, scan_text, verdict, fails
 from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
-from .sources import (SERVER_KEYS, display_ref, display_url, home_label, is_git_url, materialize, parse_mcp_config,
-                      split_configs)
+from .sources import (SERVER_KEYS, display_ref, display_target, display_url, home_label, is_git_url, materialize,
+                      parse_mcp_config, split_configs)
 from . import pin, proxy
 from .debug import setup_debug
 
@@ -121,7 +121,7 @@ def _cmd_scan(argv: list[str]) -> int:
     result = ScanResult()
     audits: list[str] = []
     servers: list[AuditRecord] = []
-    label = ", ".join(args.targets + args.mcp_config) or "<text>"
+    label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or "<text>"
     try:
         if args.text is not None:
             result.extend(scan_text(args.text, "<text>"))

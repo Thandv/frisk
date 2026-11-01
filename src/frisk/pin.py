@@ -21,7 +21,8 @@ import os
 from pathlib import Path
 
 from .debug import log as _root_log
-from .sources import ServerRef, looks_like_mcp_config, materialize, parse_mcp_config, split_configs
+from .sources import (ServerRef, display_target, looks_like_mcp_config, materialize, parse_mcp_config,
+                      split_configs)
 
 log = _root_log.getChild("pin")
 
@@ -55,9 +56,15 @@ def fingerprint_path(root: Path) -> dict:
 
 
 def _entry_for_target(target: str) -> dict:
+    """The target's content, pinned under its credential-free form (display_target): a token
+    in a git URL is used for this clone but never stored; verify re-clones the clean URL,
+    and git's own credential helper supplies any auth it needs."""
+    clean = display_target(target)
+    if clean == "<unparsable URL>":
+        raise ValueError("cannot pin a URL whose host part cannot be told from a password")
     with materialize(target) as (root, _):
         fp = fingerprint_path(root)
-    fp.update({"kind": "source", "recompute": {"type": "target", "value": target}})
+    fp.update({"kind": "source", "recompute": {"type": "target", "value": clean}})
     return fp
 
 
@@ -65,7 +72,7 @@ def build_lock(targets: list[str], configs: list[str]) -> dict:
     entries: dict[str, dict] = {}
     targets, configs = split_configs(targets, configs)
     for t in targets:
-        entries[t] = _entry_for_target(t)
+        entries[display_target(t)] = _entry_for_target(t)
     for cfg in configs:
         servers = parse_mcp_config(cfg)
         entries[cfg] = {"kind": "mcp-config", **_server_names(servers),
@@ -156,10 +163,13 @@ def _recompute(entry: dict, parsed: dict) -> dict:
 
 
 def verify_lock(lock: dict) -> list[dict]:
-    """Return a drift report: one record per locked entry with status and changed files."""
+    """Return a drift report: one record per locked entry with status and changed files.
+    Entries are named without credentials, also those an older frisk pinned with a token in
+    a git URL (that stored URL is still what gets cloned, so they keep verifying)."""
     out = []
     parsed: dict = {}  # each MCP config is read once, however many entries pin it
-    for key, old in lock.get("entries", {}).items():
+    for stored, old in lock.get("entries", {}).items():
+        key = display_target(stored)
         try:
             new = _recompute(old, parsed)
         except Exception as e:  # noqa: BLE001

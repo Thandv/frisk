@@ -45,3 +45,16 @@
   (`mcp.servers`), Zed's `context_servers` and a misspelt `mcpservers` are still not read,
   and now say so. The text report also escapes a finding's description, which can now
   carry a file name.
+- **A git URL target never prints or stores its credentials.** A git URL given as a scan
+  target used to be echoed as typed in the verdict line, `-q`, `--json` (`target`), error
+  messages, `frisk-mcp` results and the lockfile, `user:token@` included. It is now shown
+  and pinned without userinfo, query or fragment; scheme, host, port and path stay, so two
+  repositories stay apart in `frisk verify`. An ssh username such as `git@` is kept, a
+  password beside it is not. The clone still uses the URL as given. A failed clone of a URL
+  that carried credentials does not show git's own message, since it could echo the token.
+  `frisk lock` stores the clean URL and `frisk verify` re-clones it: for a private
+  repository, git's credential helper (or an ssh key) supplies the access. A URL whose host
+  part cannot be told from a password is not pinned (exit 2). A lockfile written before
+  this change with a token in a git URL still verifies (it clones the URL it stored) and
+  never prints the token; the next `frisk lock` rewrites it without the token. **If a
+  lockfile holding a token was ever committed, rotate that token.**

@@ -40,6 +40,25 @@ def is_git_url(s: str) -> bool:
                                                             "https://gitlab.com/"))
 
 
+def display_target(target: str) -> str:
+    """A scan target as frisk prints and pins it. A URL loses its userinfo, query and
+    fragment, so a token in it is never shown or stored; scheme, host, port and path stay,
+    so two repositories stay apart. An ssh username (git@) is kept, since ssh needs it and it
+    is no secret, but a password beside it is dropped. A URL whose host part cannot be told
+    from a password is '<unparsable URL>'. Anything else, a local path, is unchanged."""
+    if "://" in target:
+        parts = _split_url(target)
+        if parts is None:
+            return "<unparsable URL>"
+        user, _, host = parts.netloc.rpartition("@")
+        kept = user.split(":", 1)[0] + "@" if parts.scheme == "ssh" and user else ""
+        return f"{parts.scheme}://{kept}{host}{parts.path}"
+    user, at, rest = target.partition("@")
+    if at and ":" in user and ":" in rest and not os.path.exists(target):  # scp-like 'user:password@host:path'
+        return user.split(":", 1)[0] + "@" + rest
+    return target
+
+
 def _normalize_git(url: str) -> str:
     url = url.strip()
     if url.startswith("github.com/"):
@@ -66,6 +85,9 @@ def materialize(target: str):
                 raise
             log.debug("git clone end status=exit rc=%d ms=%d", r.returncode, ms_since(t0))
             if r.returncode != 0:
+                if display_target(target) != target.strip():  # git's message could echo the credential
+                    raise RuntimeError(f"git clone failed with exit code {r.returncode} (git's message is not "
+                                       f"shown: the URL may carry credentials)")
                 raise RuntimeError(f"git clone failed: {r.stderr.strip()[:200]}")
             yield Path(tmp), target
         finally:
@@ -73,7 +95,7 @@ def materialize(target: str):
     else:
         p = Path(target)
         if not p.exists():
-            raise FileNotFoundError(f"not a path or recognizable git URL: {target}")
+            raise FileNotFoundError(f"not a path or recognizable git URL: {display_target(target)}")
         yield p, target
 
 

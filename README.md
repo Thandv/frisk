@@ -92,6 +92,14 @@ config file is audited once, however often and however it is named (compared by 
 path), and it is audited even when a directory you also name holds it (that directory is
 scanned as files, as always).
 
+A git URL target is cloned as you give it, a token in it included, but frisk never prints
+or stores its credentials: the report label (text, `--json`, `-q`), error messages, debug
+lines, `frisk-mcp` results and the lockfile all show it without `user:token@`, query or
+fragment (`https://git.example.com/acme/tool.git`). Scheme, host, port and path stay, so
+two repositories stay apart; an ssh username such as `git@` stays too, a password beside it
+does not. If a clone of such a URL fails, git's own message is not shown, since it could
+echo the token.
+
 ### What was not scanned (coverage)
 
 Every scan reports what it could *not* pattern-match, so a clean verdict never hides
@@ -301,6 +309,12 @@ the package name (`uv run --directory …`, `uvx --python 3.12 …`, `pipx run �
 server that sets one of the code-loading variables above, locked before their values were
 pinned, reports DRIFT once with `~ NODE_OPTIONS changed` (or the variable it sets): lock it
 again.
+
+A git URL is pinned without its credentials, and `frisk verify` re-clones that clean URL:
+for a private repository, git's own credential helper (or an ssh key) supplies the
+access. A lockfile that an older frisk wrote with a token in a git URL still verifies (it
+clones the URL it stored) and never prints the token; the next `frisk lock` rewrites the
+entry without it.
 
 For **continuous** monitoring, commit your `.frisk-lock.json` and drop
 [`examples/continuous-verify.yml`](examples/continuous-verify.yml) into your repo —
