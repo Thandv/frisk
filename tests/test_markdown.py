@@ -69,6 +69,14 @@ class TestCodeForms(TempDir):
             with self.subTest(name):
                 self.assertEqual(self.lines(name, text), [2])
 
+    def test_mid_line_opener_after_inline_code_opens_a_fence(self) -> None:
+        # Main caught these too. The opener had to follow a character other than a backtick
+        # or ~, so inline code (or a ~) just before it left the payload in prose.
+        for head in ("Run `x` ```sh", "Run ``x`` ```sh", "a ~ ```sh"):
+            for name in ("guide.md", "notes.txt", "tool.yaml"):
+                with self.subTest(head=head, name=name):
+                    self.assertEqual(self.lines(name, head + "\n" + INSTALLER + "\n```\n"), [2])
+
     def test_backticks_inside_a_sentence_do_not_open_a_fence(self) -> None:
         text = "Use ``` to start a fence.\n\n```\n" + INSTALLER + "\n```\n"
         self.assertEqual(self.lines("guide.md", text), [4])

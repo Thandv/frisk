@@ -12,9 +12,10 @@ from . import Span
 
 # An opening fence line: three or more backticks or tildes, at any indent (list items
 # indent them), then an info string. A backtick fence's info string has no backtick.
-# Backticks after text on the line ("Run: ```sh") also open a fence when only a bare
-# language tag follows them: an agent reads raw text, not the rendered page.
-_OPEN = re.compile(r"(?:^[ \t]*|(?<=[^\s`~])[ \t]*(?=`{3,}[\w+.-]*$))(`{3,}|~{3,})([^\n]*)$", re.MULTILINE)
+# Backticks after text on the line ("Run: ```sh", also after inline code: "Run `x` ```sh")
+# open a fence when only a bare language tag follows them: an agent reads raw text, not the
+# rendered page.
+_OPEN = re.compile(r"(?:^[ \t]*|(?<=\S)[ \t]*(?=`{3,}[\w+.-]*$))(`{3,}|~{3,})([^\n]*)$", re.MULTILINE)
 
 
 def fence_blocks(text: str) -> list[tuple[int, int, int, int]]:
