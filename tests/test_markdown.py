@@ -79,6 +79,18 @@ class TestCodeForms(TempDir):
                 with self.subTest(head=head, name=name):
                     self.assertEqual(self.lines(name, head + "\n" + INSTALLER + "\n```\n"), [2])
 
+    def test_an_opener_next_to_other_whitespace_opens_a_fence(self) -> None:
+        # Main caught these too: a space or tab after the tag, a no-break space (or another
+        # Unicode space, or a form feed) before the run, a no-break space as the indent.
+        for head in ("Run: ```sh ", "Run: ```sh\t", "Run: ```sh", "Run: ````sh",
+                     "Run:　```sh", "Run:\f```sh", "Run `x` ```sh", " ```sh"):
+            for name in ("guide.md", "notes.txt", "tool.yaml"):
+                with self.subTest(head=head, name=name):
+                    self.assertEqual(self.lines(name, head + "\n" + INSTALLER + "\n```\n"), [2])
+        # Text after the run still keeps it prose, so a later fence pairs as written.
+        text = "Use ``` to start a fence. \n\n```\n" + INSTALLER + "\n```\n"
+        self.assertEqual(self.lines("guide.md", text), [4])
+
     def test_backticks_inside_a_sentence_do_not_open_a_fence(self) -> None:
         text = "Use ``` to start a fence.\n\n```\n" + INSTALLER + "\n```\n"
         self.assertEqual(self.lines("guide.md", text), [4])
