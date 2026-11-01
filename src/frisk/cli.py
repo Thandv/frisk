@@ -9,7 +9,7 @@ from pathlib import Path
 from . import __version__
 from .engine import ScanResult, display_prefix, reroot, scan_path, scan_text, verdict, fails
 from .report import AuditRecord, audit_text, to_text, to_json, to_sarif, _c
-from .sources import is_git_url, materialize, parse_mcp_config
+from .sources import is_git_url, looks_like_mcp_config, materialize, parse_mcp_config
 from . import pin, proxy
 from .debug import setup_debug
 
@@ -88,7 +88,8 @@ def _cmd_scan(argv: list[str]) -> int:
                     "(MCP servers, Claude Code skills/plugins/subagents, Cursor rules). "
                     "Subcommands: lock, verify.",
     )
-    p.add_argument("targets", nargs="*", help="local paths and/or git URLs to scan")
+    p.add_argument("targets", nargs="*",
+                   help="local paths and/or git URLs to scan; an MCP config file is audited as with --mcp-config")
     p.add_argument("--mcp-config", action="append", default=[], metavar="FILE",
                    help="audit every server in an MCP config file (repeatable)")
     p.add_argument("--text", metavar="STR", help="scan a raw string instead of a path")
@@ -110,9 +111,13 @@ def _cmd_scan(argv: list[str]) -> int:
     try:
         if args.text is not None:
             result.extend(scan_text(args.text, "<text>"))
+        configs: list[str] = []
         for t in _distinct(args.targets):
-            result.extend(_scan_target(t))
-        for cfg in args.mcp_config:
+            if os.path.isfile(t) and looks_like_mcp_config(t):
+                configs.append(t)  # audited, never text-scanned: its env values must not show
+            else:
+                result.extend(_scan_target(t))
+        for cfg in configs + args.mcp_config:
             records = _audit_config(cfg)
             for rec in records:
                 result.extend(rec.result)

@@ -105,16 +105,24 @@ class ServerRef:
 def display_ref(s: ServerRef) -> str:
     """The server's ref as it may be printed. Every audit output (text, --json, --sarif, -q)
     shows a ref only through this function, and so must any later output of server
-    locations (project labels, cache paths).
+    locations (project labels, cache paths; both are built with the same home_label).
 
     A URL (any remote ref, or a ref containing '://') keeps its scheme, host, port and
     path; userinfo, query and fragment, where tokens live, are dropped, and a URL without a
-    scheme and host shows as '<unparsable URL>'. Env values and headers are never read into
-    a ServerRef, so they cannot reach the output.
+    scheme and host shows as '<unparsable URL>'. Any other ref is shown with $HOME as ~.
+    Env values and headers are never read into a ServerRef, so they cannot reach the output.
     """
     if s.kind == "remote" or "://" in s.ref:
         return _safe_url(s.ref)
-    return s.ref
+    return home_label(s.ref)
+
+
+def home_label(path: str) -> str:
+    """A path as printed: a $HOME prefix is shown as ~."""
+    home = str(Path.home()).rstrip(os.sep)
+    if path == home:
+        return "~"
+    return "~" + path[len(home):] if path.startswith(home + os.sep) else path
 
 
 def _safe_url(url: str) -> str:
@@ -293,9 +301,37 @@ def _at_or_above_home(path: Path) -> bool:
 
 
 def parse_mcp_config(path: str | Path) -> list[ServerRef]:
+    """Every server in the config: the top-level mcpServers (or servers), then each
+    project's mcpServers in a .claude.json, named 'server (project)' with $HOME shown as ~.
+
+    A config whose top level, mcpServers, projects or project entry is not a JSON object
+    raises ValueError: frisk cannot tell which servers it holds.
+    """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    servers = data.get("mcpServers") or data.get("servers") or {}
-    return [_classify(name, spec or {}) for name, spec in servers.items()]
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: the top level is not a JSON object")
+    refs = [_classify(name, spec or {}) for name, spec in _servers(data, path).items()]
+    for key, project in _object(data, "projects", path).items():
+        label = home_label(key)
+        if not isinstance(project, dict):
+            raise ValueError(f"{path}: project {label} is not a JSON object")
+        refs.extend(_classify(f"{name} ({label})", spec or {})
+                    for name, spec in _servers(project, f"{path}: project {label}").items())
+    return refs
+
+
+def _servers(obj: dict, where: str | Path) -> dict:
+    """The server map: 'mcpServers', else 'servers' (VS Code); {} when neither is set."""
+    return _object(obj, "mcpServers" if obj.get("mcpServers") is not None else "servers", where)
+
+
+def _object(obj: dict, key: str, where: str | Path) -> dict:
+    value = obj.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{where}: '{key}' is not a JSON object")
+    return value
 
 
 def looks_like_mcp_config(path: str | Path) -> bool:
@@ -304,7 +340,8 @@ def looks_like_mcp_config(path: str | Path) -> bool:
         return True
     if p.suffix == ".json" and p.is_file():
         try:
-            return "mcpServers" in json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding="utf-8"))
+            return isinstance(data, dict) and "mcpServers" in data
         except Exception as e:
             log.debug("not an MCP config (unreadable JSON) error=%s", type(e).__name__)
             return False
