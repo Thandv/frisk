@@ -69,7 +69,8 @@ def _r(p: str) -> re.Pattern:
 
 
 # Argument words of one shell command, lazily: no newline or command separator inside.
-_ARGS = r"(?:[^\s;&|]+[ \t]+)*?"
+# At most 32 words, so a line of many rm words is scanned in linear time.
+_ARGS = r"(?:[^\s;&|]+[ \t]+){0,32}?"
 
 
 # --- code rules -------------------------------------------------------------
@@ -77,9 +78,11 @@ _ARGS = r"(?:[^\s;&|]+[ \t]+)*?"
 CODE_RULES = [
     # Remote code execution / piped installers
     ("rce.pipe_installer", "rce", "block",
-     # Piped (lines may continue with a backslash before or after the pipe; the shell may be reached through a path,
-     # sudo or env with options), or the download run via process substitution or sh -c.
-     _r(r"\b(curl|wget)\b(?:[^\n|]|\\\n)*\|(?:\s|\\\n)*(?:(?:\S*/)?(?:sudo|env)(?:\s+-\S+)*\s+)*"
+     # Piped (lines may continue with a backslash before or after the pipe; the shell may be
+     # named by a path, or reached through sudo or env with options), or the download run via
+     # process substitution or sh -c.
+     # A run never crosses another curl/wget (that one matches the same pipe), so it is linear.
+     _r(r"\b(curl|wget)\b(?:(?!\b(?:curl|wget)\b)[^\n|]|\\\n)*\|(?:\s|\\\n)*(?:(?:\S*/)?(?:sudo|env)(?:\s+-\S+)*\s+)*"
         r"(?:\S*/)?(bash|sh|zsh|python[0-9.]*)\b"
         r"|\b(?:bash|sh|zsh)\s+(?:<\(|-c\s+[\"']?\$\()\s*(?:curl|wget)\b"),
      "pipe-to-shell remote installer (curl|wget ... | sh)"),
@@ -144,9 +147,10 @@ CODE_RULES = [
      "recursive force delete of a root, system, home or credential directory"),
     ("destroy.disk", "destructive", "block",
      # dd writing to a device (not the null/zero/stdio sinks), mkfs on a device, or a
-     # redirect into a raw disk. dd to a regular file does not match.
-     _r(r"\bdd\b[^\n;&|]*\bof=[\"']?/dev/(?!(?:null|zero|stdout|stderr)\b|fd/)"
-        r"|\bmkfs(?:\.\w+)?\b[^\n;&|]*\s[\"']?/dev/|>\s*/dev/sd|>\s*/dev/disk"),
+     # redirect into a raw disk. dd to a regular file does not match. A run never crosses
+     # another dd/mkfs (that one reaches the same target), so the scan stays linear.
+     _r(r"\bdd\b(?:(?!\bdd\b)[^\n;&|])*\bof=[\"']?/dev/(?!(?:null|zero|stdout|stderr)\b|fd/)"
+        r"|\bmkfs(?:\.\w+)?\b(?:(?!\bmkfs(?:\.\w+)?\b)[^\n;&|])*\s[\"']?/dev/|>\s*/dev/sd|>\s*/dev/disk"),
      "raw disk write / format"),
     ("destroy.forkbomb", "destructive", "block",
      _r(r":\(\)\s*\{\s*:\|:&\s*\}\s*;:"),

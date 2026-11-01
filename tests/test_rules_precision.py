@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -125,6 +126,23 @@ class TestPipeToShellForms(RuleCase):
             f.write_text("set -e\n" + FETCH + " \\\n  | sudo -E bash\n", encoding="utf-8")
             found = [(x.line, x.rule) for x in scan_file(f, Path(d)).findings]
         self.assertEqual(found, [(2, "rce.pipe_installer")])
+
+
+class TestLinearTime(unittest.TestCase):
+    """Review: a line of many command words made these rules rescan the rest of the line (or,
+    with continuations, the file) from every word: 64 KiB took 7 to 14 s, 1 MiB about an hour.
+    Each now takes well under a second on 1 MiB; 2 s on 64 KiB is a wide margin."""
+
+    def test_many_command_words_scan_in_linear_time(self) -> None:
+        size = 64 * 1024
+        for rid, unit in (("destroy.rm_rf", "r" + "m "), ("destroy.rm_rf", "r" + "m -r a "),
+                          ("destroy.disk", "d" + "d "), ("destroy.disk", "mk" + "fs "),
+                          ("rce.pipe_installer", "cu" + "rl \\\n"), ("rce.pipe_installer", "cu" + "rl ")):
+            text = unit * (size // len(unit))
+            with self.subTest(rid=rid, unit=unit):
+                t0 = time.monotonic()
+                self.assertIsNone(rule(rid).search(text))
+                self.assertLess(time.monotonic() - t0, 2.0)
 
 
 class TestExamples(unittest.TestCase):
