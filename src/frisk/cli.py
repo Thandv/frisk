@@ -81,6 +81,8 @@ def _audit_config(path: str) -> list[AuditRecord]:
             result = scan_path(s.ref)
         else:
             result = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
+            if s.kind == "wrapper":  # the wrapper itself is read: a payload in it still blocks
+                result.extend(scan_path(s.ref))
         if s.url:
             result.extend(coverage_warning(display_url(s.url), "coverage.unscanned",
                                            "MCP server entry also names a remote URL, which is not scanned"))

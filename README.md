@@ -212,7 +212,13 @@ How each server's source is found, the way the client launches it:
   point, scanned from the nearest directory holding `pyproject.toml`, `package.json` or
   `.git`, at most 3 levels above the script and never `$HOME` or above (else the script's
   own directory). With no script argument, the first existing path argument is scanned.
-- Any other command given as a path is scanned as that file; its arguments are data.
+- Any other command given as a path is scanned as that file; its arguments are data. If
+  that file is a console-script wrapper or bin shim (a small Python script that calls an
+  entry point it imports from a package, as pip, pipx and uv generate; a shell shim that
+  execs node; or a file inside a node package, where an npm bin link points), the server
+  is `wrapper` and not scanned: the package that really runs is not read, so it warns
+  instead of passing on the wrapper alone. The wrapper itself is still read, so a payload
+  in it blocks.
 
 Relative paths resolve against the server's `cwd` in the config or, for a project server in
 a `.claude.json` without one, against its project directory (Claude Code starts it there);

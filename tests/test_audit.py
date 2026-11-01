@@ -253,6 +253,95 @@ class CommandAndUrlTest(AuditCase):
                 self.assertNotIn(CANARY, run([*flags, "--mcp-config", cfg])[1])
 
 
+class WrapperTest(AuditCase):
+    """FR-E4 owner decision (N4): a console-script wrapper or bin shim never PASSes on itself
+    when the package it runs is not scanned; the wrapper itself is still read."""
+
+    UV_WRAPPER = ("#!{env}/bin/python\n# -*- coding: utf-8 -*-\nimport sys\nfrom acme_mcp.server import main\n"
+                  "if __name__ == \"__main__\":\n    if sys.argv[0].endswith(\"-script.pyw\"):\n"
+                  "        sys.argv[0] = sys.argv[0][:-11]\n    elif sys.argv[0].endswith(\".exe\"):\n"
+                  "        sys.argv[0] = sys.argv[0][:-4]\n    sys.exit(main())\n")
+    PIP_WRAPPER = ("#!/usr/bin/python3\n# -*- coding: utf-8 -*-\nimport re\nimport sys\n"
+                   "from acme_cli import patched_main\nif __name__ == '__main__':\n"
+                   "    sys.argv[0] = re.sub(r'(-script\\.pyw|\\.exe)?$', '', sys.argv[0])\n"
+                   "    sys.exit(patched_main())\n")
+
+    def link(self, name: str, target: Path) -> Path:
+        link = self.home / ".local" / "bin" / name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(target)
+        return link
+
+    def uv_tool(self, wrapper: str) -> Path:
+        env = self.home / ".local" / "share" / "uv" / "tools" / "acme"
+        package = env / "lib" / "python3.12" / "site-packages" / "acme_mcp"
+        package.mkdir(parents=True)
+        (package / "server.py").write_text(INSTALLER + "\n", encoding="utf-8")  # not scanned: honest WARN
+        (env / "bin").mkdir()
+        (env / "bin" / "acme-mcp").write_text(wrapper.format(env=env), encoding="utf-8")
+        return self.link("acme-mcp", env / "bin" / "acme-mcp")
+
+    def assert_unscanned(self, command: Path, runs: str) -> None:
+        cfg = self.config({"tool": {"command": str(command)}})
+        code, out = run(["--mcp-config", cfg])
+        self.assertIn(f"  [SKIP ] tool                   wrapper  console-script wrapper or bin shim for {runs}, "
+                      "which frisk does not scan\n", out)
+        self.assertIn("\n  1 of 1 server not scanned\n", out)
+        self.assertIn("verdict:   WARN    ", out)
+        self.assertEqual(code, 0)
+        self.assertEqual(run(["-q", "--mcp-config", cfg])[1], f"frisk: WARN  ({cfg})\n")
+        (server,) = json.loads(run(["--json", "--mcp-config", cfg])[1])["servers"]
+        self.assertEqual((server["kind"], server["status"], server["verdict"]), ("wrapper", "skipped", None))
+
+    def test_a_uv_tool_wrapper_is_not_passed_on_itself(self) -> None:
+        self.assert_unscanned(self.uv_tool(self.UV_WRAPPER), "the Python package 'acme_mcp'")
+
+    def test_a_pip_wrapper_is_not_passed_on_itself(self) -> None:
+        wrapper = self.home / "venv" / "bin" / "acme"
+        wrapper.parent.mkdir(parents=True)
+        wrapper.write_text(self.PIP_WRAPPER, encoding="utf-8")
+        self.assert_unscanned(wrapper, "the Python package 'acme_cli'")
+
+    def test_a_node_package_bin_reached_through_a_link(self) -> None:
+        for package in ("acme-tool", "@acme/tool"):
+            with self.subTest(package):
+                cli = self.home / "npm-global" / "lib" / "node_modules" / package / "bin" / "cli.js"
+                cli.parent.mkdir(parents=True)
+                cli.write_text("#!/usr/bin/env node\nrequire('../lib/main.js')\n", encoding="utf-8")
+                link = self.home / "npm-global" / "bin" / package.replace("/", "-")
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(cli)
+                self.assert_unscanned(link, f"the node package '{package}'")
+
+    def test_a_shell_shim_that_runs_node(self) -> None:
+        shim = self.home / "proj" / "node_modules" / ".bin" / "acme"
+        shim.parent.mkdir(parents=True)
+        shim.write_text('#!/bin/sh\nbasedir=$(dirname "$0")\nexec node  "$basedir/../acme/bin/cli.js" "$@"\n',
+                        encoding="utf-8")
+        self.assert_unscanned(shim, "a node package")
+
+    def test_a_payload_in_a_wrapper_still_blocks(self) -> None:
+        command = self.uv_tool(self.UV_WRAPPER + INSTALLER + "\n")
+        cfg = self.config({"tool": {"command": str(command)}})
+        code, out = run(["--mcp-config", cfg])
+        self.assertIn("  [SKIP ] tool ", out)
+        self.assertIn("[BLOCK] rce            tool::acme-mcp:", out)
+        self.assertEqual(code, 1)
+
+    def test_a_script_that_is_not_a_wrapper_is_scanned_as_before(self) -> None:
+        own = "#!/usr/bin/env python3\nimport sys\nfrom typing import Any\ndef main() -> int:\n    return 0\n" \
+              "if __name__ == '__main__':\n    sys.exit(main())\n"
+        big = self.UV_WRAPPER.format(env="/opt/env") + "# padding\n" * 500
+        for label, text in (("defines its own main", own), ("larger than a wrapper", big)):
+            with self.subTest(label):
+                script = self.home / label.replace(" ", "-") / "server"
+                script.parent.mkdir()
+                script.write_text(text, encoding="utf-8")
+                cfg = self.config({"own": {"command": str(script)}})
+                self.assertIn("  [PASS ] own                    local  local executable/script\n",
+                              run(["--mcp-config", cfg])[1])
+
+
 class ControlCharacterTest(AuditCase):
     """FR-E4 fix DEFECT-3: config- and cache-derived text reaches the text report escaped."""
 

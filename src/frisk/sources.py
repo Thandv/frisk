@@ -88,6 +88,7 @@ _PKG_RUNNERS = {"npx": "npm", "npm": "npm", "pnpm": "npm", "bunx": "npm",
 # Only for these is an arg the server's source; any other command's args are its data.
 _INTERPRETERS = {"python", "node", "bun", "deno", "ruby", "bash", "sh"}
 _PROJECT_MARKERS = ("pyproject.toml", "package.json", ".git")
+_WRAPPER_MAX_BYTES = 4096  # a generated console-script wrapper or bin shim is a few hundred bytes
 _WALK_UP_LEVELS = 3
 # Options that take a value, so the value is not mistaken for the subcommand, script or package.
 _UV_VALUE_FLAGS = {"--directory", "--project", "--from", "--with", "--with-editable", "--with-requirements",
@@ -110,7 +111,7 @@ CODE_LOADING_ENV = frozenset({
 @dataclass
 class ServerRef:
     name: str
-    kind: str          # "local" | "package-cached" | "package" | "remote" | "unknown" | "invalid"
+    kind: str          # "local" | "package-cached" | "package" | "wrapper" | "remote" | "unknown" | "invalid"
     ref: str           # local path, package name, or URL; print it only through display_ref
     scannable: bool
     detail: str = ""
@@ -223,6 +224,10 @@ def _classify_command(name: str, spec: dict, cmd: str, project: Path | None) -> 
         return _local(name, root, f"local source via {base}")
     exe = _resolve(cmd, cwd) if "/" in cmd or cmd.startswith("~") else None
     if exe is not None and os.path.isfile(exe):
+        runs = _wrapped_package(exe)
+        if runs:  # the wrapper is read by the audit, but the code that runs is the package's
+            return ServerRef(name, "wrapper", str(exe), scannable=False,
+                             detail=f"console-script wrapper or bin shim for {runs}, which frisk does not scan")
         return ServerRef(name, "local", str(exe), scannable=True, detail="local executable/script")
     why = _RELATIVE if exe is None and "/" in cmd else _UNRESOLVED
     return ServerRef(name, "unknown", cmd or "?", scannable=False, detail=why)
@@ -396,6 +401,38 @@ def _first_existing(args: list[str], cwd: Path | None) -> Path | None:
         if path is not None and os.path.exists(path):
             return path.parent if os.path.isfile(path) else path
     return None
+
+
+def _wrapped_package(exe: Path) -> str:
+    """What a console-script wrapper or bin shim at `exe` runs, or '' when it is not one:
+    a file inside a node package (an npm bin link resolves there); a small Python script
+    that imports a name from a package and calls that name in sys.exit(...), as pip, pipx
+    and uv generate; or a small shell shim that execs node (pnpm, cmd-shim)."""
+    real = Path(os.path.realpath(exe))
+    parts = real.parts
+    if "node_modules" in parts:
+        i = len(parts) - 1 - parts[::-1].index("node_modules")
+        package = "/".join(parts[i + 1:i + 3] if parts[i + 1].startswith("@") else parts[i + 1:i + 2])
+        if package != ".bin" and i + 2 < len(parts):
+            return f"the node package '{package}'"
+    try:
+        with real.open("rb") as fh:
+            head = fh.read(_WRAPPER_MAX_BYTES + 1)
+    except OSError as e:
+        log.debug("could not read a command error=%s", type(e).__name__)
+        return ""
+    if len(head) > _WRAPPER_MAX_BYTES or not head.startswith(b"#!"):
+        return ""
+    shebang, _, body = head.decode("utf-8", "replace").partition("\n")
+    if "python" in shebang:
+        for line in body.splitlines():
+            words = line.split()  # 'from M import F' (or 'F as G'): a generated wrapper calls it
+            if (len(words) in (4, 6) and words[0] == "from" and words[2] == "import" and words[1] != "__future__"
+                    and f"sys.exit({words[-1]}(" in body):
+                return f"the Python package '{words[1].split('.')[0]}'"
+    elif "sh" in shebang and ("exec node " in body or 'exec "$basedir/node"' in body):
+        return "a node package"
+    return ""
 
 
 def _has_shebang(path: Path) -> bool:

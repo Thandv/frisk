@@ -26,3 +26,13 @@
   whose host part holds anything but a host name or address is `<unparsable URL>`, as are
   the DEFECT-1 shapes. `frisk lock` still pins the path (without credentials, query or
   fragment), so a changed endpoint is still drift and existing lockfiles verify as before.
+- **A console-script wrapper is not passed on itself (N4).** A `command` that is a small
+  generated wrapper (pip, pipx and uv write a few lines that import a package's entry point
+  and call it in `sys.exit(...)`; `uv tool install` links it into `~/.local/bin`), a shell
+  shim that execs node (pnpm, cmd-shim), or a file inside a node package (where an npm bin
+  link points) used to be scanned as that one file and PASS, while the package that really
+  runs was never read. Such a server is now kind `wrapper`: not scanned, a
+  `coverage.unscanned` warning naming the package (`console-script wrapper or bin shim for
+  the Python package 'acme_mcp', which frisk does not scan`), so WARN, never PASS. The
+  wrapper file itself is still read, so a payload hidden in it BLOCKs. Larger scripts, and
+  scripts that call a function they define themselves, are scanned as before.
