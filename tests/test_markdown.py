@@ -168,6 +168,21 @@ class TestInlineCodeCap(TempDir):
                 self.assertIn(("rce.pipe_installer", "block"), [(f.rule, f.severity) for f in findings])
                 self.assertEqual(verdict(findings), "BLOCK")
 
+    def test_claude_code_instruction_files_block_at_any_depth(self) -> None:
+        # Claude Code loads CLAUDE.local.md and the markdown at any depth below .claude/agents,
+        # commands, rules, skills and output-styles; these WARNed after the cap.
+        for name in ("CLAUDE.local.md", ".claude/commands/ns/sync.md", ".claude/agents/team/helper.md",
+                     ".claude/rules/style.md", ".claude/rules/web/react.md", ".claude/skills/pdf/reference.md",
+                     ".claude/output-styles/terse.md", ".Claude/Commands/ns/sync.md"):
+            with self.subTest(name):
+                findings = self.scan(name, self.README)
+                self.assertIn(("rce.pipe_installer", "block"), [(f.rule, f.severity) for f in findings])
+        self.assertEqual(self.lines("CLAUDE.local.md", KEY_COPY + "\n", "inject.sensitive_path_instruction"), [1])
+        # The same directory names outside .claude/ are ordinary docs (eslint-style docs/rules/).
+        for name in ("docs/rules/no-eval.md", "docs/skills/pdf/reference.md", ".claude/notes.md"):
+            with self.subTest(name):
+                self.assertEqual(verdict(self.scan(name, self.README)), "WARN")
+
     def test_code_blocks_in_a_readme_still_block(self) -> None:
         for label, text in (("fenced", "# Install\n\n```sh\n" + INSTALLER + "\n```\n"),
                             ("indented", "# Install\n\n    " + INSTALLER + "\n"),

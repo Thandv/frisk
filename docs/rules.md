@@ -11,7 +11,7 @@ Severity: **block** fails a scan by default; **warn** fails only with `--fail-on
 
 Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks (` ``` ` or `~~~`, any length; an unclosed fence runs to the end of the file) in every other text file, on indented code blocks and inline code spans in markdown (`.md`, `.markdown`, `.mdc`), and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command.
 
-Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md` or `.markdown` that is not an agent-instruction file) report a code rule at most as `warn`: a document that mentions a risky call by name is not running it. In agent-instruction files (`SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `*.md` in `agents/` or `commands/`, `.cursorrules`, `*.mdc`) and in fenced or indented code blocks everywhere, code rules keep the severity listed below. Text rules keep their severity in every form.
+Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md` or `.markdown` that is not an agent-instruction file) report a code rule at most as `warn`: a document that mentions a risky call by name is not running it. In agent-instruction files (see [inject.sensitive_path_instruction](#inject.sensitive_path_instruction) for the list) and in fenced or indented code blocks everywhere, code rules keep the severity listed below. Text rules keep their severity in every form.
 
 <a id="rce.pipe_installer"></a>
 ### rce.pipe_installer
@@ -243,7 +243,7 @@ Run on the full text of every file frisk reads, code files included, and on `--t
 
 ## Instruction rules
 
-Run on agent-instruction files only, where the text addresses the agent: `SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `*.mdc`, and `*.md` files in an `agents/` or `commands/` directory. Ordinary docs such as a README do not get them.
+Run on agent-instruction files only, where the text addresses the agent: `SKILL.md`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.cursorrules`, `*.mdc`, `*.md` files in an `agents/` or `commands/` directory, and `*.md` files at any depth below `.claude/agents`, `.claude/commands`, `.claude/rules`, `.claude/skills` or `.claude/output-styles`. Names match in any case. Ordinary docs such as a README do not get them.
 
 <a id="inject.sensitive_path_instruction"></a>
 ### inject.sensitive_path_instruction
