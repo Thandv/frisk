@@ -26,9 +26,13 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from typing import TextIO
 
+from .debug import log as _root_log, ms_since
 from .engine import scan_text, worst_severity
+
+log = _root_log.getChild("proxy")
 
 
 def _tool_text(tool: dict) -> str:
@@ -102,6 +106,8 @@ class Proxy:
     # -- relay loop ----------------------------------------------------------
     def run(self) -> int:
         self._log("started; wrapping: " + " ".join(self.server_cmd))
+        t0 = time.monotonic()
+        log.debug("server start argv0=%s args=%d", self.server_cmd[0], len(self.server_cmd) - 1)
         proc = subprocess.Popen(self.server_cmd, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=sys.stderr,
                                 text=True, bufsize=1)
@@ -111,13 +117,13 @@ class Proxy:
                 for line in sys.stdin:
                     proc.stdin.write(line)
                     proc.stdin.flush()
-            except (BrokenPipeError, ValueError):
-                pass
+            except (BrokenPipeError, ValueError) as e:
+                log.debug("client->server relay stopped error=%s", type(e).__name__)
             finally:
                 try:
                     proc.stdin.close()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    log.debug("server stdin close failed error=%s", type(e).__name__)
 
         threading.Thread(target=client_to_server, daemon=True).start()
 
@@ -128,6 +134,7 @@ class Proxy:
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
+                log.debug("non-JSON server line passed through bytes=%d", len(line))
                 sys.stdout.write(line + "\n")
                 sys.stdout.flush()
                 continue
@@ -139,6 +146,7 @@ class Proxy:
             sys.stdout.flush()
 
         code = proc.wait()
+        log.debug("server end status=exit rc=%s ms=%d", code, ms_since(t0))
         self._log(f"server exited ({code}); dropped={self.stats['dropped']} "
                   f"flagged={self.stats['flagged']}")
         return code

@@ -56,7 +56,7 @@ class TestProxyRun(unittest.TestCase):
         # pytest's `pythonpath` setting only affects this process, so the child gets
         # PYTHONPATH explicitly.
         env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
-               **extra_env}
+               "FRISK_DEBUG": "0", **extra_env}
         proc = subprocess.Popen(
             [sys.executable, "-m", "frisk.cli", "proxy", *proxy_args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

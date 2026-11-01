@@ -13,11 +13,15 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 
 from . import __version__
 from .engine import scan_path, scan_text, verdict, worst_severity
 from .rules import owasp_for
+from .debug import log as _root_log, ms_since, setup_debug
 from .sources import materialize
+
+log = _root_log.getChild("mcp")
 
 PROTOCOL = "2024-11-05"
 
@@ -102,11 +106,14 @@ def handle(req: dict) -> dict | None:
         p = req.get("params", {})
         name = p.get("name")
         args = p.get("arguments", {})
+        t0 = time.monotonic()
         try:
             text = str(TOOLS[name][0](**args))
+            log.debug("tool end name=%s status=ok ms=%d bytes=%d", name, ms_since(t0), len(text))
             return {"jsonrpc": "2.0", "id": rid,
                     "result": {"content": [{"type": "text", "text": text}]}}
         except Exception as e:  # noqa: BLE001
+            log.debug("tool end name=%s status=error error=%s ms=%d", name, type(e).__name__, ms_since(t0))
             return {"jsonrpc": "2.0", "id": rid,
                     "result": {"content": [{"type": "text", "text": f"error: {e}"}],
                                "isError": True}}
@@ -117,13 +124,15 @@ def handle(req: dict) -> dict | None:
 
 
 def main() -> None:
+    setup_debug()
     for line in sys.stdin:
         line = line.strip()
         if not line:
             continue
         try:
             req = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            log.debug("request skipped (not JSON) error=%s", e)
             continue
         resp = handle(req)
         if resp is not None:

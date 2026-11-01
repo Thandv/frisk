@@ -11,6 +11,7 @@ from .engine import ScanResult, display_prefix, reroot, scan_path, scan_text, ve
 from .report import to_text, to_json, to_sarif, _c
 from .sources import is_git_url, materialize, parse_mcp_config
 from . import pin, proxy
+from .debug import setup_debug
 
 
 def _scan_target(target: str) -> ScanResult:
@@ -229,6 +230,7 @@ def _cmd_proxy(argv: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    setup_debug()
     if argv and argv[0] == "lock":
         return _cmd_lock(argv[1:])
     if argv and argv[0] == "verify":

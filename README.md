@@ -240,6 +240,12 @@ Optional extras, never needed at runtime: `pip install -e ".[test]"` (pytest) an
 `pip install -e ".[dev]"` (pytest, ruff, mypy). CI runs `ruff check` and `mypy src`
 in an advisory lint job; their config is in `pyproject.toml`.
 
+Debug logs: `FRISK_DEBUG=1` (for `frisk`, `frisk proxy` and `frisk-mcp`) prints
+`[frisk debug]` lines to stderr: git clones (exit code, duration; not the URL),
+the proxied server's start and exit, MCP tool calls (status, duration, sizes),
+and errors that are otherwise skipped. Secrets are redacted. Unset or `0`
+changes nothing.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Built from the security gate behind
