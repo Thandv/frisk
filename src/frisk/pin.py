@@ -87,14 +87,19 @@ def _server_names(servers: list[ServerRef]) -> dict:
 
 
 def _server_fingerprint(s: ServerRef) -> dict:
-    """How the server starts plus the code frisk scans for it (none when it scans none)."""
+    """How the server starts, the values of its code-loading env variables (as hashes) and
+    the code frisk scans for it (none when it scans none)."""
     if s.kind == "package-cached":
         code = _cached_fingerprint(s)
     elif s.scannable:
         code = fingerprint_path(Path(s.ref))
     else:
         code = {"digest": "", "files": {}}
-    return {"digest": _sha(f"{s.launch}\0{code['digest']}".encode()), "files": code["files"]}
+    parts = [s.launch, code["digest"]]
+    if not s.code_env:  # the digest of a server without code-loading env variables is unchanged
+        return {"digest": _sha("\0".join(parts).encode()), "files": code["files"]}
+    parts.append(json.dumps(s.code_env, sort_keys=True))
+    return {"digest": _sha("\0".join(parts).encode()), "files": code["files"], "code_env": s.code_env}
 
 
 def _cached_fingerprint(s: ServerRef) -> dict:
@@ -173,6 +178,10 @@ def verify_lock(lock: dict) -> list[dict]:
         record = {"entry": key, "status": "DRIFT", "changed": changed, "added": added, "removed": removed}
         if "launch" in old and new.get("launch", old["launch"]) != old["launch"]:
             record["launch"] = "changed"
+        old_env, new_env = old.get("code_env", {}), new.get("code_env", {})
+        env = sorted(name for name in old_env.keys() | new_env.keys() if old_env.get(name) != new_env.get(name))
+        if env:
+            record["env"] = env  # the names of the code-loading env variables whose value changed
         out.append(record)
     return out
 

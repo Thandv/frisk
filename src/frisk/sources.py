@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -97,6 +97,14 @@ _PIPX_VALUE_FLAGS = {"--spec", "--python", "--pip-args", "--index-url"}
 _UNRESOLVED = "could not resolve a local source to scan"
 _RELATIVE = "relative path and no absolute 'cwd' in the config: cannot tell which file runs"
 _NOT_CACHED = "not in local cache; frisk does not download"
+# Env variables that make a runtime load code (options, module and library paths, preloads,
+# startup files): frisk lock pins their values (as hashes); every other env value may be a
+# secret and is never read. Any DYLD_* variable counts too.
+CODE_LOADING_ENV = frozenset({
+    "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "PERL5OPT", "PERL5LIB", "RUBYOPT",
+    "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "BASH_ENV", "ENV",
+})
 
 
 @dataclass
@@ -116,6 +124,9 @@ class ServerRef:
     # A remote URL the entry names beside its command: the command is what gets classified and
     # scanned; the URL is not scanned and is shown only through display_url.
     url: str = ""
+    # sha256 of the value of each code-loading env variable the entry sets (CODE_LOADING_ENV),
+    # for frisk lock; never the value itself, never printed.
+    code_env: dict[str, str] = field(default_factory=dict)
 
 
 def display_ref(s: ServerRef) -> str:
@@ -430,7 +441,16 @@ def parse_mcp_config(path: str | Path) -> list[ServerRef]:
 def _server(name: str, spec: object, project: Path | None = None) -> ServerRef:
     ref = _classify(name, spec, project)
     ref.launch = _launch_digest(spec)
+    ref.code_env = _code_env(spec)
     return ref
+
+
+def _code_env(spec: object) -> dict[str, str]:
+    env = spec.get("env") if isinstance(spec, dict) else None
+    if not isinstance(env, dict):
+        return {}
+    return {name: hashlib.sha256(json.dumps(value, default=str).encode("utf-8")).hexdigest()
+            for name, value in env.items() if name in CODE_LOADING_ENV or name.startswith("DYLD_")}
 
 
 def _launch_digest(spec: object) -> str:

@@ -263,17 +263,26 @@ never as a whole file:
   args, cwd, the URL without credentials, query or fragment, and the *names* of its env
   vars and headers, never their values) together with the code frisk scans for it. A
   package found in the local cache is pinned as its cached content plus its version.
+- The values of env variables that make a runtime load code are pinned too, as hashes:
+  `NODE_OPTIONS`, `NODE_PATH`, `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, `LD_PRELOAD`,
+  `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` (and
+  any other `DYLD_*`), `PERL5OPT`, `PERL5LIB`, `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`,
+  `_JAVA_OPTIONS`, `BASH_ENV` and `ENV`. A changed value is DRIFT and `frisk verify` names
+  the variable (`~ NODE_OPTIONS changed`), never its value.
 
 So the rest of the file can change (Claude Code rewrites `~/.claude.json` all the time) and
 a rotated secret is not drift, while a changed command, argument, URL or env name (`~
-changed: how it starts`), changed server code, a different cached version, or a cache entry
-that is gone is DRIFT. Lockfiles written by older versions keep verifying with the checks
+changed: how it starts`), a changed code-loading env value, changed server code, a
+different cached version, or a cache entry that is gone is DRIFT. Lockfiles written by older versions keep verifying with the checks
 they were written with, with two exceptions. A config that an older frisk pinned as a whole
 file verifies while the file is unchanged, and afterwards `frisk verify` reports one error,
 `MCP config pinned as a whole file by an older frisk: run frisk lock again to pin each
 server`. A package server whose older pin had taken an option's value or a subcommand as
 the package name (`uv run --directory …`, `uvx --python 3.12 …`, `pipx run …`,
-`npx --registry …`) reports DRIFT once with no changed file: run `frisk lock` again.
+`npx --registry …`) reports DRIFT once with no changed file: run `frisk lock` again. A
+server that sets one of the code-loading variables above, locked before their values were
+pinned, reports DRIFT once with `~ NODE_OPTIONS changed` (or the variable it sets): lock it
+again.
 
 For **continuous** monitoring, commit your `.frisk-lock.json` and drop
 [`examples/continuous-verify.yml`](examples/continuous-verify.yml) into your repo —

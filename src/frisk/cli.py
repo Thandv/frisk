@@ -205,6 +205,8 @@ def _cmd_verify(argv: list[str]) -> int:
                 if r.get("launch"):
                     print(_c("           ~ changed: how it starts (command, args, cwd, URL, env or header names)",
                              "block"))
+                for name in r.get("env", []):
+                    print(_c(f"           ~ {printable(name)} changed", "block"))
                 for f in r.get("changed", []):
                     print(_c(f"           ~ changed: {printable(f)}", "block"))
                 for f in r.get("added", []):
