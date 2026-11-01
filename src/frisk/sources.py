@@ -118,9 +118,11 @@ def display_ref(s: ServerRef) -> str:
     locations (project labels, cache paths; both are built with the same home_label).
 
     A URL (any remote ref, or a ref containing '://') keeps its scheme, host, port and
-    path; userinfo, query and fragment, where tokens live, are dropped, and a URL without a
-    scheme and host shows as '<unparsable URL>'. Any other ref is shown with $HOME as ~.
-    Env values and headers are never read into a ServerRef, so they cannot reach the output.
+    path; userinfo, query and fragment, where tokens live, are dropped. A URL without a
+    scheme and host, with a port that is not a number, or with an '@' outside its host part
+    shows as '<unparsable URL>': there an unencoded '#', '?' or '/' in a password has cut
+    the host part short. Any other ref is shown with $HOME as ~. Env values and headers are
+    never read into a ServerRef, so they cannot reach the output.
     """
     if s.kind == "remote" or "://" in s.ref:
         return _safe_url(s.ref)
@@ -138,10 +140,11 @@ def home_label(path: str) -> str:
 def _safe_url(url: str) -> str:
     try:
         parts = urlsplit(url)
-    except ValueError:  # for example an unclosed IPv6 bracket
+        _ = parts.port  # raises ValueError for a port that is not a number, such as 'user:pass' cut short
+    except ValueError:  # also an unclosed IPv6 bracket
         return "<unparsable URL>"
     host = parts.netloc.rpartition("@")[2]
-    if not parts.scheme or not host:
+    if not parts.scheme or not host or ("@" in url and "@" not in parts.netloc):
         return "<unparsable URL>"
     return f"{parts.scheme}://{host}{parts.path}"
 

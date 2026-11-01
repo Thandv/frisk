@@ -244,10 +244,9 @@ class CacheEdgeTest(HomeCase):
 
 
 class DefectTest(HomeCase):
-    # DEFECT-1: a URL whose userinfo holds an unencoded '#', '?' or '/' ends its authority
-    #   early in urlsplit, so display_ref prints 'scheme://user:<part of the password>'.
-    #   Every audit format shows it (the SKIP arrow and the coverage.unscanned path).
-    @unittest.expectedFailure
+    # Fixed by "FR-E4 fix: DEFECT-1" (was DEFECT-1: a URL whose userinfo holds an unencoded
+    #   '#', '?' or '/' ends its authority early in urlsplit, so display_ref printed
+    #   'scheme://user:<part of the password>' in every audit format).
     def test_userinfo_with_a_delimiter_never_reaches_the_output(self) -> None:
         for sep in ("#", "?", "/"):
             url = "https://user:" + CANARY + sep + "x@auth.example.invalid/mcp"

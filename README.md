@@ -209,7 +209,9 @@ directory you run frisk from; with no absolute `cwd`, a relative script is `unkn
 
 A skipped server's location is printed without secrets: a URL shows only its scheme,
 host, port and path (no `user:password@`, query string or fragment), and env values and
-headers are never read.
+headers are never read. A URL whose host part cannot be told apart from its password
+(an unencoded `#`, `?` or `/` in the password, a port that is not a number, or an `@` after
+the host) is shown as `<unparsable URL>`.
 
 ### Detect rug pulls (pin what you approved, catch silent changes)
 

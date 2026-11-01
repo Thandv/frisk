@@ -101,5 +101,47 @@ class AuditOutputTest(unittest.TestCase):
         self.assertNotIn(CANARY, out)
 
 
+class UserinfoDelimiterTest(unittest.TestCase):
+    """FR-E4 fix DEFECT-1: an unencoded '#', '?' or '/' in a password cuts urlsplit's host
+    part short; such a URL must show as '<unparsable URL>', never 'scheme://user:<secret>'."""
+
+    SERVERS = {
+        "hash": ("https://user:" + CANARY + "#x@hash.example.invalid/mcp", "<unparsable URL>"),
+        "query": ("https://user:" + CANARY + "?x@query.example.invalid/mcp", "<unparsable URL>"),
+        "slash": ("https://user:" + CANARY + "/x@slash.example.invalid/mcp", "<unparsable URL>"),
+        "bare-token-slash": ("https://" + CANARY + "/x@token.example.invalid/mcp", "<unparsable URL>"),
+        "pct-at": ("https://user%40corp:" + CANARY + "@pct.example.invalid/mcp", "https://pct.example.invalid/mcp"),
+        "ipv6": ("https://user:" + CANARY + "@[::1]:8443/sse?t=" + CANARY, "https://[::1]:8443/sse"),
+        "ipv6-hash": ("https://user:" + CANARY + "#x@[::1]/sse", "<unparsable URL>"),
+    }
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.cfg = Path(tmp.name) / "mcp.json"
+        self.cfg.write_text(json.dumps({"mcpServers": {n: {"url": u} for n, (u, _) in self.SERVERS.items()}}),
+                            encoding="utf-8")
+
+    def test_display_ref_of_each_form(self) -> None:
+        for name, (url, shown) in self.SERVERS.items():
+            with self.subTest(name):
+                self.assertEqual(display_ref(ref("remote", url)), shown)
+
+    def test_no_output_format_shows_the_secret(self) -> None:
+        for flags in ([], ["--json"], ["--sarif"], ["-q"]):
+            with self.subTest(flags=flags):
+                self.assertNotIn(CANARY, run([*flags, "--mcp-config", str(self.cfg)]))
+        text = run(["--mcp-config", str(self.cfg)])
+        self.assertIn("→ https://[::1]:8443/sse\n", text)
+        self.assertIn("→ https://pct.example.invalid/mcp\n", text)
+        self.assertEqual(text.count("→ <unparsable URL>\n"), 5)
+
+    def test_other_forms_that_hide_the_host_are_unparsable(self) -> None:
+        for url in ("https://host.example.invalid:99999/x", "https://host.example.invalid:http/x",
+                    "https://host.example.invalid/@scope/pkg"):  # an '@' after the host is ambiguous: hidden
+            with self.subTest(url=url):
+                self.assertEqual(display_ref(ref("remote", url)), "<unparsable URL>")
+
+
 if __name__ == "__main__":
     unittest.main()
