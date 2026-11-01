@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 from .debug import log as _root_log
-from .sources import materialize, parse_mcp_config
+from .sources import ServerRef, materialize, parse_mcp_config
 
 log = _root_log.getChild("pin")
 
@@ -60,7 +60,14 @@ def build_lock(targets: list[str], configs: list[str]) -> dict:
     for cfg in configs:
         for s in parse_mcp_config(cfg):
             key = f"{cfg}::{s.name}"
-            if s.scannable:
+            if s.kind == "package-cached":
+                # the cached package's content and version, re-found in the cache through
+                # the live config on verify: a version change or a missing entry is drift.
+                fp = _cached_fingerprint(s)
+                fp.update({"kind": s.kind, "version": s.version,
+                           "recompute": {"type": "cached_package", "config": cfg, "name": s.name}})
+                entries[key] = fp
+            elif s.scannable:
                 fp = fingerprint_path(Path(s.ref))
                 fp.update({"kind": "source",
                            "recompute": {"type": "path", "value": s.ref}})
@@ -68,11 +75,23 @@ def build_lock(targets: list[str], configs: list[str]) -> dict:
             else:
                 # package/remote: pin the reference itself, re-read from the live
                 # config on verify so a swapped version/URL surfaces as drift.
-                entries[key] = {"kind": s.kind, "digest": _sha(s.ref.encode()),
+                entries[key] = {"kind": s.kind, "digest": _ref_digest(s),
                                 "files": {},
                                 "recompute": {"type": "config_ref",
                                               "config": cfg, "name": s.name}}
     return {"version": 1, "entries": entries}
+
+
+def _cached_fingerprint(s: ServerRef) -> dict:
+    fp = fingerprint_path(Path(s.ref))
+    fp["digest"] = _sha(f"{s.version}\0{fp['digest']}".encode())
+    return fp
+
+
+def _ref_digest(s: ServerRef) -> str:
+    """The pinned reference: the package as the config names it, else the ref (the same
+    string whether or not the package is cached, so a config_ref entry keeps verifying)."""
+    return _sha((s.package or s.ref).encode())
 
 
 def _recompute(entry: dict) -> dict:
@@ -88,7 +107,12 @@ def _recompute(entry: dict) -> dict:
     if rc["type"] == "config_ref":
         for s in parse_mcp_config(rc["config"]):
             if s.name == rc["name"]:
-                return {"digest": _sha(s.ref.encode()), "files": {}}
+                return {"digest": _ref_digest(s), "files": {}}
+        return {"digest": "<missing>", "files": {}}
+    if rc["type"] == "cached_package":
+        for s in parse_mcp_config(rc["config"]):
+            if s.name == rc["name"] and s.kind == "package-cached":
+                return _cached_fingerprint(s)
         return {"digest": "<missing>", "files": {}}
     return {"digest": _sha(rc["value"].encode()), "files": {}}
 

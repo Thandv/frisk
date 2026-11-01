@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _home import fake_home
 from frisk.engine import scan_text, scan_path, verdict, fails, worst_severity
 from frisk.report import to_sarif, to_json
 from frisk.sources import parse_mcp_config
@@ -94,6 +95,9 @@ class TestSarif(unittest.TestCase):
 
 
 class TestMcpConfig(unittest.TestCase):
+    def setUp(self):
+        fake_home(self)  # FR-E4 t5: package servers are looked up in an empty cache, never the real one
+
     def test_classification(self):
         with tempfile.TemporaryDirectory() as d:
             local_script = Path(d) / "server.py"

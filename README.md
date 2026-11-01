@@ -145,7 +145,7 @@ MCP config audit: claude_desktop_config.json
   [BLOCK] sketchy-server         local  local source via node
   [SKIP ] some-remote            remote  remote HTTP/SSE server — behavior not statically verifiable
            → https://mcp.example.com/sse
-  [SKIP ] npm-tool               package  npm package — fetch+scan not yet supported (roadmap)
+  [SKIP ] npm-tool               package  not in local cache; frisk does not download
            → some-npm-mcp
 ```
 
@@ -159,10 +159,23 @@ code 2 rather than being audited in part.
 
 How each server's source is found, the way the client launches it:
 
-- A remote `url` and a package run by `npx`, `uvx`, `pipx` (or `npm`, `pnpm`, `bunx`,
-  `pip`) are not scanned: frisk does not fetch anything.
+- A remote `url` is not scanned.
+- A package run by `npx`, `uvx`, `uv tool run` or `pipx run` is scanned (kind
+  `package-cached`) when it is already in your local cache: `~/.npm/_npx/<hash>/node_modules/<pkg>`
+  (a package npx was asked to run, not one of its dependencies), `~/.local/share/uv/tools/<pkg>`,
+  uv's cache `~/.cache/uv/archive-v0/*`, or `~/.local/pipx/venvs/<pkg>`. Only the package's own
+  code is scanned; its declared dependencies are listed, not scanned. A version pinned in the
+  config (`pkg@1.2.3`, `pkg==1.2.3`) must match the cached one exactly; with no pin, it is
+  scanned only when one version is cached. Otherwise the server is skipped with `not in local
+  cache; frisk does not download`: frisk never downloads and never runs npm, npx, uv or pip.
+  A cache entry that is unreadable or malformed, leads outside its cache (a symlink), or
+  whose code is not one package directory or module (an editable install) skips only that
+  server. Packages run by `npm`, `pnpm`, `bunx` or `pip`
+  are not looked up. The cache locations can be overridden with `FRISK_NPX_CACHE` (the
+  `_npx` directory), `FRISK_UV_TOOLS`, `FRISK_UV_CACHE` (uv's cache directory) and
+  `FRISK_PIPX_VENVS`.
 - `uv run` is local source, rooted at `--directory`/`--project`, else at the project of the
-  script it runs, else at the config's `cwd`. `uv tool run` is a package, like `uvx`.
+  script it runs, else at the config's `cwd`.
 - For an interpreter (`python`, `node`, `bun`, `deno`, `ruby`, `bash`, `sh`, with any version
   suffix) the first script argument (a code extension or a `#!` first line) is the entry
   point, scanned from the nearest directory holding `pyproject.toml`, `package.json` or
@@ -201,7 +214,11 @@ This pins local source, git targets, **and** the package/URL references in your 
 config (so a swapped `npx` version or a changed server URL surfaces too). Each server is
 pinned as `<config>::<server name>`, so project servers in a `.claude.json` get their own
 entries (`<config>::db (~/work/app)`); lockfiles written before project servers were read
-keep verifying.
+keep verifying. A package found in the local cache is pinned as its cached content plus
+its version, and `frisk verify` finds it again through the config: a different version, a
+changed file, or a cache entry that is gone (or no longer the only cached version) is
+DRIFT. A package lock entry written before the cache lookup existed (the package name
+itself) keeps verifying.
 
 For **continuous** monitoring, commit your `.frisk-lock.json` and drop
 [`examples/continuous-verify.yml`](examples/continuous-verify.yml) into your repo —

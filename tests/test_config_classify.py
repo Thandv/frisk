@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
+from _home import fake_home
 from frisk.sources import _classify
 
 RELATIVE = "relative path and no absolute 'cwd' in the config: cannot tell which file runs"
@@ -40,9 +41,7 @@ class ClassifyCase(unittest.TestCase):
         self.tmp = Path(tmp.name)
         self.home = self.tmp / "home"
         self.home.mkdir()
-        home = mock.patch.dict(os.environ, {"HOME": str(self.home)})
-        home.start()
-        self.addCleanup(home.stop)
+        fake_home(self, self.home)
         self.proj = self.make("home/proj/server.py", 'print("hello")\n').parent
         self.data = self.tmp / "data"
         self.data.mkdir()

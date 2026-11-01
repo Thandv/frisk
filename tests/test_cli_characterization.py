@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from _home import fake_home
 from frisk import __version__
 from frisk.cli import main
 
@@ -207,6 +208,9 @@ class TestVerifyCharacterization(unittest.TestCase):
 class TestMcpConfigAuditCharacterization(unittest.TestCase):
     """Pins today's full --mcp-config text output (FR-E4 reworks the audit)."""
 
+    def setUp(self) -> None:
+        fake_home(self)  # FR-E4 t5: package servers are looked up in an empty cache, never the real one
+
     def test_full_text_output_mixed_servers(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -225,7 +229,9 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             f"MCP config audit: {cfg}",
             "",
             "  [PASS ] local-srv              local  local source via python3",
-            "  [SKIP ] pkg-srv                package  npm package — fetch+scan not yet supported (roadmap)",
+            # FR-E4 t5: npx packages are looked up in the local cache (empty here); was
+            # "npm package — fetch+scan not yet supported (roadmap)".
+            "  [SKIP ] pkg-srv                package  not in local cache; frisk does not download",
             "           → acme-weather-mcp",
             "  [SKIP ] remote-srv             remote  remote HTTP/SSE server — behavior not statically verifiable",
             "           → https://mcp.example.invalid/sse",

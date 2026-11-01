@@ -8,10 +8,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _home import fake_home
 from frisk.sources import ServerRef, _classify
 
-NPM_DETAIL = "npm package — fetch+scan not yet supported (roadmap)"
-PYPI_DETAIL = "pypi package — fetch+scan not yet supported (roadmap)"
+# FR-E4 t5: npx/uvx packages are looked up in the local cache (was: "npm|pypi package —
+# fetch+scan not yet supported (roadmap)"); HOME is an empty temp dir, so the cache is empty.
+NOT_CACHED = "not in local cache; frisk does not download"
 REMOTE_DETAIL = "remote HTTP/SSE server — behavior not statically verifiable"
 
 
@@ -22,18 +24,19 @@ class TestClassifyTable(unittest.TestCase):
         self.dir = Path(tmp.name)
         self.script = self.dir / "server.py"
         self.script.write_text('print("hello")\n', encoding="utf-8")
+        fake_home(self)
 
     def test_table(self) -> None:
         d, script = str(self.dir), str(self.script)
         rows: list[tuple[str, dict[str, object], ServerRef]] = [
             ("npx", {"command": "npx", "args": ["-y", "@acme/weather-mcp"]},
-             ServerRef("s", "package", "@acme/weather-mcp", False, NPM_DETAIL)),
+             ServerRef("s", "package", "@acme/weather-mcp", False, NOT_CACHED)),
             ("npx by absolute path", {"command": "/opt/bin/npx", "args": ["acme-mcp"]},
-             ServerRef("s", "package", "acme-mcp", False, NPM_DETAIL)),
+             ServerRef("s", "package", "acme-mcp", False, NOT_CACHED)),
             ("npx without a package arg", {"command": "npx", "args": ["-y"]},
-             ServerRef("s", "package", "npx", False, NPM_DETAIL)),
+             ServerRef("s", "package", "npx", False, NOT_CACHED)),
             ("uvx", {"command": "uvx", "args": ["acme-mcp-server"]},
-             ServerRef("s", "package", "acme-mcp-server", False, PYPI_DETAIL)),
+             ServerRef("s", "package", "acme-mcp-server", False, NOT_CACHED)),
             ("url", {"url": "https://mcp.example.invalid/sse"},
              ServerRef("s", "remote", "https://mcp.example.invalid/sse", False, REMOTE_DETAIL)),
             ("serverUrl", {"serverUrl": "https://mcp.example.invalid/mcp"},

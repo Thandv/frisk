@@ -4,8 +4,9 @@ A target may be:
   - a local file or directory               -> scanned in place
   - a git URL (https://… .git, git@…, github.com/owner/repo) -> shallow-cloned to a temp dir
   - an MCP config file (claude_desktop_config.json / .mcp.json / .claude.json)
-        -> every referenced server is resolved; local ones are scanned, remote/
-           package ones are reported as unverifiable (cannot scan without fetching).
+        -> every referenced server is resolved; local ones and npx/uvx/pipx packages
+           already in the local cache are scanned; remote ones and uncached packages are
+           reported as unverifiable (frisk never fetches).
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import pkgcache
 from .debug import log as _root_log, ms_since
 from .rules import CODE_EXTS
 
@@ -86,20 +88,28 @@ _PKG_RUNNERS = {"npx": "npm", "npm": "npm", "pnpm": "npm", "bunx": "npm",
 _INTERPRETERS = {"python", "node", "bun", "deno", "ruby", "bash", "sh"}
 _PROJECT_MARKERS = ("pyproject.toml", "package.json", ".git")
 _WALK_UP_LEVELS = 3
-# uv options that take a value, so the value is not mistaken for the subcommand or script.
+# Options that take a value, so the value is not mistaken for the subcommand, script or package.
 _UV_VALUE_FLAGS = {"--directory", "--project", "--from", "--with", "--with-editable", "--with-requirements",
                    "--python", "-p", "--package", "--env-file", "--index", "--index-url", "--extra-index-url"}
+_NPX_VALUE_FLAGS = {"-p", "--package", "-c", "--call", "--registry", "--cache", "--userconfig", "--prefix"}
+_PIPX_VALUE_FLAGS = {"--spec", "--python", "--pip-args", "--index-url"}
 _UNRESOLVED = "could not resolve a local source to scan"
 _RELATIVE = "relative path and no absolute 'cwd' in the config: cannot tell which file runs"
+_NOT_CACHED = "not in local cache; frisk does not download"
 
 
 @dataclass
 class ServerRef:
     name: str
-    kind: str          # "local" | "package" | "remote" | "unknown"
+    kind: str          # "local" | "package-cached" | "package" | "remote" | "unknown"
     ref: str           # local path, package name, or URL; print it only through display_ref
     scannable: bool
     detail: str = ""
+    # A package-cached server (ref is the cached package's own source): the package as the
+    # config names it, the cached version, and its declared dependencies, which are not scanned.
+    package: str = ""
+    version: str = ""
+    unscanned_deps: tuple[str, ...] = ()
 
 
 def display_ref(s: ServerRef) -> str:
@@ -149,6 +159,8 @@ def _classify(name: str, spec: dict) -> ServerRef:
     base = os.path.basename(cmd)
     if base == "uv":
         return _classify_uv(name, args, cwd)
+    if base in ("npx", "uvx", "pipx"):
+        return _cached_package(name, base, _package_spec(base, args) or cmd)
     if base in _PKG_RUNNERS:
         pkg = next((a for a in args if not a.startswith("-")), "")
         return _package(name, _PKG_RUNNERS[base], pkg or cmd)
@@ -171,8 +183,7 @@ def _classify_uv(name: str, args: list[str], cwd: Path | None) -> ServerRef:
     else 'cwd'. `uv tool run` runs a PyPI package, like uvx."""
     opts, rest = _leading_options(args, _UV_VALUE_FLAGS)
     if rest[:2] == ["tool", "run"]:
-        tool_opts, command = _leading_options(rest[2:], _UV_VALUE_FLAGS)
-        return _package(name, "pypi", tool_opts.get("--from") or (command[0] if command else "uv"))
+        return _cached_package(name, "uvx", _package_spec("uvx", rest[2:]) or "uv")
     if rest[:1] != ["run"]:
         return ServerRef(name, "unknown", "uv", scannable=False, detail=_UNRESOLVED)
     run_opts, command = _leading_options(rest[1:], _UV_VALUE_FLAGS)
@@ -193,6 +204,58 @@ def _classify_uv(name: str, args: list[str], cwd: Path | None) -> ServerRef:
 def _package(name: str, ecosystem: str, pkg: str) -> ServerRef:
     return ServerRef(name, "package", pkg, scannable=False,
                      detail=f"{ecosystem} package — fetch+scan not yet supported (roadmap)")
+
+
+def _cached_package(name: str, runner: str, spec: str) -> ServerRef:
+    """An npx, uvx or pipx server: scannable when one version of its package is in the local
+    cache (pinned in the spec, or the only one there). Never downloads; one unusable cache
+    entry makes only this server SKIP."""
+    pkg, version = _split_spec(runner, spec)
+    try:
+        copies = [c for c in pkgcache.find(runner, pkg) if c.version == version or not version]
+    except pkgcache.CacheError as e:
+        return ServerRef(name, "package", spec, scannable=False,
+                         detail=f"local cache entry unusable ({e}); frisk does not download")
+    versions = sorted({c.version for c in copies})
+    if len(versions) > 1:
+        return ServerRef(name, "package", spec, scannable=False,
+                         detail=f"versions {', '.join(versions)} are cached; frisk cannot tell which one runs")
+    if not copies:
+        return ServerRef(name, "package", spec, scannable=False, detail=_NOT_CACHED)
+    c = copies[0]
+    return ServerRef(name, "package-cached", str(c.path), scannable=True,
+                     detail=f"{_PKG_RUNNERS[runner]} package {pkg} {c.version} from local cache "
+                            f"{home_label(str(c.path))}",
+                     package=spec, version=c.version, unscanned_deps=c.deps)
+
+
+def _package_spec(runner: str, args: list[str]) -> str:
+    """The package a runner's args name: npx [-p PKG] PKG, uvx [--from PKG] PKG,
+    pipx run [--spec PKG] PKG."""
+    if runner == "npx":
+        opts, rest = _leading_options(args, _NPX_VALUE_FLAGS)
+        return opts.get("--package") or opts.get("-p") or (rest[0] if rest else "")
+    if runner == "uvx":
+        opts, rest = _leading_options(args, _UV_VALUE_FLAGS)
+        return opts.get("--from") or (rest[0] if rest else "")
+    _, rest = _leading_options(args, _PIPX_VALUE_FLAGS)
+    if rest[:1] != ["run"]:
+        return ""
+    opts, rest = _leading_options(rest[1:], _PIPX_VALUE_FLAGS)
+    return opts.get("--spec") or (rest[0] if rest else "")
+
+
+def _split_spec(runner: str, spec: str) -> tuple[str, str]:
+    """(name, pinned version or ''): npm 'pkg@1.2.3' or '@scope/pkg@1.2.3'; PyPI
+    'pkg==1.2.3' or 'pkg@1.2.3', extras dropped. A range or tag is kept as the version, so
+    it matches no cached version."""
+    if runner == "npx":
+        at = spec.find("@", 1)
+        return (spec[:at], spec[at + 1:]) if at > 0 else (spec, "")
+    name, sep, version = spec.partition("==")
+    if not sep:
+        name, _, version = spec.partition("@")
+    return name.split("[", 1)[0].strip(), version.strip()
 
 
 def _local(name: str, root: Path, detail: str) -> ServerRef:
