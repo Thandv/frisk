@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from .engine import ScanResult, display_prefix, reroot, scan_path, scan_text, verdict, fails
-from .report import to_text, to_json, to_sarif, _c
+from .report import AuditRecord, audit_text, to_text, to_json, to_sarif, _c
 from .sources import is_git_url, materialize, parse_mcp_config
 from . import pin, proxy
 from .debug import setup_debug
@@ -67,25 +67,16 @@ def _distinct(targets: list[str]) -> list[str]:
     return out
 
 
-def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
-    result = ScanResult()
-    lines: list[str] = [_c(f"MCP config audit: {path}", "bold"), ""]
-    servers = parse_mcp_config(path)
-    if not servers:
-        lines.append("  (no servers found in config)")
-        return result, lines
-    for s in servers:
+def _audit_config(path: str) -> list[AuditRecord]:
+    """One record per server in the config, in config order; [] when it lists none."""
+    records: list[AuditRecord] = []
+    for s in parse_mcp_config(path):
         if s.scannable:
             server = reroot(scan_path(s.ref), f"{s.name}::", "mcp")
-            result.extend(server)
-            v = verdict(server.findings)
-            tag = _c(f"{v:<5}", {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}[v])
+            records.append(AuditRecord(s, server, verdict(server.findings)))
         else:
-            tag = _c("SKIP ", "dim")
-        lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {s.detail}")
-        if not s.scannable:
-            lines.append(_c(f"           → {s.ref}", "dim"))
-    return result.sort(), lines
+            records.append(AuditRecord(s, ScanResult(), None))
+    return records
 
 
 # --- scan (default) ---------------------------------------------------------
@@ -114,7 +105,7 @@ def _cmd_scan(argv: list[str]) -> int:
         return 2
 
     result = ScanResult()
-    audit_lines: list[str] = []
+    audits: list[str] = []
     label = ", ".join(args.targets + args.mcp_config) or "<text>"
     try:
         if args.text is not None:
@@ -122,9 +113,10 @@ def _cmd_scan(argv: list[str]) -> int:
         for t in _distinct(args.targets):
             result.extend(_scan_target(t))
         for cfg in args.mcp_config:
-            server_result, lines = _audit_config(cfg)
-            result.extend(server_result)
-            audit_lines.extend(lines)
+            records = _audit_config(cfg)
+            for rec in records:
+                result.extend(rec.result)
+            audits.append(audit_text(cfg, records))
     except (FileNotFoundError, RuntimeError, ValueError) as e:
         print(f"frisk: {e}", file=sys.stderr)
         return 2
@@ -137,8 +129,8 @@ def _cmd_scan(argv: list[str]) -> int:
     elif args.quiet:
         print(f"frisk: {verdict(findings)}  ({label})")
     else:
-        if audit_lines:
-            print("\n".join(audit_lines))
+        if audits:
+            print("\n".join(audits))
             print()
         print(to_text(result, label, show_coverage=bool(args.targets or args.mcp_config)))
 

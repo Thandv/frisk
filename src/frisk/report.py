@@ -6,19 +6,47 @@ import json
 import os
 import sys
 from collections import Counter
+from typing import NamedTuple
 
 from .engine import Coverage, Finding, ScanResult, sort_findings, verdict, worst_severity
 from .rules import RULE_META, owasp_for
+from .sources import ServerRef
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 _C = {
     "block": "\033[31m", "warn": "\033[33m", "pass": "\033[32m",
     "dim": "\033[2m", "bold": "\033[1m", "reset": "\033[0m",
 }
+_VERDICT_COLOR = {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}
 
 
 def _c(s: str, key: str) -> str:
     return f"{_C[key]}{s}{_C['reset']}" if _USE_COLOR else s
+
+
+class AuditRecord(NamedTuple):
+    """One server of an MCP config audit: built by cli._audit_config, formatted here.
+
+    `result` is the server's scan (finding and skipped paths prefixed 'name::');
+    `verdict` is None when the server was not scanned.
+    """
+    server: ServerRef
+    result: ScanResult
+    verdict: str | None
+
+
+def audit_text(path: str, records: list[AuditRecord]) -> str:
+    """The text audit of one config: a header, then one line per server in config order."""
+    lines = [_c(f"MCP config audit: {path}", "bold"), ""]
+    if not records:
+        lines.append("  (no servers found in config)")
+    for rec in records:
+        s = rec.server
+        tag = _c("SKIP ", "dim") if rec.verdict is None else _c(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
+        lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {s.detail}")
+        if rec.verdict is None:
+            lines.append(_c(f"           → {s.ref}", "dim"))
+    return "\n".join(lines)
 
 
 # Sized to the longest category any rule can report, so every line aligns.
@@ -47,8 +75,7 @@ def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
     blocks = sum(1 for f in findings if f.severity == "block")
     warns = sum(1 for f in findings if f.severity == "warn")
     v = verdict(findings)
-    vkey = {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}[v]
-    banner = _c(f"  {v}  ", vkey)
+    banner = _c(f"  {v}  ", _VERDICT_COLOR[v])
     if not findings:
         lines.append(_c(f"frisk: clean — no findings in {target}", "pass"))
     lines.append("")
