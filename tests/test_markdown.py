@@ -249,6 +249,18 @@ class TestAdversarialSize(TempDir):
         self.assertEqual([s for s in markdown.extract(Path("big.md"), text) if s.kind == "code"], [])
         self.assertLess(time.monotonic() - t0, 5.0)
 
+    def test_a_long_backtick_run_inside_a_line_is_linear(self) -> None:
+        # Review: the mid-line fence opener was tried from every backtick of a run that text
+        # follows, and each try rescanned the rest of the run. 16 KiB took about 4 s of CPU,
+        # 32 KiB about 16 s, and 1 MiB would take hours. Now about 1 ms. CPU time, so machine
+        # load does not matter; 2 s is a wide margin.
+        text = "See " + "`" * (1 << 15) + " here.\n" + INSTALLER + "\n"
+        for name in ("guide.md", "notes.txt"):
+            with self.subTest(name):
+                t0 = time.process_time()
+                self.assertEqual(self.lines(name, text), [])
+                self.assertLess(time.process_time() - t0, 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()
