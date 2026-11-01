@@ -247,7 +247,7 @@ Run on agent-instruction files only, where the text addresses the agent: `SKILL.
 ### inject.sensitive_path_instruction
 
 - Severity: `block` · Category: `injection` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
-- Matches: An imperative verb (copy, send, upload, read, cat, include, attach or print) followed within 60 characters by a credential location: the `.ssh` directory or an `id_rsa`/`id_ed25519`-style private key (not a `.pub` key, `.ssh/config` or `known_hosts`), the AWS credentials file, the gcloud or Azure config directory, the `.gnupg` directory, a private key or the keychain. A clause that negates the verb first (never, not, no, avoid, don't) does not match, so a defensive "never read the SSH key" passes.
+- Matches: An imperative verb (copy, send, upload, read, cat, include, attach or print) followed within 60 characters, in the same sentence, by a credential location: the `.ssh` directory or an `id_rsa`/`id_ed25519`-style private key (not a `.pub` key, `.ssh/config` or `known_hosts`), the AWS credentials file, the gcloud or Azure config directory, the `.gnupg` directory, a private key or the keychain. A clause that negates the verb first (never, not, no, avoid, don't) does not match, so a defensive "never read the SSH key" passes, also after an imperative sentence such as "Read the README."
 - Likely false positive: A key-management skill whose stated job is to read a key.
 - On a hit: Reject: an instruction file that tells the agent to read or send key material is an exfiltration attempt.
 

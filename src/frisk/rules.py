@@ -201,10 +201,14 @@ _CREDENTIAL_LOCATION = (
 # Text from the start of a line or clause up to the verb, with no negation in it, so a
 # defensive "never read ~/.ssh" does not match.
 _UNNEGATED_CLAUSE = r"(?:^|(?<=[.!?;:]))(?:(?!\b(?:never|not|no|avoid)\b|n['\u2019]t\b)[^\n.!?;:])*?"
+# From the verb to the location: up to 60 characters in the same sentence (a '.', '!', '?' or
+# ';' inside a path such as ~/.ssh is not a sentence end), so the verb of one sentence never
+# reaches the location of the next, which may be a defensive "never read ~/.ssh".
+_SAME_SENTENCE = r"(?:[^\n.!?;]|[.!?;](?=\S)){0,60}?"
 
 INSTRUCTION_RULES = [
     ("inject.sensitive_path_instruction", "injection", "block",
-     re.compile(_UNNEGATED_CLAUSE + r"\b(?:copy|send|upload|read|cat|include|attach|print)\b[^\n]{0,60}?"
+     re.compile(_UNNEGATED_CLAUSE + r"\b(?:copy|send|upload|read|cat|include|attach|print)\b" + _SAME_SENTENCE
                 + _CREDENTIAL_LOCATION, re.IGNORECASE | re.MULTILINE),
      "instruction to the agent to copy, read or send a credential file"),
 ]
