@@ -150,14 +150,18 @@ def scan_text(text: str, label: str = "<text>") -> ScanResult:
     return ScanResult(findings)
 
 
+def coverage_warning(rel: str, rule: str, message: str) -> ScanResult:
+    """A coverage finding (a rule in RULE_META) about `rel` as a whole, at line 1."""
+    category, severity, _ = RULE_META[rule]
+    return ScanResult([Finding(rel, 1, rule, category, severity, message, "")])
+
+
 def _not_scanned(rel: str, reason: str, detail: str, rule: str | None = None,
                  message: str = "") -> ScanResult:
     """A file that was not pattern-matched: a skipped entry, plus a warn finding if `rule`."""
-    findings = []
-    if rule is not None:
-        category, severity, _ = RULE_META[rule]
-        findings.append(Finding(rel, 1, rule, category, severity, message, ""))
-    return ScanResult(findings, Coverage(skipped=[Skipped(rel, reason, detail)]))
+    result = coverage_warning(rel, rule, message) if rule is not None else ScanResult()
+    result.coverage.skipped.append(Skipped(rel, reason, detail))
+    return result
 
 
 def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:

@@ -98,6 +98,8 @@ class AuditTextTest(unittest.TestCase):
             "  [PASS ] ok                     local  local source via node",
             "  [SKIP ] far                    remote  remote server",
             "           → " + REMOTE,
+            "",
+            "  1 of 2 servers not scanned",  # FR-E4 t6: the summary line
         ]))
 
     def test_empty_config_says_so(self) -> None:

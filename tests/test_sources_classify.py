@@ -54,8 +54,10 @@ class TestClassifyTable(unittest.TestCase):
             ("unresolvable command", {"command": "/nonexistent.invalid/bin/srv", "args": ["x"]},
              ServerRef("s", "unknown", "/nonexistent.invalid/bin/srv", False,
                        "could not resolve a local source to scan")),
+            # FR-E4 t6: an entry with neither a command nor a url is 'invalid' (was 'unknown',
+            # "could not resolve a local source to scan").
             ("empty spec", {},
-             ServerRef("s", "unknown", "?", False, "could not resolve a local source to scan")),
+             ServerRef("s", "invalid", "?", False, "server entry has neither a command nor a url")),
             # Changed on purpose by FR-E4 t3: `uv` used to count as a package runner (the
             # --directory value was taken as the package name, so this was an unscannable
             # pypi package). `uv run` is local source rooted at --directory.

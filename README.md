@@ -117,6 +117,9 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   it raises a `coverage.surface_error` warning, and the rest of that file and every
   other file are still scanned.
 
+In an MCP config audit, each server frisk could not scan also raises a
+`coverage.unscanned` warning ([below](#audit-everything-youve-already-installed)).
+
 ### SARIF for code scanning
 
 `--sarif` writes SARIF 2.1.0 that is deterministic (two runs over the same tree are
@@ -139,17 +142,34 @@ Point `frisk` at your MCP config and it resolves and scans every server you have
 frisk --mcp-config ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
 ```
+$ frisk --mcp-config claude_desktop_config.json
 MCP config audit: claude_desktop_config.json
 
   [PASS ] notes-server           local  local source via python3
-  [BLOCK] sketchy-server         local  local source via node
+  [PASS ] weather                package-cached  npm package acme-weather 1.4.2 from local cache ~/.npm/_npx/9f86d081884c7d65/node_modules/acme-weather; 1 dependency not scanned: zod
   [SKIP ] some-remote            remote  remote HTTP/SSE server — behavior not statically verifiable
-           → https://mcp.example.com/sse
+           → https://mcp.example.invalid/sse
   [SKIP ] npm-tool               package  not in local cache; frisk does not download
            → some-npm-mcp
+
+  2 of 4 servers not scanned
+
+[warn ] coverage       npm-tool::some-npm-mcp:1  MCP server not scanned (package)
+[warn ] coverage       some-remote::https://mcp.example.invalid/sse:1  MCP server not scanned (remote)
+
+scanned 3 files, skipped 0
+verdict:   WARN    0 blocking · 2 warnings · 2 total  (claude_desktop_config.json)
 ```
 
-The findings and the verdict follow, as for any scan.
+A server frisk could not scan is never passed over in silence: it raises a
+`coverage.unscanned` warning, so the verdict is at least WARN (never PASS), and each
+config's audit ends with `N of M servers not scanned` (or `scanned M of M servers`).
+`--fail-on warn` fails on it; the default `--fail-on block` does not. A server entry that
+is not a valid server (not a JSON object, a `command` that is not a string, no `command`
+or `url`) is reported as `invalid`, and the other servers are still audited. `--json` adds
+`servers`, one entry per audited server: `name`, `kind`, `status` (`scanned` or `skipped`),
+`reason` (the detail shown above, with a cached package's unscanned dependencies) and
+`verdict` (`null` when skipped).
 
 Claude Code's `~/.claude.json` works too (`frisk ~/.claude.json`): its top-level servers and
 every project's `mcpServers` are audited. A project server is named `server (project)`,

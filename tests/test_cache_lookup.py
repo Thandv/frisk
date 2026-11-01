@@ -94,7 +94,7 @@ class NpxTest(CacheCase):
         code, out = run(["--mcp-config", self.config({"tool": {"command": "npx", "args": ["-y", "acme-tool"]}})])
         self.assertEqual(code, 1)
         self.assertIn("  [BLOCK] tool                   package-cached  npm package acme-tool 1.0.0 from local cache "
-                      f"~/.npm/_npx/{NPX_HASH}/node_modules/acme-tool\n", out)
+                      f"~/.npm/_npx/{NPX_HASH}/node_modules/acme-tool; 1 dependency not scanned: left-pad\n", out)
         self.assertIn("[BLOCK] rce            tool::index.js:1  ", out)
 
     def test_cached_server_fields(self) -> None:

@@ -101,7 +101,7 @@ _NOT_CACHED = "not in local cache; frisk does not download"
 @dataclass
 class ServerRef:
     name: str
-    kind: str          # "local" | "package-cached" | "package" | "remote" | "unknown"
+    kind: str          # "local" | "package-cached" | "package" | "remote" | "unknown" | "invalid"
     ref: str           # local path, package name, or URL; print it only through display_ref
     scannable: bool
     detail: str = ""
@@ -146,9 +146,13 @@ def _safe_url(url: str) -> str:
     return f"{parts.scheme}://{host}{parts.path}"
 
 
-def _classify(name: str, spec: dict) -> ServerRef:
+def _classify(name: str, spec: object) -> ServerRef:
     """How the server really launches. Paths resolve against the spec's absolute 'cwd',
-    never against frisk's own working directory."""
+    never against frisk's own working directory. An entry frisk cannot read is 'invalid'
+    and affects no other server."""
+    problem = _invalid(spec)
+    if problem or not isinstance(spec, dict):  # isinstance only narrows the type
+        return ServerRef(name, "invalid", "?", scannable=False, detail=problem)
     url = spec.get("url") or spec.get("serverUrl")
     if url:
         return ServerRef(name, "remote", url, scannable=False,
@@ -176,6 +180,19 @@ def _classify(name: str, spec: dict) -> ServerRef:
         return ServerRef(name, "local", str(exe), scannable=True, detail="local executable/script")
     why = _RELATIVE if exe is None and "/" in cmd else _UNRESOLVED
     return ServerRef(name, "unknown", cmd or "?", scannable=False, detail=why)
+
+
+def _invalid(spec: object) -> str:
+    """Why a server entry is not one frisk can classify, or ''."""
+    if not isinstance(spec, dict):
+        return "server entry is not a JSON object"
+    for key, kind, what in (("command", str, "a string"), ("url", str, "a string"), ("serverUrl", str, "a string"),
+                            ("cwd", str, "a string"), ("args", list, "a list")):
+        if spec.get(key) is not None and not isinstance(spec[key], kind):
+            return f"server entry's '{key}' is not {what}"
+    if not (spec.get("command") or spec.get("url") or spec.get("serverUrl")):
+        return "server entry has neither a command nor a url"
+    return ""
 
 
 def _classify_uv(name: str, args: list[str], cwd: Path | None) -> ServerRef:
@@ -373,12 +390,12 @@ def parse_mcp_config(path: str | Path) -> list[ServerRef]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: the top level is not a JSON object")
-    refs = [_classify(name, spec or {}) for name, spec in _servers(data, path).items()]
+    refs = [_classify(name, spec) for name, spec in _servers(data, path).items()]
     for key, project in _object(data, "projects", path).items():
         label = home_label(key)
         if not isinstance(project, dict):
             raise ValueError(f"{path}: project {label} is not a JSON object")
-        refs.extend(_classify(f"{name} ({label})", spec or {})
+        refs.extend(_classify(f"{name} ({label})", spec)
                     for name, spec in _servers(project, f"{path}: project {label}").items())
     return refs
 

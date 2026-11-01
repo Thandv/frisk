@@ -36,17 +36,38 @@ class AuditRecord(NamedTuple):
 
 
 def audit_text(path: str, records: list[AuditRecord]) -> str:
-    """The text audit of one config: a header, then one line per server in config order."""
+    """The text audit of one config: a header, one line per server in config order, then
+    how many servers were not scanned."""
     lines = [_c(f"MCP config audit: {path}", "bold"), ""]
     if not records:
         lines.append("  (no servers found in config)")
     for rec in records:
         s = rec.server
         tag = _c("SKIP ", "dim") if rec.verdict is None else _c(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
-        lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {s.detail}")
+        lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {_reason(s)}")
         if rec.verdict is None:
             lines.append(_c(f"           → {display_ref(s)}", "dim"))
+    if records:
+        total, skipped = len(records), sum(1 for rec in records if rec.verdict is None)
+        noun = "server" if total == 1 else "servers"
+        summary = f"{skipped} of {total} {noun} not scanned" if skipped else f"scanned {total} of {total} {noun}"
+        lines += ["", "  " + _c(summary, "warn" if skipped else "dim")]
     return "\n".join(lines)
+
+
+def _reason(s: ServerRef) -> str:
+    """The server's detail, plus the dependencies of a cached package, which were not scanned."""
+    deps = s.unscanned_deps
+    if not deps:
+        return s.detail
+    return f"{s.detail}; {len(deps)} dependenc{'y' if len(deps) == 1 else 'ies'} not scanned: {', '.join(deps)}"
+
+
+def _audit_servers(records: list[AuditRecord]) -> list[dict]:
+    """The servers[] entries of the JSON report: name, kind, status, reason and verdict."""
+    return [{"name": rec.server.name, "kind": rec.server.kind,
+             "status": "skipped" if rec.verdict is None else "scanned",
+             "reason": _reason(rec.server), "verdict": rec.verdict} for rec in records]
 
 
 # Sized to the longest category any rule can report, so every line aligns.
@@ -87,9 +108,11 @@ def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
     return "\n".join(lines)
 
 
-def to_json(result: ScanResult, target: str) -> str:
+def to_json(result: ScanResult, target: str, servers: list[AuditRecord] | None = None) -> str:
+    """The JSON report; `servers` (one entry per audited MCP server) is present only when
+    an MCP config was audited."""
     findings = result.findings
-    return json.dumps({
+    doc: dict[str, object] = {
         "target": target,
         "verdict": verdict(findings),
         "worst_severity": worst_severity(findings),
@@ -100,7 +123,10 @@ def to_json(result: ScanResult, target: str) -> str:
         },
         "findings": [{**f.as_dict(), "owasp": owasp_for(f.category)} for f in findings],
         "coverage": result.coverage.as_dict(),
-    }, indent=2)
+    }
+    if servers is not None:
+        doc["servers"] = _audit_servers(servers)
+    return json.dumps(doc, indent=2)
 
 
 _SARIF_LEVEL = {"block": "error", "warn": "warning"}

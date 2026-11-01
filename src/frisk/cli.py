@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .engine import ScanResult, display_prefix, reroot, scan_path, scan_text, verdict, fails
+from .engine import ScanResult, coverage_warning, display_prefix, reroot, scan_path, scan_text, verdict, fails
 from .report import AuditRecord, audit_text, to_text, to_json, to_sarif, _c
-from .sources import is_git_url, looks_like_mcp_config, materialize, parse_mcp_config
+from .sources import display_ref, is_git_url, looks_like_mcp_config, materialize, parse_mcp_config
 from . import pin, proxy
 from .debug import setup_debug
 
@@ -68,14 +68,20 @@ def _distinct(targets: list[str]) -> list[str]:
 
 
 def _audit_config(path: str) -> list[AuditRecord]:
-    """One record per server in the config, in config order; [] when it lists none."""
+    """One record per server in the config, in config order; [] when it lists none.
+
+    A server frisk does not scan (remote, an uncached package, an unresolved or invalid
+    entry) carries a coverage.unscanned warning at 'name::<its ref>', so no audit with a
+    skipped server is ever PASS.
+    """
     records: list[AuditRecord] = []
     for s in parse_mcp_config(path):
         if s.scannable:
             server = reroot(scan_path(s.ref), f"{s.name}::", "mcp")
             records.append(AuditRecord(s, server, verdict(server.findings)))
         else:
-            records.append(AuditRecord(s, ScanResult(), None))
+            note = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
+            records.append(AuditRecord(s, reroot(note, f"{s.name}::", "mcp"), None))
     return records
 
 
@@ -107,6 +113,7 @@ def _cmd_scan(argv: list[str]) -> int:
 
     result = ScanResult()
     audits: list[str] = []
+    servers: list[AuditRecord] = []
     label = ", ".join(args.targets + args.mcp_config) or "<text>"
     try:
         if args.text is not None:
@@ -117,10 +124,12 @@ def _cmd_scan(argv: list[str]) -> int:
                 configs.append(t)  # audited, never text-scanned: its env values must not show
             else:
                 result.extend(_scan_target(t))
-        for cfg in configs + args.mcp_config:
+        configs += args.mcp_config
+        for cfg in configs:
             records = _audit_config(cfg)
             for rec in records:
                 result.extend(rec.result)
+            servers.extend(records)
             audits.append(audit_text(cfg, records))
     except (FileNotFoundError, RuntimeError, ValueError) as e:
         print(f"frisk: {e}", file=sys.stderr)
@@ -128,7 +137,7 @@ def _cmd_scan(argv: list[str]) -> int:
     findings = result.sort().findings
 
     if args.json:
-        print(to_json(result, label))
+        print(to_json(result, label, servers if configs else None))
     elif args.sarif:
         print(to_sarif(result, __version__))
     elif args.quiet:

@@ -237,11 +237,18 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             "           → https://mcp.example.invalid/sse",
             "  [SKIP ] ghost-srv              unknown  could not resolve a local source to scan",
             "           → /nonexistent.invalid/bin/ghost",
+            # FR-E4 t6: a summary line, and one coverage.unscanned warning per skipped server, so
+            # the verdict is WARN (was "frisk: clean — no findings in <cfg>" and PASS, with 3 of
+            # 4 servers unscanned). The exit code stays 0 under the default --fail-on block.
             "",
-            f"frisk: clean — no findings in {cfg}",
+            "  3 of 4 servers not scanned",
+            "",
+            "[warn ] coverage       ghost-srv::/nonexistent.invalid/bin/ghost:1  MCP server not scanned (unknown)",
+            "[warn ] coverage       pkg-srv::acme-weather-mcp:1  MCP server not scanned (package)",
+            "[warn ] coverage       remote-srv::https://mcp.example.invalid/sse:1  MCP server not scanned (remote)",
             "",
             "scanned 2 files, skipped 0",  # FR-E2 t3: coverage line (server.py and mcp.json)
-            f"verdict:   PASS    0 blocking · 0 warnings · 0 total  ({cfg})",
+            f"verdict:   WARN    0 blocking · 3 warnings · 3 total  ({cfg})",
             "",
         ]))
 
@@ -261,6 +268,8 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             f"MCP config audit: {cfg}",
             "",
             "  [BLOCK] bad-srv                local  local source via bash",
+            "",
+            "  scanned 1 of 1 server",  # FR-E4 t6: the summary line
             "",
             # FR-E2 t5: the category column is 14 wide (longest category), was 13.
             "[BLOCK] rce            bad-srv::run.sh:2  pipe-to-shell remote installer (curl|wget ... | sh)",
