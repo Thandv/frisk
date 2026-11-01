@@ -9,13 +9,15 @@ Severity: **block** fails a scan by default; **warn** fails only with `--fail-on
 
 ## Code rules
 
-Run on script files (`.py`, `.sh`, `.js` and the other code extensions) and on fenced code blocks in every other text file.
+Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks (` ``` ` or `~~~`, any length; an unclosed fence runs to the end of the file) in every other text file, on indented code blocks and inline code spans in markdown (`.md`, `.markdown`, `.mdc`), and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command.
+
+Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md` or `.markdown` that is not an agent-instruction file) report a code rule at most as `warn`: a document that mentions a risky call by name is not running it. In agent-instruction files (see [inject.sensitive_path_instruction](#inject.sensitive_path_instruction) for the list) and in fenced or indented code blocks everywhere, code rules keep the severity listed below. Text rules keep their severity in every form.
 
 <a id="rce.pipe_installer"></a>
 ### rce.pipe_installer
 
 - Severity: `block` · Category: `rce` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A `curl` or `wget` command whose output is piped, on the same line, into a shell or a Python interpreter (optionally through `sudo`).
+- Matches: A `curl` or `wget` command whose output is piped into a shell or a Python interpreter on the same line or across backslash-continued lines (before or after the `|`), where the shell may be named by a path (`/bin/sh`) or reached through `sudo` or `env` with options; or a `curl`/`wget` download run by a shell through process substitution (`bash <(…)`) or `sh -c "$(…)"`.
 - Likely false positive: Install instructions in a README that tell a human to run a vendor's official installer.
 - On a hit: Do not run it. Download the script, read it, and pin it by hash; prefer a package manager.
 
@@ -95,7 +97,7 @@ Run on script files (`.py`, `.sh`, `.js` and the other code extensions) and on f
 ### exfil.secret_name
 
 - Severity: `warn` · Category: `exfil` · OWASP LLM Top 10 (2025): LLM02:2025 Sensitive Information Disclosure
-- Matches: An upper-case identifier ending in TOKEN, SECRET, API_KEY, ACCESS_KEY, PRIVATE_KEY or PASSWORD.
+- Matches: An upper-case identifier ending in TOKEN, SECRET, API_KEY, ACCESS_KEY, PRIVATE_KEY or PASSWORD. Case-sensitive: lower-case identifiers such as `access_token` do not match.
 - Likely false positive: Configuration docs naming the variable a user must set.
 - On a hit: Review together with network findings; on its own it is informational.
 
@@ -135,15 +137,15 @@ Run on script files (`.py`, `.sh`, `.js` and the other code extensions) and on f
 ### destroy.rm_rf
 
 - Severity: `block` · Category: `destructive` · OWASP LLM Top 10 (2025): LLM06:2025 Excessive Agency
-- Matches: A recursive, forced `rm` whose target is `/`, `~`, `$HOME` or a glob.
-- Likely false positive: Cleanup of a build directory written with a glob.
+- Matches: A recursive, forced `rm` (`-rf`, `-fr`, `-r -f`, `--recursive --force`, in any order) whose target is `/`; a top-level system directory (`/etc`, `/usr`, `/bin`, `/sbin`, `/var`, `/opt`, `/private`, `/System`, `/Library`, `/home`, `/Users`, `/root`); `~`, `$HOME` or `${HOME}`; a credential directory in the home directory (`.ssh`, `.aws`, `.gnupg`, `.config`, `.kube`, `.docker`); or a glob over one of them or a bare `*`. Targets may be quoted and end in `/` or `/*`. Paths below those, such as temporary and build directories (`/tmp/x`, `$TMPDIR/x`, `/usr/local/x`, `./build`), do not match.
+- Likely false positive: A script that empties its own working directory with a bare `*`.
 - On a hit: Reject unless the path is a clearly scoped temporary directory.
 
 <a id="destroy.disk"></a>
 ### destroy.disk
 
 - Severity: `block` · Category: `destructive` · OWASP LLM Top 10 (2025): LLM06:2025 Excessive Agency
-- Matches: `dd if=`, `mkfs`, or a redirect into a raw disk device.
+- Matches: `dd` with `of=` a `/dev` device other than `/dev/null`, `/dev/zero`, `/dev/stdout`, `/dev/stderr` or `/dev/fd/*`; `mkfs` (or `mkfs.<type>`) on a `/dev` device; or a redirect into a raw disk device. `dd` to a regular file does not match.
 - Likely false positive: Disk-imaging tools whose purpose this is.
 - On a hit: Never acceptable in agent content; reject.
 
@@ -165,7 +167,7 @@ Run on script files (`.py`, `.sh`, `.js` and the other code extensions) and on f
 
 ## Text rules
 
-Run on the full text of every file frisk reads, code files included, and on `--text` input.
+Run on the full text of every file frisk reads, code files included, and on `--text` input. Markdown HTML comments, which renderers hide, are text-scanned like everything else.
 
 <a id="inject.ignore_prev"></a>
 ### inject.ignore_prev
@@ -203,7 +205,7 @@ Run on the full text of every file frisk reads, code files included, and on `--t
 ### inject.exfil_instr
 
 - Severity: `warn` · Category: `injection` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
-- Matches: Text with send, post, exfiltrate or upload, then `to`, then an http(s) URL, all on one line within short distances.
+- Matches: Text with any inflection of send, post, exfiltrate or upload (sends, sent, posted, uploading…), then `to`, then an http(s) URL, within short distances and with at most one line break (never across a blank line).
 - Likely false positive: Docs telling a user to upload a file to the project's own site.
 - On a hit: Check the URL and who the instruction is addressed to; an instruction to the model to send data out is hostile.
 
@@ -239,6 +241,18 @@ Run on the full text of every file frisk reads, code files included, and on `--t
 - Likely false positive: Setup docs that tell a human where a cloud credential file lives.
 - On a hit: If the text addresses the model, reject: it asks the model to read secrets.
 
+## Instruction rules
+
+Run on agent-instruction files only, where the text addresses the agent: `SKILL.md`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.cursorrules`, `*.mdc`, `*.md` files in an `agents/` or `commands/` directory, and `*.md` files at any depth below `.claude/agents`, `.claude/commands`, `.claude/rules`, `.claude/skills` or `.claude/output-styles`. Names match in any case. Ordinary docs such as a README do not get them.
+
+<a id="inject.sensitive_path_instruction"></a>
+### inject.sensitive_path_instruction
+
+- Severity: `block` · Category: `injection` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
+- Matches: An imperative verb (copy, send, upload, read, cat, include, attach or print) followed within 60 characters, in the same sentence, by a credential location: the `.ssh` directory or an `id_rsa`/`id_ed25519`-style private key (not a `.pub` key, `.ssh/config` or `known_hosts`), the AWS credentials file, the gcloud or Azure config directory, the `.gnupg` directory, a private key or the keychain. A clause that negates the verb first (never, not, no, avoid, don't) does not match, so a defensive "never read the SSH key" passes, also after an imperative sentence such as "Read the README."
+- Likely false positive: A key-management skill whose stated job is to read a key.
+- On a hit: Reject: an instruction file that tells the agent to read or send key material is an exfiltration attempt.
+
 ## Hidden characters
 
 Run with the text rules.
@@ -247,9 +261,17 @@ Run with the text rules.
 ### unicode.invisible
 
 - Severity: `block` · Category: `obfuscation` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
-- Matches: Zero-width characters (space, joiner, non-joiner, word joiner) or bidirectional controls (marks, embeddings, overrides, isolates) anywhere in the text. A byte-order mark (U+FEFF) is not reported anywhere: a leading one is read as encoding, and one later in the text is a known gap, as are the soft hyphen, the invisible operators and tag characters. Only the first occurrence of each character is reported.
+- Matches: Zero-width characters (space, joiner, non-joiner, word joiner), bidirectional controls (marks, embeddings, overrides, isolates) or tag characters (U+E0000 to U+E007F) anywhere in the text. A zero-width joiner directly between two emoji (as in a family emoji) and the tag sequence of one of the three recommended subdivision flags (England, Scotland, Wales: black flag, tag letters, cancel tag) are allowed; any other tag run blocks, since tag letters can spell hidden text a few at a time. Only the first reported occurrence of each character class is reported.
 - Likely false positive: Text in right-to-left languages that uses directional marks on purpose.
 - On a hit: Reveal the characters (for example with a hex view); hidden text an agent reads but a human does not see is a classic injection carrier.
+
+<a id="unicode.hidden_format"></a>
+### unicode.hidden_format
+
+- Severity: `warn` · Category: `obfuscation` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
+- Matches: Invisible formatting characters that rarely belong in agent content: a run of two or more supplementary variation selectors (U+E0100 to U+E01EF), the invisible operators (U+2061 to U+2064), the soft hyphen (U+00AD), the Mongolian vowel separator (U+180E), or a byte-order mark (U+FEFF) anywhere but the very start of the text. A single variation selector and a leading byte-order mark are allowed. Only the first reported occurrence of each character class is reported.
+- Likely false positive: Text copied from a word processor that inserted soft hyphens; ideographic variation sequences.
+- On a hit: Reveal the characters (for example with a hex view); runs of variation selectors can encode hidden bytes.
 
 ## Coverage
 

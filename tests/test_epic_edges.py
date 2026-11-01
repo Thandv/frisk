@@ -3,9 +3,8 @@
 Each edge states the behaviour we hold to be correct. Where today's behaviour is
 correct it is asserted exactly; a real defect is a test of the CORRECT behaviour marked
 @unittest.expectedFailure with a `# DEFECT-n:` line above it. Unclosed, ~~~ and
-longer-backtick fences are markdown forms planned for FR-E3a; they are recorded here
-as defects so the fixer can defer them knowingly. FR-E2 t9 fixed DEFECT-4..6 and
-marked DEFECT-1..3 DEFERRED (still expected failures) for FR-E3a.
+longer-backtick fences were recorded here as DEFECT-1..3 for FR-E3a. FR-E2 t9 fixed
+DEFECT-4..6; FR-E3a t3 fixed DEFECT-1..3.
 
 Payloads are assembled at runtime (no malicious literal is committed), hosts use the
 .invalid TLD, nothing is executed and nothing touches the network.
@@ -130,24 +129,17 @@ class TestFenceEdges(TempDir):
                 self.assertEqual(rows(findings), [(line, "rce.pipe_installer")])
                 self.assertEqual(findings[0].source_line.strip(), INSTALLER)
 
-    # DEFERRED (DEFECT-1; markdown fence forms belong to FR-E3a's markdown surface): an unclosed ```
-    #   fence is not scanned as code (CommonMark: it runs to EOF).
-    @unittest.expectedFailure
+    # Fixed in FR-E3a t3 (was DEFECT-1): an unclosed ``` fence is scanned as code to EOF (CommonMark).
     def test_unclosed_fence_runs_to_end_of_file(self) -> None:
         findings = self.scan_bytes("a.md", ("a\n```sh\n" + INSTALLER + "\nmore\n").encode("utf-8"))
         self.assertEqual(rows(findings), [(3, "rce.pipe_installer")])
 
-    # DEFERRED (DEFECT-2; markdown fence forms belong to FR-E3a's markdown surface): a ~~~ fence is
-    #   not scanned as code (only ``` is recognised).
-    @unittest.expectedFailure
+    # Fixed in FR-E3a t3 (was DEFECT-2): a ~~~ fence is scanned as code.
     def test_tilde_fence(self) -> None:
         findings = self.scan_bytes("a.md", ("a\n~~~sh\n" + INSTALLER + "\n~~~\n").encode("utf-8"))
         self.assertEqual(rows(findings), [(3, "rce.pipe_installer")])
 
-    # DEFERRED (DEFECT-3; markdown fence forms belong to FR-E3a's markdown surface): a ```` fence
-    #   holding a ``` example is mis-paired, so its code is not scanned.
-    # (Not on the edge list; found while probing fence pairing.)
-    @unittest.expectedFailure
+    # Fixed in FR-E3a t3 (was DEFECT-3): a ```` fence holding a ``` example pairs correctly.
     def test_longer_fence_containing_a_shorter_one(self) -> None:
         text = "````md\n```sh\n" + INSTALLER + "\n```\n````\n"
         findings = self.scan_bytes("a.md", text.encode("utf-8"))

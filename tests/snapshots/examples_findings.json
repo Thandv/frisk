@@ -16,6 +16,14 @@
   },
   {
     "path": "examples/malicious-skill/SKILL.md",
+    "line": 15,
+    "rule": "inject.exfil_instr",
+    "severity": "warn",
+    "expected_change": null,
+    "note": "New in FR-E3a t1a (F1.07): inject.exfil_instr accepts inflections such as 'posts'."
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
     "line": 17,
     "rule": "inject.hidden_important",
     "severity": "warn",
@@ -34,6 +42,14 @@
     "rule": "inject.read_then_send",
     "severity": "warn",
     "expected_change": null
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
+    "line": 18,
+    "rule": "inject.sensitive_path_instruction",
+    "severity": "block",
+    "expected_change": null,
+    "note": "New in FR-E3a t3 (F1.06): SKILL.md tells the agent to cat a credentials file."
   },
   {
     "path": "examples/malicious-skill/SKILL.md",

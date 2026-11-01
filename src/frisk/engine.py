@@ -11,7 +11,7 @@ from pathlib import Path
 from . import surfaces
 from .rules import (
     ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
-    TEXT_EXTS, TEXT_RULES, UNICODE_RULE, executable_magic, hidden_unicode,
+    INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
 )
 from .surfaces import Span
 
@@ -95,35 +95,49 @@ def _excerpt(text: str, idx: int, span: int = 80) -> str:
     return snippet.strip()[:120]
 
 
-def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Finding]) -> None:
+_RULES_FOR_KIND = {"code": CODE_RULES, "md_inline_code": CODE_RULES, "instruction": INSTRUCTION_RULES}
+_WARN_CAPPED_KINDS = {"md_inline_code"}  # a block finding from these spans reports as warn
+
+
+def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Finding],
+               seen: set[tuple[int, str]]) -> None:
     """Run the span's rules on text[span.start:span.end]; lines are file lines.
 
     The span is matched as its own string (so ^, lookbehinds and word boundaries see the
     span's edges, as they always have) and its excerpts stay inside it; offsets are
-    shifted by span.start and mapped to a line through the file's line index.
+    shifted by span.start and mapped to a line through the file's line index. A rule that
+    matched at the same file offset in an earlier, overlapping span is reported once.
     """
     seg = text if (span.start, span.end) == (0, len(text)) else text[span.start:span.end]
 
     def add(idx: int, rid: str, cat: str, sev: str, desc: str, excerpt: str) -> None:
+        if (span.start + idx, rid) in seen:
+            return
+        seen.add((span.start + idx, rid))
         line = bisect_right(starts, span.start + idx)
         end = starts[line] - 1 if line < len(starts) else len(text)
         out.append(Finding(rel, line, rid, cat, sev, desc, excerpt,
                            source_line=text[starts[line - 1]:end]))
 
-    for rid, cat, sev, rx, desc in (CODE_RULES if span.kind == "code" else TEXT_RULES):
+    capped = span.kind in _WARN_CAPPED_KINDS
+    for rid, cat, sev, rx, desc in _RULES_FOR_KIND.get(span.kind, TEXT_RULES):
+        if capped and sev == "block":
+            sev = "warn"
         for m in rx.finditer(seg):
             add(m.start(), rid, cat, sev, desc, _excerpt(seg, m.start()))
-    if span.kind == "text":
-        rid, cat, sev = UNICODE_RULE
-        for idx, desc in hidden_unicode(seg):
+    if span.kind not in _RULES_FOR_KIND:  # every text kind
+        for idx, rid, desc in hidden_unicode(seg, span.start == 0):
+            cat, sev, _ = RULE_META[rid]
             add(idx, rid, cat, sev, desc, "")
 
 
 def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
     starts = _line_starts(text)
     out: list[Finding] = []
-    for span in spans:
-        _scan_span(text, span, starts, rel, out)
+    seen: set[tuple[int, str]] = set()
+    # Capped spans go last, so a match also found by an uncapped span keeps its severity.
+    for span in sorted(spans, key=lambda s: s.kind in _WARN_CAPPED_KINDS):
+        _scan_span(text, span, starts, rel, out, seen)
     return sort_findings(out)
 
 
@@ -211,10 +225,19 @@ def scan_file(path: Path, root: Path | None = None) -> ScanResult:
     if "\0" in text:
         # NUL bytes make two readings: as written (a renderer shows NUL as U+FFFD, so it
         # cannot close a fence) and with NUL dropped (shells drop it, so 'c<NUL>url' runs as
-        # 'curl'). A finding from either reading counts, once.
-        seen = {(f.line, f.rule, f.description) for f in findings}
-        findings += [f for f in _scan_reading(path, text.replace("\0", ""), rel, failed)
-                     if (f.line, f.rule, f.description) not in seen]
+        # 'curl'). A finding from either reading counts, once, at the higher of its two
+        # severities: one reading may see as capped inline code what the other sees as a
+        # code block.
+        first: dict[tuple[int, str, str], list[Finding]] = {}
+        for f in findings:
+            first.setdefault((f.line, f.rule, f.description), []).append(f)
+        for f in _scan_reading(path, text.replace("\0", ""), rel, failed):
+            same = first.get((f.line, f.rule, f.description))
+            if same is None:
+                findings.append(f)
+                continue
+            for g in same:
+                g.severity = max(g.severity, f.severity, key=SEVERITY_ORDER.__getitem__)
     for detail in failed:
         notes.extend(_not_scanned(rel, "surface_error", detail, "coverage.surface_error",
                                   f"scan surface failed on this file ({detail})"))

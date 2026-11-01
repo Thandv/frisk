@@ -69,14 +69,15 @@ class TestScanResult(unittest.TestCase):
         total.extend(scan_path(EXAMPLES / "malicious-skill"))
         total.extend(scan_path(EXAMPLES / "clean-skill"))
         self.assertEqual(total.coverage.files_scanned, 2)
-        self.assertEqual(len(total.findings), 6)
+        self.assertEqual(len(total.findings), 8)
 
 
 class TestHiddenUnicodeLivesInRules(unittest.TestCase):
     def test_rules_function_reports_offsets(self) -> None:
         from frisk.rules import hidden_unicode
         text = chr(0xFEFF) + "ab" + chr(0x200B) + "c"
-        self.assertEqual(hidden_unicode(text), [(3, "suspicious invisible/bidi character: zero-width space")])
+        self.assertEqual(hidden_unicode(text),
+                         [(3, "unicode.invisible", "suspicious invisible/bidi character: zero-width space")])
         self.assertEqual(hidden_unicode(chr(0xFEFF) + "plain"), [])
 
     def test_engine_has_no_unicode_table(self) -> None:
