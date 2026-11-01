@@ -14,7 +14,10 @@ import hashlib
 import json
 from pathlib import Path
 
+from .debug import log as _root_log
 from .sources import materialize, parse_mcp_config
+
+log = _root_log.getChild("pin")
 
 LOCK_DEFAULT = ".frisk-lock.json"
 
@@ -34,7 +37,8 @@ def fingerprint_path(root: Path) -> dict:
         rel = str(p.relative_to(root))
         try:
             fh = _sha(p.read_bytes())
-        except OSError:
+        except OSError as e:
+            log.debug("fingerprint skipped a file error=%s", type(e).__name__)
             continue
         files[rel] = fh
         overall.update(rel.encode())

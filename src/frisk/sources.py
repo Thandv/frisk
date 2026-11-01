@@ -16,8 +16,13 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from .debug import log as _root_log, ms_since
+
+log = _root_log.getChild("sources")
 
 _GIT_URL = re.compile(r"^(https?://[^\s]+?(\.git)?|git@[^\s]+:[^\s]+|github\.com/[^\s/]+/[^\s/]+)$",
                       re.IGNORECASE)
@@ -43,10 +48,18 @@ def materialize(target: str):
     if is_git_url(target):
         tmp = tempfile.mkdtemp(prefix="frisk-")
         try:
-            r = subprocess.run(
-                ["git", "clone", "--depth", "1", "--quiet", _normalize_git(target), tmp],
-                capture_output=True, text=True, timeout=120,
-            )
+            t0 = time.monotonic()
+            # The URL is not logged: it can carry credentials.
+            log.debug("git clone start args=6")
+            try:
+                r = subprocess.run(
+                    ["git", "clone", "--depth", "1", "--quiet", _normalize_git(target), tmp],
+                    capture_output=True, text=True, timeout=120,
+                )
+            except Exception as e:
+                log.debug("git clone end status=error error=%s ms=%d", type(e).__name__, ms_since(t0))
+                raise
+            log.debug("git clone end status=exit rc=%d ms=%d", r.returncode, ms_since(t0))
             if r.returncode != 0:
                 raise RuntimeError(f"git clone failed: {r.stderr.strip()[:200]}")
             yield Path(tmp), target
@@ -117,6 +130,7 @@ def looks_like_mcp_config(path: str | Path) -> bool:
     if p.suffix == ".json" and p.is_file():
         try:
             return "mcpServers" in json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            log.debug("not an MCP config (unreadable JSON) error=%s", type(e).__name__)
             return False
     return False
