@@ -16,6 +16,14 @@
   },
   {
     "path": "examples/malicious-skill/SKILL.md",
+    "line": 15,
+    "rule": "inject.exfil_instr",
+    "severity": "warn",
+    "expected_change": null,
+    "note": "New in FR-E3a t1a (F1.07): inject.exfil_instr accepts inflections such as 'posts'."
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
     "line": 17,
     "rule": "inject.hidden_important",
     "severity": "warn",

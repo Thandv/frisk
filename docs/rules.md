@@ -15,7 +15,7 @@ Run on script files (`.py`, `.sh`, `.js` and the other code extensions) and on f
 ### rce.pipe_installer
 
 - Severity: `block` · Category: `rce` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A `curl` or `wget` command whose output is piped, on the same line, into a shell or a Python interpreter (optionally through `sudo`).
+- Matches: A `curl` or `wget` command whose output is piped into a shell or a Python interpreter on the same line or across backslash-continued lines, where the shell may be named by a path (`/bin/sh`) or reached through `sudo` or `env` with options; or a `curl`/`wget` download run by a shell through process substitution (`bash <(…)`) or `sh -c "$(…)"`.
 - Likely false positive: Install instructions in a README that tell a human to run a vendor's official installer.
 - On a hit: Do not run it. Download the script, read it, and pin it by hash; prefer a package manager.
 
@@ -95,7 +95,7 @@ Run on script files (`.py`, `.sh`, `.js` and the other code extensions) and on f
 ### exfil.secret_name
 
 - Severity: `warn` · Category: `exfil` · OWASP LLM Top 10 (2025): LLM02:2025 Sensitive Information Disclosure
-- Matches: An upper-case identifier ending in TOKEN, SECRET, API_KEY, ACCESS_KEY, PRIVATE_KEY or PASSWORD.
+- Matches: An upper-case identifier ending in TOKEN, SECRET, API_KEY, ACCESS_KEY, PRIVATE_KEY or PASSWORD. Case-sensitive: lower-case identifiers such as `access_token` do not match.
 - Likely false positive: Configuration docs naming the variable a user must set.
 - On a hit: Review together with network findings; on its own it is informational.
 
@@ -135,15 +135,15 @@ Run on script files (`.py`, `.sh`, `.js` and the other code extensions) and on f
 ### destroy.rm_rf
 
 - Severity: `block` · Category: `destructive` · OWASP LLM Top 10 (2025): LLM06:2025 Excessive Agency
-- Matches: A recursive, forced `rm` whose target is `/`, `~`, `$HOME` or a glob.
-- Likely false positive: Cleanup of a build directory written with a glob.
+- Matches: A recursive, forced `rm` (`-rf`, `-fr`, `-r -f`, `--recursive --force`, in any order) whose target is `/`, `~`, `$HOME` or `${HOME}` (optionally quoted), or a glob over one of them or a bare `*`. Other paths, such as temporary directories (`/tmp/x`, `$TMPDIR/x`), do not match.
+- Likely false positive: A script that empties its own working directory with a bare `*`.
 - On a hit: Reject unless the path is a clearly scoped temporary directory.
 
 <a id="destroy.disk"></a>
 ### destroy.disk
 
 - Severity: `block` · Category: `destructive` · OWASP LLM Top 10 (2025): LLM06:2025 Excessive Agency
-- Matches: `dd if=`, `mkfs`, or a redirect into a raw disk device.
+- Matches: `dd` with `of=` a `/dev` device other than `/dev/null`, `/dev/zero`, `/dev/stdout`, `/dev/stderr` or `/dev/fd/*`; `mkfs` (or `mkfs.<type>`) on a `/dev` device; or a redirect into a raw disk device. `dd` to a regular file does not match.
 - Likely false positive: Disk-imaging tools whose purpose this is.
 - On a hit: Never acceptable in agent content; reject.
 
@@ -203,7 +203,7 @@ Run on the full text of every file frisk reads, code files included, and on `--t
 ### inject.exfil_instr
 
 - Severity: `warn` · Category: `injection` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
-- Matches: Text with send, post, exfiltrate or upload, then `to`, then an http(s) URL, all on one line within short distances.
+- Matches: Text with any inflection of send, post, exfiltrate or upload (sends, sent, posted, uploading…), then `to`, then an http(s) URL, within short distances and with at most one line break (never across a blank line).
 - Likely false positive: Docs telling a user to upload a file to the project's own site.
 - On a hit: Check the URL and who the instruction is addressed to; an instruction to the model to send data out is hostile.
 

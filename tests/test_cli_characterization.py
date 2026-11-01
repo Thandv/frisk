@@ -44,7 +44,7 @@ class TestScanCharacterization(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(err, "")
         self.assertEqual(out.splitlines()[-1],
-                         f"verdict:   BLOCK    3 blocking · 3 warnings · 6 total  ({EXAMPLES})")
+                         f"verdict:   BLOCK    3 blocking · 4 warnings · 7 total  ({EXAMPLES})")
 
     def test_quiet_prints_only_the_verdict(self) -> None:
         code, out, _ = run(["-q", str(EXAMPLES)])
@@ -61,8 +61,8 @@ class TestScanCharacterization(unittest.TestCase):
         self.assertEqual(doc["target"], str(EXAMPLES))
         self.assertEqual(doc["verdict"], "BLOCK")
         self.assertEqual(doc["worst_severity"], "block")
-        self.assertEqual(doc["counts"], {"block": 3, "warn": 3, "total": 6})
-        self.assertEqual(len(doc["findings"]), 6)
+        self.assertEqual(doc["counts"], {"block": 3, "warn": 4, "total": 7})
+        self.assertEqual(len(doc["findings"]), 7)
         for f in doc["findings"]:
             self.assertEqual(set(f), {"path", "line", "rule", "category", "severity",
                                       "description", "excerpt", "owasp"})
@@ -75,9 +75,9 @@ class TestScanCharacterization(unittest.TestCase):
         self.assertEqual(doc["$schema"], "https://json.schemastore.org/sarif-2.1.0.json")
         run0 = doc["runs"][0]
         self.assertEqual(run0["tool"]["driver"]["version"], __version__)
-        self.assertEqual(len(run0["results"]), 6)
+        self.assertEqual(len(run0["results"]), 7)
         self.assertEqual(sorted(r["id"] for r in run0["tool"]["driver"]["rules"]), [
-            "inject.before_using", "inject.hidden_important", "inject.hide_from_user",
+            "inject.before_using", "inject.exfil_instr", "inject.hidden_important", "inject.hide_from_user",
             "inject.ignore_prev", "inject.read_then_send", "rce.pipe_installer"])
 
     def test_fail_on_levels_on_the_malicious_example(self) -> None:

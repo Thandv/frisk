@@ -60,12 +60,20 @@ def _r(p: str) -> re.Pattern:
     return re.compile(p, re.IGNORECASE)
 
 
+# Argument words of one shell command, lazily: no newline or command separator inside.
+_ARGS = r"(?:[^\s;&|]+[ \t]+)*?"
+
+
 # --- code rules -------------------------------------------------------------
 
 CODE_RULES = [
     # Remote code execution / piped installers
     ("rce.pipe_installer", "rce", "block",
-     _r(r"\b(curl|wget)\b[^\n|]*\|\s*(sudo\s+)?(bash|sh|zsh|python[0-9.]*)\b"),
+     # Piped (lines may continue with a backslash; the shell may be reached through a path,
+     # sudo or env with options), or the download run via process substitution or sh -c.
+     _r(r"\b(curl|wget)\b(?:[^\n|]|\\\n)*\|\s*(?:(?:\S*/)?(?:sudo|env)(?:\s+-\S+)*\s+)*"
+        r"(?:\S*/)?(bash|sh|zsh|python[0-9.]*)\b"
+        r"|\b(?:bash|sh|zsh)\s+(?:<\(|-c\s+[\"']?\$\()\s*(?:curl|wget)\b"),
      "pipe-to-shell remote installer (curl|wget ... | sh)"),
     ("rce.eval_b64", "rce", "block",
      _r(r"(?<![.\w])(eval|exec)\s*\(\s*[^)]*b(ase)?64[._]?decode"),
@@ -99,7 +107,8 @@ CODE_RULES = [
         r"(TOKEN|SECRET|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|PASSWORD)"),
      "reads a secret-bearing env var (normal for auth; review only with network egress)"),
     ("exfil.secret_name", "exfil", "warn",
-     _r(r"\b[A-Z][A-Z0-9_]{2,}(TOKEN|SECRET|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|PASSWORD)\b"),
+     # Case-sensitive: SCREAMING_CASE names only, not ordinary identifiers like access_token.
+     re.compile(r"\b[A-Z][A-Z0-9_]{2,}(TOKEN|SECRET|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|PASSWORD)\b"),
      "mention of a secret-bearing identifier"),
     ("exfil.keychain_read", "exfil", "block",
      _r(r"\bsecurity\s+find-(generic|internet)-password\b"),
@@ -116,10 +125,17 @@ CODE_RULES = [
      "network/transfer tool use inside a script"),
     # Destructive operations
     ("destroy.rm_rf", "destructive", "block",
-     _r(r"\brm\s+-[a-z]*r[a-z]*f[a-z]*\s+(/|~|\$HOME|\*)"),
+     # Recursive and force in any spelling (-rf, -fr, -r -f, --recursive --force); the target
+     # is the root, the home directory or a glob over either or the current directory,
+     # optionally quoted. Other paths, such as temp directories, do not match.
+     _r(r"\brm\s+(?=" + _ARGS + r"(?:-[a-z]*r|--recursive\b))(?=" + _ARGS + r"(?:-[a-z]*f|--force\b))"
+        + _ARGS + r"[\"']?(?:(?:/|~/?|\$HOME/?|\$\{HOME\}/?)\*?|\*)[\"']?(?=[\s;&|)]|$)"),
      "recursive force delete of a root/home/glob path"),
     ("destroy.disk", "destructive", "block",
-     _r(r"\bdd\s+if=|\bmkfs\b|>\s*/dev/sd|>\s*/dev/disk"),
+     # dd writing to a device (not the null/zero/stdio sinks), mkfs on a device, or a
+     # redirect into a raw disk. dd to a regular file does not match.
+     _r(r"\bdd\b[^\n;&|]*\bof=[\"']?/dev/(?!(?:null|zero|stdout|stderr)\b|fd/)"
+        r"|\bmkfs(?:\.\w+)?\b[^\n;&|]*\s[\"']?/dev/|>\s*/dev/sd|>\s*/dev/disk"),
      "raw disk write / format"),
     ("destroy.forkbomb", "destructive", "block",
      _r(r":\(\)\s*\{\s*:\|:&\s*\}\s*;:"),
@@ -145,7 +161,10 @@ TEXT_RULES = [
      _r(r"<\|im_start\|>\s*system|<\|system\|>"),
      "embedded chat-template system role override"),
     ("inject.exfil_instr", "injection", "warn",
-     _r(r"\b(send|post|exfiltrate|upload)\b[^\n]{0,40}\bto\b[^\n]{0,40}https?://"),
+     # Any inflection of the verb; at most one newline in the match, so never a blank line.
+     _r(r"\b(sends?|sending|sent|posts?|posted|posting|exfiltrat(?:e|es|ed|ing)|uploads?|uploaded|uploading)\b"
+        r"(?:(?:[^\n]{0,40}\n)?[^\n]{0,40}\bto\b[^\n]{0,40}|[^\n]{0,40}\bto\b(?:[^\n]{0,40}\n)?[^\n]{0,40})"
+        r"https?://"),
      "instruction to send data to an external URL"),
     # --- MCP tool-poisoning patterns (hidden directives in tool descriptions) ---
     ("inject.hide_from_user", "tool-poisoning", "block",
