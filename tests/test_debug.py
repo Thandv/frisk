@@ -24,9 +24,8 @@ def _ok(*a, **k):
 
 
 def _clone(run):
-    with mock.patch.object(sources.subprocess, "run", run):
-        with sources.materialize(URL):
-            pass
+    with mock.patch.object(sources.subprocess, "run", run), sources.materialize(URL):
+        pass
 
 
 class DebugLogTests(unittest.TestCase):
@@ -69,8 +68,19 @@ class DebugLogTests(unittest.TestCase):
     def test_tool_call_logs_status_not_content(self):
         req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                "params": {"name": "scan_text", "arguments": {"text": SENTINEL}}}
-        err = self._stderr("1", lambda: self.assertTrue(mcp_server.handle(req)["result"]["content"]))
+        rest = mcp_server.TOOLS["scan_text"][1:]
+
+        def fail(text):
+            raise ValueError(text)
+
+        def calls():
+            # A tool's output and its error message can quote what it scanned.
+            for fn in (lambda text: "echo: " + text, fail):
+                with mock.patch.dict(mcp_server.TOOLS, {"scan_text": (fn, *rest)}):
+                    self.assertIn(SENTINEL, mcp_server.handle(req)["result"]["content"][0]["text"])
+        err = self._stderr("1", calls)
         self.assertIn("tool end name=scan_text status=ok", err)
+        self.assertIn("tool end name=scan_text status=error error=ValueError", err)
         self.assertNotIn(SENTINEL, err)
 
     def test_swallowed_error_is_logged(self):
