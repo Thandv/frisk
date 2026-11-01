@@ -45,7 +45,7 @@ verdict:   BLOCK    3 blocking · 4 warnings · 7 total  (examples/malicious-ski
 | **Destructive ops** | `rm -rf` of `/`, `~`/`$HOME` or a glob over them (any flag spelling; temp paths pass), `dd` or `mkfs` onto a `/dev` device (not `/dev/null` or a file), fork bombs, `chmod 777` |
 | **Prompt injection** | "ignore previous instructions", fake tool-call markup, role overrides, "POST data to URL" |
 | **Tool poisoning** (MCP) | hidden directives in tool descriptions: "do not tell the user", `<IMPORTANT>` blocks, read-then-send |
-| **Obfuscation** | zero-width spaces & bidi-override unicode used to hide instructions |
+| **Obfuscation** | zero-width characters, bidi overrides and Unicode tag characters used to hide instructions (block; emoji joiners and subdivision flags pass); runs of variation selectors, invisible operators, soft hyphens, U+180E and a byte-order mark after the start (warn) |
 
 Every rule id, its severity, what it matches and what to do about a hit:
 [docs/rules.md](docs/rules.md).

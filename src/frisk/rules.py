@@ -181,29 +181,40 @@ TEXT_RULES = [
      "tool-poisoning: instruction to read sensitive files"),
 ]
 
-# Suspicious invisible / control characters used to hide instructions, keyed by
-# codepoint (never written literally, so this rule cannot flag its own source).
-# Not listed, so never reported: \t \n \r and the BOM (U+FEFF).
-SUSPECT_UNICODE = {
-    chr(0x200B): "zero-width space",
-    chr(0x200C): "zero-width non-joiner",
-    chr(0x200D): "zero-width joiner",
-    chr(0x200E): "left-to-right mark",
-    chr(0x200F): "right-to-left mark",
-    chr(0x202A): "left-to-right embedding (bidi)",
-    chr(0x202B): "right-to-left embedding (bidi)",
-    chr(0x202C): "pop directional formatting (bidi)",
-    chr(0x202D): "left-to-right override (bidi)",
-    chr(0x202E): "right-to-left override (bidi)",
-    chr(0x2060): "word joiner",
-    chr(0x2066): "left-to-right isolate (bidi)",
-    chr(0x2067): "right-to-left isolate (bidi)",
-    chr(0x2068): "first strong isolate (bidi)",
-    chr(0x2069): "pop directional isolate (bidi)",
-}
+# Suspicious invisible / control characters used to hide instructions:
+# (first codepoint, last codepoint, name, severity). Codepoints are never written
+# literally, so these rules cannot flag their own source. Not listed, so never
+# reported: \t \n \r. hidden_unicode() applies the exceptions noted per entry.
+SUSPECT_UNICODE = [
+    (0x200B, 0x200B, "zero-width space", "block"),
+    (0x200C, 0x200C, "zero-width non-joiner", "block"),
+    (0x200D, 0x200D, "zero-width joiner", "block"),  # allowed directly between two emoji
+    (0x200E, 0x200E, "left-to-right mark", "block"),
+    (0x200F, 0x200F, "right-to-left mark", "block"),
+    (0x202A, 0x202A, "left-to-right embedding (bidi)", "block"),
+    (0x202B, 0x202B, "right-to-left embedding (bidi)", "block"),
+    (0x202C, 0x202C, "pop directional formatting (bidi)", "block"),
+    (0x202D, 0x202D, "left-to-right override (bidi)", "block"),
+    (0x202E, 0x202E, "right-to-left override (bidi)", "block"),
+    (0x2060, 0x2060, "word joiner", "block"),
+    (0x2066, 0x2066, "left-to-right isolate (bidi)", "block"),
+    (0x2067, 0x2067, "right-to-left isolate (bidi)", "block"),
+    (0x2068, 0x2068, "first strong isolate (bidi)", "block"),
+    (0x2069, 0x2069, "pop directional isolate (bidi)", "block"),
+    (0xE0000, 0xE007F, "tag characters", "block"),  # allowed as a subdivision-flag sequence
+    (0xE0100, 0xE01EF, "run of supplementary variation selectors", "warn"),  # 2 or more in a row
+    (0x2061, 0x2064, "invisible operator", "warn"),
+    (0x00AD, 0x00AD, "soft hyphen", "warn"),
+    (0x180E, 0x180E, "Mongolian vowel separator", "warn"),
+    (0xFEFF, 0xFEFF, "byte-order mark after the start of the text", "warn"),  # allowed at offset 0
+]
 
-# The hidden-Unicode rule: (id, category, severity). Its matcher is hidden_unicode().
-UNICODE_RULE = ("unicode.invisible", "obfuscation", "block")
+# The hidden-Unicode rules, one per severity: (id, category, severity, description).
+# Their matcher is hidden_unicode().
+UNICODE_RULES = [
+    ("unicode.invisible", "obfuscation", "block", "suspicious invisible/bidi character"),
+    ("unicode.hidden_format", "obfuscation", "warn", "hidden formatting character"),
+]
 
 # Coverage rules: content frisk could not pattern-match. (id, category, severity, description)
 COVERAGE_RULES = [
@@ -218,18 +229,64 @@ COVERAGE_RULES = [
 ]
 
 
-def hidden_unicode(text: str) -> list[tuple[int, str]]:
-    """Return (offset, description) for the first occurrence of each suspect character.
+def _suspect_class(lo: int, hi: int) -> str:
+    return re.escape(chr(lo)) + ("" if lo == hi else "-" + re.escape(chr(hi)))
 
-    Offsets index into `text`. A BOM (U+FEFF) is not in SUSPECT_UNICODE, so it is never
-    reported; files are decoded with utf-8-sig, which drops a leading one.
+
+# Any suspect character, as one class so the scan stays fast.
+_SUSPECT_RE = re.compile("[" + "".join(_suspect_class(lo, hi) for lo, hi, _n, _s in SUSPECT_UNICODE) + "]")
+_ENTRY_OF = {cp: i for i, (lo, hi, _n, _s) in enumerate(SUSPECT_UNICODE) for cp in range(lo, hi + 1)}
+_RUN_ENTRIES = (0xE0000, 0xE0100)  # tag characters and variation selectors are judged as runs
+# A subdivision id in tag characters: a 2-letter region, 1-4 letters or digits, the cancel tag.
+_TAG_LETTER = "[" + _suspect_class(0xE0061, 0xE007A) + "]"
+_TAG_ALNUM = "[" + _suspect_class(0xE0030, 0xE0039) + _suspect_class(0xE0061, 0xE007A) + "]"
+_FLAG_TAGS = re.compile(_TAG_LETTER + "{2}" + _TAG_ALNUM + "{1,4}" + re.escape(chr(0xE007F)))
+_BLACK_FLAG = chr(0x1F3F4)
+
+
+def _is_emoji(ch: str) -> bool:
+    """Pictographic symbol ranges (BMP symbols and the supplementary emoji blocks)."""
+    return 0x2300 <= ord(ch) <= 0x2BFF or 0x1F000 <= ord(ch) <= 0x1FAFF
+
+
+def _allowed(text: str, start: int, end: int, lo: int, starts_text: bool) -> bool:
+    """The legitimate uses of a suspect character, run or sequence at text[start:end]."""
+    if lo == 0x200D:  # emoji ZWJ sequence; the left emoji may carry VS-16 (U+FE0F)
+        left = text[start - 1:start]
+        if left == chr(0xFE0F):
+            left = text[start - 2:start - 1]
+        return bool(left) and _is_emoji(left) and end < len(text) and _is_emoji(text[end])
+    if lo == 0xE0000:  # subdivision flag: black flag, tag letters/digits, cancel tag
+        return text[start - 1:start] == _BLACK_FLAG and _FLAG_TAGS.fullmatch(text, start, end) is not None
+    if lo == 0xE0100:
+        return end - start < 2
+    if lo == 0xFEFF:
+        return start == 0 and starts_text
+    return False
+
+
+def hidden_unicode(text: str, starts_text: bool = True) -> list[tuple[int, str, str]]:
+    """Return (offset, rule id, description) for the first reportable use of each suspect entry.
+
+    Offsets index into `text`. `starts_text` says whether `text` begins the file or input,
+    where a BOM is encoding, not content (files are decoded with utf-8-sig, which already
+    drops a leading one).
     """
-    hits: list[tuple[int, str]] = []
-    for ch, name in SUSPECT_UNICODE.items():
-        idx = text.find(ch)
-        if idx != -1:
-            hits.append((idx, f"suspicious invisible/bidi character: {name}"))
-    return hits
+    rule_for = {sev: (rid, desc) for rid, _cat, sev, desc in UNICODE_RULES}
+    hits: dict[int, tuple[int, str, str]] = {}
+    m = _SUSPECT_RE.search(text)
+    while m is not None:
+        start = m.start()
+        i = _ENTRY_OF[ord(m.group())]
+        lo, hi, name, sev = SUSPECT_UNICODE[i]
+        end = start + 1
+        while lo in _RUN_ENTRIES and end < len(text) and lo <= ord(text[end]) <= hi:
+            end += 1
+        if i not in hits and not _allowed(text, start, end, lo, starts_text):
+            rid, desc = rule_for[sev]
+            hits[i] = (start, rid, f"{desc}: {name}")
+        m = _SUSPECT_RE.search(text, end)
+    return list(hits.values())
 
 # Map each finding category to the OWASP Top 10 for LLM Applications (2025) entry
 # it most directly corresponds to — surfaced in JSON/SARIF output for compliance.
@@ -252,6 +309,6 @@ def owasp_for(category: str) -> str:
 # one section per id (tests/test_rules_doc.py keeps them in step).
 RULE_META: dict[str, tuple[str, str, str]] = {
     **{rid: (cat, sev, desc) for rid, cat, sev, _rx, desc in CODE_RULES + TEXT_RULES},
-    UNICODE_RULE[0]: (UNICODE_RULE[1], UNICODE_RULE[2], "suspicious invisible/bidi character"),
+    **{rid: (cat, sev, desc) for rid, cat, sev, desc in UNICODE_RULES},
     **{rid: (cat, sev, desc) for rid, cat, sev, desc in COVERAGE_RULES},
 }

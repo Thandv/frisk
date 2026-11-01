@@ -11,7 +11,7 @@ from pathlib import Path
 from . import surfaces
 from .rules import (
     ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
-    TEXT_EXTS, TEXT_RULES, UNICODE_RULE, executable_magic, hidden_unicode,
+    TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
 )
 from .surfaces import Span
 
@@ -114,8 +114,8 @@ def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Fin
         for m in rx.finditer(seg):
             add(m.start(), rid, cat, sev, desc, _excerpt(seg, m.start()))
     if span.kind == "text":
-        rid, cat, sev = UNICODE_RULE
-        for idx, desc in hidden_unicode(seg):
+        for idx, rid, desc in hidden_unicode(seg, span.start == 0):
+            cat, sev, _ = RULE_META[rid]
             add(idx, rid, cat, sev, desc, "")
 
 

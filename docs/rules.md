@@ -247,9 +247,17 @@ Run with the text rules.
 ### unicode.invisible
 
 - Severity: `block` · Category: `obfuscation` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
-- Matches: Zero-width characters (space, joiner, non-joiner, word joiner) or bidirectional controls (marks, embeddings, overrides, isolates) anywhere in the text. A byte-order mark (U+FEFF) is not reported anywhere: a leading one is read as encoding, and one later in the text is a known gap, as are the soft hyphen, the invisible operators and tag characters. Only the first occurrence of each character is reported.
+- Matches: Zero-width characters (space, joiner, non-joiner, word joiner), bidirectional controls (marks, embeddings, overrides, isolates) or tag characters (U+E0000 to U+E007F) anywhere in the text. A zero-width joiner directly between two emoji (as in a family emoji) and the tag sequence of a subdivision flag (black flag, a short tag-letter id, cancel tag) are allowed. Only the first reported occurrence of each character class is reported.
 - Likely false positive: Text in right-to-left languages that uses directional marks on purpose.
 - On a hit: Reveal the characters (for example with a hex view); hidden text an agent reads but a human does not see is a classic injection carrier.
+
+<a id="unicode.hidden_format"></a>
+### unicode.hidden_format
+
+- Severity: `warn` · Category: `obfuscation` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
+- Matches: Invisible formatting characters that rarely belong in agent content: a run of two or more supplementary variation selectors (U+E0100 to U+E01EF), the invisible operators (U+2061 to U+2064), the soft hyphen (U+00AD), the Mongolian vowel separator (U+180E), or a byte-order mark (U+FEFF) anywhere but the very start of the text. A single variation selector and a leading byte-order mark are allowed. Only the first reported occurrence of each character class is reported.
+- Likely false positive: Text copied from a word processor that inserted soft hyphens; ideographic variation sequences.
+- On a hit: Reveal the characters (for example with a hex view); runs of variation selectors can encode hidden bytes.
 
 ## Coverage
 
