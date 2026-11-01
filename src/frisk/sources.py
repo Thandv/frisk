@@ -11,6 +11,7 @@ A target may be:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -110,6 +111,8 @@ class ServerRef:
     package: str = ""
     version: str = ""
     unscanned_deps: tuple[str, ...] = ()
+    # sha256 of how the server is started, for frisk lock (see _launch_digest); never printed.
+    launch: str = ""
 
 
 def display_ref(s: ServerRef) -> str:
@@ -394,16 +397,40 @@ def parse_mcp_config(path: str | Path) -> list[ServerRef]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: the top level is not a JSON object")
-    refs = [_classify(name, spec) for name, spec in _servers(data, path).items()]
+    refs = [_server(name, spec) for name, spec in _servers(data, path).items()]
     for key, project in _object(data, "projects", path).items():
         label = home_label(key)
         if not isinstance(project, dict):
             raise ValueError(f"{path}: project {label} is not a JSON object")
         directory = Path(key).expanduser()
         base = Path(os.path.normpath(directory)) if directory.is_absolute() else None
-        refs.extend(_classify(f"{name} ({label})", spec, base)
+        refs.extend(_server(f"{name} ({label})", spec, base)
                     for name, spec in _servers(project, f"{path}: project {label}").items())
     return refs
+
+
+def _server(name: str, spec: object, project: Path | None = None) -> ServerRef:
+    ref = _classify(name, spec, project)
+    ref.launch = _launch_digest(spec)
+    return ref
+
+
+def _launch_digest(spec: object) -> str:
+    """sha256 of how a server is started: command, args, cwd, type, its URL without
+    credentials, query or fragment, and the NAMES of its env vars and headers. Their values
+    are left out, so rotating a secret is not a change (a URL frisk cannot split is hashed
+    whole)."""
+    shape: object = spec
+    if isinstance(spec, dict):
+        url = spec.get("url") or spec.get("serverUrl")
+        shown = _safe_url(url) if isinstance(url, str) else url
+        launch = {key: spec.get(key) for key in ("command", "args", "cwd", "type")}
+        launch["url"] = url if shown == "<unparsable URL>" else shown
+        for key in ("env", "headers"):
+            value = spec.get(key)
+            launch[key] = sorted(value) if isinstance(value, dict) else type(value).__name__
+        shape = launch
+    return hashlib.sha256(json.dumps(shape, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def _servers(obj: dict, where: str | Path) -> dict:

@@ -291,11 +291,18 @@ class LockTest(CacheCase):
     def drifted(self, lock: dict) -> bool:
         return pin.has_drift(pin.verify_lock(lock))
 
+    def row(self, lock: dict, name: str) -> dict:
+        # FR-E4 owner decision: a config also gets an entry listing its server names, so
+        # the server's own row is picked by key (was the only row).
+        (row,) = [r for r in pin.verify_lock(lock) if r["entry"] == f"{self.cfg}::{name}"]
+        return row
+
     def test_entry_pins_content_and_version(self) -> None:
         self.npx("acme-tool", "1.0.0", {"index.js": "x\n"})
-        (entry,) = self.lock("acme-tool@1.0.0")["entries"].values()
+        entry = self.lock("acme-tool@1.0.0")["entries"][f"{self.cfg}::tool"]
+        # FR-E4 owner decision: one 'server' entry pins launch plus code (was 'cached_package').
         self.assertEqual((entry["kind"], entry["version"], entry["recompute"]["type"]),
-                         ("package-cached", "1.0.0", "cached_package"))
+                         ("package-cached", "1.0.0", "server"))
         self.assertEqual(sorted(entry["files"]), ["index.js", "package.json"])
 
     def test_unchanged_verifies(self) -> None:
@@ -306,7 +313,7 @@ class LockTest(CacheCase):
         self.npx("acme-tool", "1.0.0", {"index.js": "x\n"})
         lock = self.lock("acme-tool")
         shutil.rmtree(self.home / ".npm" / "_npx" / NPX_HASH)
-        (row,) = pin.verify_lock(lock)
+        row = self.row(lock, "tool")
         self.assertEqual((row["status"], row["removed"]), ("DRIFT", ["index.js", "package.json"]))
 
     def test_a_changed_pinned_version_is_drift(self) -> None:
@@ -326,14 +333,14 @@ class LockTest(CacheCase):
         lock = pin.build_lock([], [str(self.cfg)])
         shutil.rmtree(env)
         self.pyenv(env, "acme-py", "1.3.0", {"server.py": "x = 1\n"})
-        (row,) = pin.verify_lock(lock)
+        row = self.row(lock, "py")
         self.assertEqual((row["status"], row["changed"], row["added"], row["removed"]), ("DRIFT", [], [], []))
 
     def test_changed_cached_content_is_drift(self) -> None:
         pkg = self.npx("acme-tool", "1.0.0", {"index.js": "x\n"})
         lock = self.lock("acme-tool")
         (pkg / "index.js").write_text(INSTALLER + "\n", encoding="utf-8")
-        (row,) = pin.verify_lock(lock)
+        row = self.row(lock, "tool")
         self.assertEqual((row["status"], row["changed"]), ("DRIFT", ["index.js"]))
 
     def test_a_lock_from_before_the_cache_lookup_still_verifies(self) -> None:

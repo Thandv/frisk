@@ -237,21 +237,31 @@ frisk verify                                                          # fails if
 ```
 ```
   [ok   ] ./my-skill
-  [DRIFT] some-server::./server
+  [ok   ] claude_desktop_config.json
+  [DRIFT] claude_desktop_config.json::some-server
            ~ changed: tools.py
 
-verify: DRIFT DETECTED  (1 of 2 entries changed)
+verify: DRIFT DETECTED  (1 of 3 entries changed)
 ```
 
-This pins local source, git targets, **and** the package/URL references in your MCP
-config (so a swapped `npx` version or a changed server URL surfaces too). Each server is
-pinned as `<config>::<server name>`, so project servers in a `.claude.json` get their own
-entries (`<config>::db (~/work/app)`); lockfiles written before project servers were read
-keep verifying. A package found in the local cache is pinned as its cached content plus
-its version, and `frisk verify` finds it again through the config: a different version, a
-changed file, or a cache entry that is gone (or no longer the only cached version) is
-DRIFT. A package lock entry written before the cache lookup existed (the package name
-itself) keeps verifying.
+This pins local source and git targets as content. An MCP config, given with
+`--mcp-config` or named as a target (`frisk lock ~/.claude.json`), is pinned per server,
+never as a whole file:
+
+- one entry, `<config>`, lists its server names, so an added or removed server is DRIFT;
+- one entry per server, `<config>::<server name>` (project servers in a `.claude.json` get
+  their own, such as `<config>::db (~/work/app)`), pins how the server starts (command,
+  args, cwd, the URL without credentials, query or fragment, and the *names* of its env
+  vars and headers, never their values) together with the code frisk scans for it. A
+  package found in the local cache is pinned as its cached content plus its version.
+
+So the rest of the file can change (Claude Code rewrites `~/.claude.json` all the time) and
+a rotated secret is not drift, while a changed command, argument, URL or env name (`~
+changed: how it starts`), changed server code, a different cached version, or a cache entry
+that is gone is DRIFT. Lockfiles written by older versions keep verifying with the checks
+they were written with; a config that an older frisk pinned as a whole file verifies while
+the file is unchanged, and afterwards `frisk verify` reports one error, `MCP config pinned
+as a whole file by an older frisk: run frisk lock again to pin each server`.
 
 For **continuous** monitoring, commit your `.frisk-lock.json` and drop
 [`examples/continuous-verify.yml`](examples/continuous-verify.yml) into your repo —

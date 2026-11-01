@@ -7,19 +7,27 @@ approved; `frisk verify` recomputes it later and flags any drift.
 
 Static analog of mcp-scan's tool pinning: we pin the *bytes* of the source, so a
 changed file, an added script, or a swapped package reference all surface as drift.
+
+An MCP config, named as a target or with --mcp-config, is pinned per server, never as a
+whole file: one entry lists its server names, and one entry per server pins how it starts
+(sources._launch_digest: no env or header values) plus the code frisk scans for it. So
+other changes to the file (Claude Code rewrites .claude.json constantly) are not drift.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from .debug import log as _root_log
-from .sources import ServerRef, materialize, parse_mcp_config
+from .sources import ServerRef, looks_like_mcp_config, materialize, parse_mcp_config, split_configs
 
 log = _root_log.getChild("pin")
 
 LOCK_DEFAULT = ".frisk-lock.json"
+# The one message for an MCP config that an older frisk pinned as a whole file.
+RELOCK_WHOLE_CONFIG = "MCP config pinned as a whole file by an older frisk: run frisk lock again to pin each server"
 
 
 def _sha(b: bytes) -> str:
@@ -55,31 +63,38 @@ def _entry_for_target(target: str) -> dict:
 
 def build_lock(targets: list[str], configs: list[str]) -> dict:
     entries: dict[str, dict] = {}
+    targets, configs = split_configs(targets, configs)
     for t in targets:
         entries[t] = _entry_for_target(t)
     for cfg in configs:
-        for s in parse_mcp_config(cfg):
-            key = f"{cfg}::{s.name}"
+        servers = parse_mcp_config(cfg)
+        entries[cfg] = {"kind": "mcp-config", **_server_names(servers),
+                        "recompute": {"type": "config_servers", "config": cfg}}
+        for s in servers:
+            # re-found through the live config on verify: a changed launch, changed code, a
+            # new cached version or a server that is gone is drift.
+            entry = {"kind": s.kind, "launch": s.launch, **_server_fingerprint(s),
+                     "recompute": {"type": "server", "config": cfg, "name": s.name}}
             if s.kind == "package-cached":
-                # the cached package's content and version, re-found in the cache through
-                # the live config on verify: a version change or a missing entry is drift.
-                fp = _cached_fingerprint(s)
-                fp.update({"kind": s.kind, "version": s.version,
-                           "recompute": {"type": "cached_package", "config": cfg, "name": s.name}})
-                entries[key] = fp
-            elif s.scannable:
-                fp = fingerprint_path(Path(s.ref))
-                fp.update({"kind": "source",
-                           "recompute": {"type": "path", "value": s.ref}})
-                entries[key] = fp
-            else:
-                # package/remote: pin the reference itself, re-read from the live
-                # config on verify so a swapped version/URL surfaces as drift.
-                entries[key] = {"kind": s.kind, "digest": _ref_digest(s),
-                                "files": {},
-                                "recompute": {"type": "config_ref",
-                                              "config": cfg, "name": s.name}}
+                entry["version"] = s.version
+            entries[f"{cfg}::{s.name}"] = entry
     return {"version": 1, "entries": entries}
+
+
+def _server_names(servers: list[ServerRef]) -> dict:
+    names = {s.name: "" for s in servers}  # 'files' are the names: added or removed ones show
+    return {"digest": _sha("\0".join(sorted(names)).encode()), "files": names}
+
+
+def _server_fingerprint(s: ServerRef) -> dict:
+    """How the server starts plus the code frisk scans for it (none when it scans none)."""
+    if s.kind == "package-cached":
+        code = _cached_fingerprint(s)
+    elif s.scannable:
+        code = fingerprint_path(Path(s.ref))
+    else:
+        code = {"digest": "", "files": {}}
+    return {"digest": _sha(f"{s.launch}\0{code['digest']}".encode()), "files": code["files"]}
 
 
 def _cached_fingerprint(s: ServerRef) -> dict:
@@ -96,6 +111,14 @@ def _ref_digest(s: ServerRef) -> str:
 
 def _recompute(entry: dict) -> dict:
     rc = entry["recompute"]
+    if rc["type"] == "server":
+        for s in parse_mcp_config(rc["config"]):
+            if s.name == rc["name"]:
+                return {**_server_fingerprint(s), "launch": s.launch}
+        return {"digest": "<missing>", "files": {}}
+    if rc["type"] == "config_servers":
+        return _server_names(parse_mcp_config(rc["config"]))
+    # The types below are written only by older frisk versions; they still verify.
     if rc["type"] == "target":
         with materialize(rc["value"]) as (root, _):
             return fingerprint_path(root)
@@ -129,13 +152,25 @@ def verify_lock(lock: dict) -> list[dict]:
         if new["digest"] == old["digest"]:
             out.append({"entry": key, "status": "ok"})
             continue
+        if _whole_config(old):
+            out.append({"entry": key, "status": "error", "detail": RELOCK_WHOLE_CONFIG})
+            continue
         old_f, new_f = old.get("files", {}), new.get("files", {})
         changed = sorted(f for f in new_f if f in old_f and new_f[f] != old_f[f])
         added = sorted(set(new_f) - set(old_f))
         removed = sorted(set(old_f) - set(new_f))
-        out.append({"entry": key, "status": "DRIFT",
-                    "changed": changed, "added": added, "removed": removed})
+        record = {"entry": key, "status": "DRIFT", "changed": changed, "added": added, "removed": removed}
+        if "launch" in old and new.get("launch", old["launch"]) != old["launch"]:
+            record["launch"] = "changed"
+        out.append(record)
     return out
+
+
+def _whole_config(entry: dict) -> bool:
+    """An entry an older frisk wrote for an MCP config named as a target: the whole file."""
+    rc = entry.get("recompute", {})
+    value = rc.get("value", "")
+    return rc.get("type") == "target" and os.path.isfile(value) and looks_like_mcp_config(value)
 
 
 def has_drift(report: list[dict]) -> bool:

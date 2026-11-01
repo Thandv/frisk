@@ -13,6 +13,7 @@ import json
 import os
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -300,7 +301,8 @@ class LockTest(ClaudeJsonCase):
         code, _, err = run(["lock", "--mcp-config", str(self.cfg), "--lockfile", str(lockfile)])
         self.assertEqual((code, err), (0, ""))
         keys = list(json.loads(lockfile.read_text(encoding="utf-8"))["entries"])
-        self.assertEqual(keys, [f"{self.cfg}::{n}" for n in (
+        # FR-E4 owner decision: the config's own entry (its server names) comes first.
+        self.assertEqual(keys, [str(self.cfg)] + [f"{self.cfg}::{n}" for n in (
             "shared", "remote", "db (~/work/a)", "shared (~/work/a)", "db (~/work/b)", f"tool ({self.outside})")])
         self.assertNotIn(CANARY, lockfile.read_text(encoding="utf-8"))
         code, out, _ = run(["verify", "--lockfile", str(lockfile)])
@@ -327,6 +329,112 @@ class LockTest(ClaudeJsonCase):
         report = pin.verify_lock(old)
         self.assertEqual([(r["entry"], r["status"]) for r in report],
                          [(f"{self.cfg}::shared", "ok"), (f"{self.cfg}::remote", "ok")])
+
+
+class ConfigLockTest(ClaudeJsonCase):
+    """Owner decision (FR-E4): an MCP config named as a target is pinned per server, never as
+    a whole file, so churn elsewhere in the file is not drift and a changed server is."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.lockfile = str(self.tmp / "lock.json")
+
+    def mutate(self, change: Callable[[dict], object]) -> None:
+        data = json.loads(self.cfg.read_text(encoding="utf-8"))
+        change(data)
+        self.write(data)
+
+    def lock(self) -> dict:
+        code, out, err = run(["lock", str(self.cfg), "--lockfile", self.lockfile])
+        self.assertEqual((code, err), (0, ""))
+        lock: dict = json.loads(Path(self.lockfile).read_text(encoding="utf-8"))
+        return lock
+
+    def drifted(self) -> dict[str, dict]:
+        return {r["entry"]: r for r in pin.verify_lock(pin.read_lock(self.lockfile)) if r["status"] != "ok"}
+
+    def test_a_target_is_pinned_per_server_like_mcp_config(self) -> None:
+        lock = self.lock()
+        self.assertEqual(list(lock["entries"]), [str(self.cfg)] + [f"{self.cfg}::{n}" for n in (
+            "shared", "remote", "db (~/work/a)", "shared (~/work/a)", "db (~/work/b)", f"tool ({self.outside})")])
+        self.assertNotIn("target", {e["recompute"]["type"] for e in lock["entries"].values()})
+        self.assertEqual(lock, pin.build_lock([], [str(self.cfg)]))
+        self.assertNotIn(CANARY, Path(self.lockfile).read_text(encoding="utf-8"))
+        self.assertEqual(run(["verify", "--lockfile", self.lockfile])[0], 0)
+
+    def test_churn_and_rotated_secrets_are_not_drift(self) -> None:
+        self.mutate(lambda d: d["mcpServers"]["remote"].update({"headers": {"Authorization": "Bearer a"}}))
+        self.lock()
+
+        def churn(data: dict) -> None:
+            data["numStartups"] = 99
+            data["history"] = [{"display": "anything"}]
+            data["projects"][str(self.home / "work" / "a")]["allowedTools"] = ["Bash"]
+            data["projects"][str(self.home / "work" / "a")]["mcpServers"]["shared"]["env"]["TOKEN"] = "rotated"
+            data["projects"][str(self.home / "work" / "a")]["mcpServers"]["db"]["url"] += "-rotated"
+            data["mcpServers"]["remote"]["headers"]["Authorization"] = "Bearer b"
+
+        self.mutate(churn)
+        self.assertEqual(self.drifted(), {})
+        self.assertEqual(run(["verify", "--lockfile", self.lockfile])[0], 0)
+
+    def test_a_changed_server_is_drift(self) -> None:
+        a = str(self.home / "work" / "a")
+        for label, key, change in (
+            ("args", "shared", lambda d: d["mcpServers"]["shared"]["args"].append("--debug")),
+            ("command", "shared", lambda d: d["mcpServers"]["shared"].update({"command": "python3.12"})),
+            ("env name", "shared (~/work/a)",
+             lambda d: d["projects"][a]["mcpServers"]["shared"]["env"].update({"NEW_KEY": "x"})),
+            ("url host", "remote", lambda d: d["mcpServers"]["remote"].update({"url": "https://other.example.invalid/mcp"})),
+            ("cwd", "remote", lambda d: d["mcpServers"]["remote"].update({"cwd": "/srv"})),
+        ):
+            with self.subTest(label):
+                self.lock()
+                self.mutate(change)
+                drift = self.drifted()
+                self.assertEqual(list(drift), [f"{self.cfg}::{key}"])
+                self.assertEqual(drift[f"{self.cfg}::{key}"]["launch"], "changed")
+
+    def test_changed_server_code_is_drift(self) -> None:
+        self.lock()
+        (self.home / "tools" / "shared" / "server.py").write_text("x = 2\n", encoding="utf-8")
+        drift = self.drifted()
+        self.assertEqual(list(drift), [f"{self.cfg}::shared"])
+        self.assertEqual((drift[f"{self.cfg}::shared"]["changed"], "launch" in drift[f"{self.cfg}::shared"]),
+                         (["server.py"], False))
+
+    def test_an_added_or_removed_server_is_drift(self) -> None:
+        self.lock()
+        self.mutate(lambda d: d["mcpServers"].update({"new": {"url": "https://new.example.invalid/mcp"}}))
+        drift = self.drifted()
+        self.assertEqual((list(drift), drift[str(self.cfg)]["added"]), ([str(self.cfg)], ["new"]))
+        self.lock()
+        self.mutate(lambda d: d["mcpServers"].pop("remote"))
+        drift = self.drifted()
+        self.assertEqual(list(drift), [str(self.cfg), f"{self.cfg}::remote"])
+        self.assertEqual(drift[str(self.cfg)]["removed"], ["remote"])
+
+    def test_verify_text_says_how_a_server_changed(self) -> None:
+        self.lock()
+        self.mutate(lambda d: d["mcpServers"]["shared"]["args"].append("--debug"))
+        code, out, _ = run(["verify", "--lockfile", self.lockfile])
+        self.assertIn(f"  [DRIFT] {self.cfg}::shared\n"
+                      "           ~ changed: how it starts (command, args, cwd, URL, env or header names)\n", out)
+        self.assertEqual(code, 1)
+
+    def test_a_lockfile_that_pinned_the_whole_file(self) -> None:
+        # What `frisk lock <cfg>` wrote before configs were pinned per server.
+        old = {"version": 1, "entries": {str(self.cfg): {
+            **pin.fingerprint_path(self.cfg), "kind": "source",
+            "recompute": {"type": "target", "value": str(self.cfg)}}}}
+        pin.write_lock(old, self.lockfile)
+        self.assertEqual(run(["verify", "--lockfile", self.lockfile])[:2],
+                         (0, f"  [ok   ] {self.cfg}\n\nverify: no drift  (0 of 1 entries changed)\n"))
+        self.mutate(lambda d: d.update({"numStartups": 99}))
+        code, out, err = run(["verify", "--lockfile", self.lockfile])
+        self.assertEqual((code, err), (1, ""))
+        self.assertEqual(out, f"  [error] {self.cfg}  {pin.RELOCK_WHOLE_CONFIG}\n\n"
+                              "verify: DRIFT DETECTED  (1 of 1 entries changed)\n")
 
 
 if __name__ == "__main__":

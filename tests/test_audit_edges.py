@@ -129,9 +129,10 @@ class OwnerShapedHomeTest(HomeCase):
 
     def test_same_name_in_a_project_and_at_the_top_level_stays_two_entries(self) -> None:
         lock = pin.build_lock([], [str(self.cfg)])
-        self.assertEqual([k.split("::", 1)[1] for k in lock["entries"]], [
-            "notes", "weather", "search", "fetch", "db (~/work/app)", "notes (~/work/app)"])
-        self.assertEqual([r["status"] for r in pin.verify_lock(lock)], ["ok"] * 6)
+        # FR-E4 owner decision: the config's own entry (its server names) comes first.
+        self.assertEqual(list(lock["entries"]), [str(self.cfg)] + [f"{self.cfg}::{n}" for n in (
+            "notes", "weather", "search", "fetch", "db (~/work/app)", "notes (~/work/app)")])
+        self.assertEqual([r["status"] for r in pin.verify_lock(lock)], ["ok"] * 7)
         servers = json.loads(run(["--json", str(self.cfg)])[1])["servers"]
         self.assertEqual([(s["name"], s["status"]) for s in servers if s["name"].startswith("notes")],
                          [("notes", "scanned"), ("notes (~/work/app)", "skipped")])

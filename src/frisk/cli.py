@@ -198,6 +198,9 @@ def _cmd_verify(argv: list[str]) -> int:
                 print(f"  [{_c('error', 'warn')}] {entry}  {printable(r.get('detail', ''))}")
             else:
                 print(f"  [{_c('DRIFT', 'block')}] {entry}")
+                if r.get("launch"):
+                    print(_c("           ~ changed: how it starts (command, args, cwd, URL, env or header names)",
+                             "block"))
                 for f in r.get("changed", []):
                     print(_c(f"           ~ changed: {printable(f)}", "block"))
                 for f in r.get("added", []):
