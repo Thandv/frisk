@@ -11,7 +11,7 @@ from pathlib import Path
 from . import surfaces
 from .rules import (
     ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
-    TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
+    INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
 )
 from .surfaces import Span
 
@@ -95,25 +95,33 @@ def _excerpt(text: str, idx: int, span: int = 80) -> str:
     return snippet.strip()[:120]
 
 
-def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Finding]) -> None:
+_RULES_FOR_KIND = {"code": CODE_RULES, "instruction": INSTRUCTION_RULES}
+
+
+def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Finding],
+               seen: set[tuple[int, str]]) -> None:
     """Run the span's rules on text[span.start:span.end]; lines are file lines.
 
     The span is matched as its own string (so ^, lookbehinds and word boundaries see the
     span's edges, as they always have) and its excerpts stay inside it; offsets are
-    shifted by span.start and mapped to a line through the file's line index.
+    shifted by span.start and mapped to a line through the file's line index. A rule that
+    matched at the same file offset in an earlier, overlapping span is reported once.
     """
     seg = text if (span.start, span.end) == (0, len(text)) else text[span.start:span.end]
 
     def add(idx: int, rid: str, cat: str, sev: str, desc: str, excerpt: str) -> None:
+        if (span.start + idx, rid) in seen:
+            return
+        seen.add((span.start + idx, rid))
         line = bisect_right(starts, span.start + idx)
         end = starts[line] - 1 if line < len(starts) else len(text)
         out.append(Finding(rel, line, rid, cat, sev, desc, excerpt,
                            source_line=text[starts[line - 1]:end]))
 
-    for rid, cat, sev, rx, desc in (CODE_RULES if span.kind == "code" else TEXT_RULES):
+    for rid, cat, sev, rx, desc in _RULES_FOR_KIND.get(span.kind, TEXT_RULES):
         for m in rx.finditer(seg):
             add(m.start(), rid, cat, sev, desc, _excerpt(seg, m.start()))
-    if span.kind == "text":
+    if span.kind not in _RULES_FOR_KIND:  # every text kind
         for idx, rid, desc in hidden_unicode(seg, span.start == 0):
             cat, sev, _ = RULE_META[rid]
             add(idx, rid, cat, sev, desc, "")
@@ -122,8 +130,9 @@ def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Fin
 def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
     starts = _line_starts(text)
     out: list[Finding] = []
+    seen: set[tuple[int, str]] = set()
     for span in spans:
-        _scan_span(text, span, starts, rel, out)
+        _scan_span(text, span, starts, rel, out, seen)
     return sort_findings(out)
 
 

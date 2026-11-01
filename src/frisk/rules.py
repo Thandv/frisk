@@ -27,6 +27,8 @@ TEXT_EXTS = {
     ".md", ".markdown", ".txt", ".mdc", ".rst", ".yaml", ".yml", ".json", ".toml",
     ".html", ".htm", ".xml", ".svg", ".cfg", ".ini", ".conf",
 }
+# Markdown: the markdown surface finds their code and hidden regions.
+MARKDOWN_EXTS = {".md", ".markdown", ".mdc"}
 # Media: never read, no finding, counted in coverage.skipped as "binary".
 MEDIA_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".pdf", ".woff",
@@ -60,7 +62,6 @@ def executable_magic(data: bytes) -> str | None:
     """The executable format named by the file's first four bytes, if any."""
     return EXECUTABLE_MAGIC.get(data[:4])
 
-FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
 
 def _r(p: str) -> re.Pattern:
@@ -186,6 +187,23 @@ TEXT_RULES = [
     ("inject.read_then_send", "tool-poisoning", "warn",
      _r(r"\b(read|cat|open)\b[^\n]{0,40}\b(\.ssh|\.aws|\.env\b|id_rsa|credentials)\b"),
      "tool-poisoning: instruction to read sensitive files"),
+]
+
+# --- instruction rules (agent-instruction files only: see surfaces/instructions.py) ------
+
+# A file or store that holds credentials. Public keys and ssh config are not credentials.
+_CREDENTIAL_LOCATION = (
+    r"(?:\.ssh\b(?!/(?:[\w.-]+\.pub|config|known_hosts)\b)|\bid_(?:rsa|dsa|ecdsa|ed25519)\b(?!\.pub)"
+    r"|\.aws/credentials\b|\.config/gcloud\b|\.azure/|\.gnupg\b|\bprivate[ _-]?keys?\b|\bkeychain\b)")
+# Text from the start of a line or clause up to the verb, with no negation in it, so a
+# defensive "never read ~/.ssh" does not match.
+_UNNEGATED_CLAUSE = r"(?:^|(?<=[.!?;:]))(?:(?!\b(?:never|not|no|avoid)\b|n['\u2019]t\b)[^\n.!?;:])*?"
+
+INSTRUCTION_RULES = [
+    ("inject.sensitive_path_instruction", "injection", "block",
+     re.compile(_UNNEGATED_CLAUSE + r"\b(?:copy|send|upload|read|cat|include|attach|print)\b[^\n]{0,60}?"
+                + _CREDENTIAL_LOCATION, re.IGNORECASE | re.MULTILINE),
+     "instruction to the agent to copy, read or send a credential file"),
 ]
 
 # Suspicious invisible / control characters used to hide instructions:
@@ -315,7 +333,7 @@ def owasp_for(category: str) -> str:
 # Every rule id frisk can report -> (category, severity, description). docs/rules.md has
 # one section per id (tests/test_rules_doc.py keeps them in step).
 RULE_META: dict[str, tuple[str, str, str]] = {
-    **{rid: (cat, sev, desc) for rid, cat, sev, _rx, desc in CODE_RULES + TEXT_RULES},
+    **{rid: (cat, sev, desc) for rid, cat, sev, _rx, desc in CODE_RULES + TEXT_RULES + INSTRUCTION_RULES},
     **{rid: (cat, sev, desc) for rid, cat, sev, desc in UNICODE_RULES},
     **{rid: (cat, sev, desc) for rid, cat, sev, desc in COVERAGE_RULES},
 }

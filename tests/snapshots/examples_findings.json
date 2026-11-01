@@ -45,6 +45,14 @@
   },
   {
     "path": "examples/malicious-skill/SKILL.md",
+    "line": 18,
+    "rule": "inject.sensitive_path_instruction",
+    "severity": "block",
+    "expected_change": null,
+    "note": "New in FR-E3a t3 (F1.06): SKILL.md tells the agent to cat a credentials file."
+  },
+  {
+    "path": "examples/malicious-skill/SKILL.md",
     "line": 19,
     "rule": "inject.ignore_prev",
     "severity": "block",

@@ -9,7 +9,7 @@ Severity: **block** fails a scan by default; **warn** fails only with `--fail-on
 
 ## Code rules
 
-Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks in every other text file, and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command.
+Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks (` ``` ` or `~~~`, any length; an unclosed fence runs to the end of the file) in every other text file, on indented code blocks and inline code spans in markdown (`.md`, `.markdown`, `.mdc`), and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command.
 
 <a id="rce.pipe_installer"></a>
 ### rce.pipe_installer
@@ -165,7 +165,7 @@ Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, 
 
 ## Text rules
 
-Run on the full text of every file frisk reads, code files included, and on `--text` input.
+Run on the full text of every file frisk reads, code files included, and on `--text` input. Markdown HTML comments, which renderers hide, are text-scanned like everything else.
 
 <a id="inject.ignore_prev"></a>
 ### inject.ignore_prev
@@ -238,6 +238,18 @@ Run on the full text of every file frisk reads, code files included, and on `--t
 - Matches: A read, cat or open verb within 40 characters of `.ssh`, `.aws`, `.env`, `id_rsa` or `credentials`.
 - Likely false positive: Setup docs that tell a human where a cloud credential file lives.
 - On a hit: If the text addresses the model, reject: it asks the model to read secrets.
+
+## Instruction rules
+
+Run on agent-instruction files only, where the text addresses the agent: `SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `*.mdc`, and `*.md` files in an `agents/` or `commands/` directory. Ordinary docs such as a README do not get them.
+
+<a id="inject.sensitive_path_instruction"></a>
+### inject.sensitive_path_instruction
+
+- Severity: `block` · Category: `injection` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
+- Matches: An imperative verb (copy, send, upload, read, cat, include, attach or print) followed within 60 characters by a credential location: the `.ssh` directory or an `id_rsa`/`id_ed25519`-style private key (not a `.pub` key, `.ssh/config` or `known_hosts`), the AWS credentials file, the gcloud or Azure config directory, the `.gnupg` directory, a private key or the keychain. A clause that negates the verb first (never, not, no, avoid, don't) does not match, so a defensive "never read the SSH key" passes.
+- Likely false positive: A key-management skill whose stated job is to read a key.
+- On a hit: Reject: an instruction file that tells the agent to read or send key material is an exfiltration attempt.
 
 ## Hidden characters
 

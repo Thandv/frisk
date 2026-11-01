@@ -69,7 +69,7 @@ class TestScanResult(unittest.TestCase):
         total.extend(scan_path(EXAMPLES / "malicious-skill"))
         total.extend(scan_path(EXAMPLES / "clean-skill"))
         self.assertEqual(total.coverage.files_scanned, 2)
-        self.assertEqual(len(total.findings), 7)
+        self.assertEqual(len(total.findings), 8)
 
 
 class TestHiddenUnicodeLivesInRules(unittest.TestCase):

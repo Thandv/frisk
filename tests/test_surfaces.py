@@ -19,7 +19,7 @@ from unittest import mock
 from frisk import engine, surfaces
 from frisk.cli import main
 from frisk.engine import Skipped, scan_file, scan_path
-from frisk.surfaces import Span, fences, plain
+from frisk.surfaces import Span, fences, markdown, plain
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 SKILL = EXAMPLES / "malicious-skill" / "SKILL.md"
@@ -98,7 +98,7 @@ class TestFileRelativeLines(unittest.TestCase):
 class TestDiscovery(unittest.TestCase):
     def test_real_package_lists_exactly_the_shipped_surfaces(self) -> None:
         self.assertEqual([surfaces.name_of(m) for m in surfaces.load()],
-                         ["build_recipes", "fences", "package_json", "plain"])
+                         ["build_recipes", "fences", "instructions", "markdown", "package_json", "plain"])
 
     def test_discover_picks_up_a_new_module_in_a_temp_package(self) -> None:
         pkg = "frisk_tmp_surfaces_pkg"
@@ -139,23 +139,23 @@ class TestSurfaceFailureIsContained(unittest.TestCase):
         original = fences.extract
 
         def flaky(path: Path, text: str) -> list[Span]:
-            if path.name == "a.md":
+            if path.name == "a.txt":  # fences owns non-markdown text files
                 raise RuntimeError("surface broke")
             return original(path, text)
 
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            (root / "a.md").write_text(OVERRIDE + "\n" + fenced([INSTALLER]) + "\n", encoding="utf-8")
-            (root / "b.md").write_text("b\n" + fenced([INSTALLER]) + "\n" + OVERRIDE + "\n", encoding="utf-8")
-            clean_b = [f for f in scan_path(root).findings if f.path == "b.md"]
+            (root / "a.txt").write_text(OVERRIDE + "\n" + fenced([INSTALLER]) + "\n", encoding="utf-8")
+            (root / "b.txt").write_text("b\n" + fenced([INSTALLER]) + "\n" + OVERRIDE + "\n", encoding="utf-8")
+            clean_b = [f for f in scan_path(root).findings if f.path == "b.txt"]
             with mock.patch.object(fences, "extract", side_effect=flaky):
                 result = scan_path(root)
-        a = [(f.line, f.rule) for f in result.findings if f.path == "a.md"]
+        a = [(f.line, f.rule) for f in result.findings if f.path == "a.txt"]
         # plain still ran, the fence did not, and the failure warns (FR-E2 review)
         self.assertEqual(a, [(1, "coverage.surface_error"), (1, "inject.ignore_prev")])
-        self.assertEqual(result.coverage.skipped, [Skipped("a.md", "surface_error", "fences: RuntimeError")])
+        self.assertEqual(result.coverage.skipped, [Skipped("a.txt", "surface_error", "fences: RuntimeError")])
         self.assertEqual(result.coverage.files_scanned, 2)
-        self.assertEqual([f for f in result.findings if f.path == "b.md"], clean_b)
+        self.assertEqual([f for f in result.findings if f.path == "b.txt"], clean_b)
         self.assertEqual(lines_of(clean_b, "rce.pipe_installer"), [3])
 
 
@@ -196,13 +196,16 @@ class TestLineIndex(unittest.TestCase):
 
 class TestShippedSurfaces(unittest.TestCase):
     def test_plain_and_fences_reproduce_the_old_selection(self) -> None:
-        md, py = Path("a.md"), Path("a.py")
+        md, txt, py = Path("a.md"), Path("a.txt"), Path("a.py")
         text = "x\n```\nbody\n```\n"
         self.assertEqual(plain.extract(md, text), [Span(0, len(text), "text")])
         self.assertEqual(plain.extract(py, text), [Span(0, len(text), "code"), Span(0, len(text), "text")])
-        self.assertEqual(fences.extract(md, text), [Span(6, 11, "code")])
+        self.assertEqual(fences.extract(txt, text), [Span(6, 11, "code")])
         self.assertEqual(text[6:11], "body\n")
         self.assertEqual(fences.extract(py, text), [])
+        # FR-E3a t3: markdown files belong to the markdown surface, which finds the same body.
+        self.assertEqual(fences.extract(md, text), [])
+        self.assertEqual(markdown.extract(md, text), [Span(6, 11, "code")])
 
 
 if __name__ == "__main__":
