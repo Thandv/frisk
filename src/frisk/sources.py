@@ -468,7 +468,8 @@ def split_configs(targets: list[str], configs: list[str]) -> tuple[list[str], li
     scan reads it as a plain file). Each config file is kept once.
     """
     named = [t for t in targets if os.path.isfile(t) and looks_like_mcp_config(t)]
-    return [t for t in targets if t not in named], _each_config_once(named + configs)
+    is_named = set(named)
+    return [t for t in targets if t not in is_named], _each_config_once(named + configs)
 
 
 def _each_config_once(paths: list[str]) -> list[str]:

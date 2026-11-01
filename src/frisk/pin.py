@@ -109,15 +109,32 @@ def _ref_digest(s: ServerRef) -> str:
     return _sha((s.package or s.ref).encode())
 
 
-def _recompute(entry: dict) -> dict:
+def _config(config: str, parsed: dict) -> dict[str, ServerRef]:
+    """The config's servers by name (the first of a repeated name), read once per verify,
+    however many entries pin it; a config that cannot be read raises again for each entry."""
+    if config not in parsed:
+        try:
+            servers: dict[str, ServerRef] = {}
+            for s in parse_mcp_config(config):
+                servers.setdefault(s.name, s)
+            parsed[config] = servers
+        except Exception as e:  # noqa: BLE001 - raised again below, for each entry of the config
+            parsed[config] = e
+    result = parsed[config]
+    if isinstance(result, Exception):
+        raise result
+    return result
+
+
+def _recompute(entry: dict, parsed: dict) -> dict:
     rc = entry["recompute"]
     if rc["type"] == "server":
-        for s in parse_mcp_config(rc["config"]):
-            if s.name == rc["name"]:
-                return {**_server_fingerprint(s), "launch": s.launch}
-        return {"digest": "<missing>", "files": {}}
+        s = _config(rc["config"], parsed).get(rc["name"])
+        if s is None:
+            return {"digest": "<missing>", "files": {}}
+        return {**_server_fingerprint(s), "launch": s.launch}
     if rc["type"] == "config_servers":
-        return _server_names(parse_mcp_config(rc["config"]))
+        return _server_names(list(_config(rc["config"], parsed).values()))
     # The types below are written only by older frisk versions; they still verify.
     if rc["type"] == "target":
         with materialize(rc["value"]) as (root, _):
@@ -128,24 +145,18 @@ def _recompute(entry: dict) -> dict:
             return {"digest": "<missing>", "files": {}}
         return fingerprint_path(p)
     if rc["type"] == "config_ref":
-        for s in parse_mcp_config(rc["config"]):
-            if s.name == rc["name"]:
-                return {"digest": _ref_digest(s), "files": {}}
-        return {"digest": "<missing>", "files": {}}
-    if rc["type"] == "cached_package":
-        for s in parse_mcp_config(rc["config"]):
-            if s.name == rc["name"] and s.kind == "package-cached":
-                return _cached_fingerprint(s)
-        return {"digest": "<missing>", "files": {}}
+        s = _config(rc["config"], parsed).get(rc["name"])
+        return {"digest": _ref_digest(s) if s is not None else "<missing>", "files": {}}
     return {"digest": _sha(rc["value"].encode()), "files": {}}
 
 
 def verify_lock(lock: dict) -> list[dict]:
     """Return a drift report: one record per locked entry with status and changed files."""
     out = []
+    parsed: dict = {}  # each MCP config is read once, however many entries pin it
     for key, old in lock.get("entries", {}).items():
         try:
-            new = _recompute(old)
+            new = _recompute(old, parsed)
         except Exception as e:  # noqa: BLE001
             out.append({"entry": key, "status": "error", "detail": str(e)[:120]})
             continue

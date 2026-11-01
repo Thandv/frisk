@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 from _home import fake_home
-from frisk import pin
+from frisk import pin, sources
 from frisk.cli import main
 from frisk.sources import ServerRef, display_ref, parse_mcp_config
 
@@ -266,6 +266,47 @@ class CommandLineTokenTest(ReviewCase):
         self.assertIn("→ /nonexistent.invalid/bin/ghost\n", outputs["text"])  # one word: shown whole
         # A source frisk scans is a real path and is never cut at a space.
         self.assertEqual(display_ref(ServerRef("s", "local", "/srv/My Server", True)), "/srv/My Server")
+
+
+
+class _Counted(str):
+    """A str that counts its == comparisons (a list membership test makes one per item)."""
+    compared = 0
+
+    def __eq__(self, other: object) -> bool:
+        _Counted.compared += 1
+        return str.__eq__(self, other)
+
+    __hash__ = str.__hash__
+
+
+class LinearWorkTest(ReviewCase):
+    """frisk verify reads each MCP config once, not once per pinned server (that was
+    quadratic: 2000 servers took 25 s); split_configs compares each target once."""
+
+    def test_verify_reads_each_config_once(self) -> None:
+        cfgs = [self.config({"mcpServers": {f"s{i}": {"url": f"https://h{i}.example.invalid/m"} for i in range(40)}},
+                            f"c{n}.json") for n in range(2)]
+        lock = pin.build_lock([], cfgs)
+        with mock.patch("frisk.pin.parse_mcp_config", wraps=pin.parse_mcp_config) as parse:
+            report = pin.verify_lock(lock)
+        self.assertEqual(parse.call_count, 2)
+        self.assertEqual({r["status"] for r in report}, {"ok"})
+        Path(cfgs[0]).unlink()  # a config that cannot be read: an error for each of its entries, read once
+        with mock.patch("frisk.pin.parse_mcp_config", wraps=pin.parse_mcp_config) as parse:
+            report = pin.verify_lock(lock)
+        self.assertEqual(parse.call_count, 2)
+        self.assertEqual([r["status"] for r in report if r["entry"].startswith(cfgs[0])], ["error"] * 41)
+        self.assertEqual({r["status"] for r in report if r["entry"].startswith(cfgs[1])}, {"ok"})
+
+    def test_split_configs_compares_each_target_once(self) -> None:
+        targets = [_Counted(f"d{i}/.mcp.json") for i in range(400)]
+        _Counted.compared = 0
+        with mock.patch.object(sources.os.path, "isfile", return_value=True), \
+                mock.patch.object(sources, "looks_like_mcp_config", return_value=True):
+            rest, configs = sources.split_configs(targets, [])
+        self.assertEqual((rest, len(configs)), ([], 400))
+        self.assertLess(_Counted.compared, 2 * len(targets))  # a list lookup per target: ~80,000
 
 
 if __name__ == "__main__":
