@@ -11,7 +11,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from frisk import surfaces
 from frisk.engine import Finding, scan_file, scan_path, verdict
 from frisk.surfaces import Span, markdown
 
@@ -214,6 +216,27 @@ class TestInlineCodeCap(TempDir):
         # Before: BLOCK (22 blocking, all rule names in inline code); after: WARN.
         docs = Path(__file__).resolve().parent.parent / "docs"
         self.assertEqual(verdict(scan_path(docs).findings), "WARN")
+
+    def test_a_match_an_uncapped_span_also_finds_keeps_block(self) -> None:
+        # Capped spans are scanned last, whatever order the surfaces return spans in.
+        def whole_file_as_code(path: Path, text: str) -> list[Span]:
+            return [Span(0, len(text), "code")]
+
+        extra = mock.Mock(__name__="frisk.surfaces.extra", extract=whole_file_as_code)
+        text = "RUN `" + INSTALLER + "`\n"
+        for label, name, load in (("Dockerfile.md is also a Dockerfile", "Dockerfile.md", surfaces.load()),
+                                  ("a code surface after markdown", "README.md", (*surfaces.load(), extra))):
+            with self.subTest(label), mock.patch("frisk.surfaces.load", return_value=load):
+                findings = self.scan(name, text)
+                self.assertEqual([(f.line, f.severity) for f in findings if f.rule == "rce.pipe_installer"],
+                                 [(1, "block")])
+
+    def test_instruction_files_match_in_any_case(self) -> None:
+        # macOS and Windows file systems are case-insensitive, so an agent loads these too.
+        for name in ("skill.md", "Claude.md", "AGENTS.MD", "Agents/helper.md", "COMMANDS/sync.MD", "rules/style.MDC"):
+            with self.subTest(name):
+                findings = self.scan(name, self.README)
+                self.assertIn(("rce.pipe_installer", "block"), [(f.rule, f.severity) for f in findings])
 
 
 class TestAdversarialSize(TempDir):
