@@ -197,5 +197,52 @@ class HomeByRealPathTest(ReviewCase):
         self.assertNotIn(self.secret, out)
 
 
+
+class TextEscapesTest(ReviewCase):
+    """The text report escapes what a scanned file, a config or a file name puts on the
+    terminal: finding excerpts (the payload's own line), the target label and error text;
+    and a lone surrogate (valid JSON, never printable as UTF-8) is escaped, not a traceback."""
+
+    ESC = "\x1b"
+    MOVES = ESC + "[1A" + ESC + "[2K" + ESC + "]52;c;aGk=" + "\x07" + ESC + "[8m"
+
+    def test_an_excerpt_cannot_drive_the_terminal(self) -> None:
+        script = self.script("evil.sh", "#!/bin/sh\n" + INSTALLER + " ; " + self.MOVES + "\n")
+        code, out, _ = run(["--mcp-config", self.config({"mcpServers": {"s": {"command": "bash", "args": [script]}}})])
+        self.assertEqual(code, 1)
+        self.assertNotIn(self.ESC, out)
+        self.assertNotIn("\x07", out)
+        self.assertIn("\\x1b[1A\\x1b[2K\\x1b]52;c;aGk=\\x07\\x1b[8m", out)
+        self.assertIn("| #!/bin/sh\\n" + INSTALLER + " ; ", out)  # the readable part is unchanged
+
+    def test_the_label_and_error_text_are_escaped(self) -> None:
+        cfg = self.config({"mcpServers": {}}, "a" + self.ESC + "[2Kb.json")
+        for argv in (["--mcp-config", cfg], ["--mcp-config", cfg, "-q"]):
+            code, out, _ = run(argv)
+            self.assertNotIn(self.ESC, out)
+            self.assertIn("a\\x1b[2Kb.json", out)
+        bad = self.config({"projects": {"/p" + self.ESC + "[2J": "not an object"}}, ".claude.json")
+        for argv in ([bad], ["lock", bad, "--lockfile", str(self.tmp / "l.json")]):
+            code, _, err = run(argv)
+            self.assertEqual(code, 2)
+            self.assertNotIn(self.ESC, err)
+            self.assertIn("/p\\x1b[2J", err)
+
+    def test_a_lone_surrogate_in_a_name_is_escaped_in_every_output(self) -> None:
+        cfg = self.tmp / "mcp.json"
+        cfg.write_text('{"mcpServers": {"x\\ud800y": {"url": "https://h.example.invalid/m"}}}', encoding="utf-8")
+        for fmt in ([], ["--json"], ["--sarif"], ["-q"]):
+            with self.subTest(fmt=fmt):
+                code, out, _ = run(["--mcp-config", str(cfg), *fmt])
+                self.assertEqual(code, 0)
+                out.encode("utf-8")  # what print() does to a real stdout; a lone surrogate raised here
+        self.assertIn("x\\ud800y", run(["--mcp-config", str(cfg)])[1])
+        lockfile = str(self.tmp / "l.json")
+        self.assertEqual(run(["lock", "--mcp-config", str(cfg), "--lockfile", lockfile])[0], 0)
+        code, out, _ = run(["verify", "--lockfile", lockfile])
+        self.assertEqual(code, 0)
+        out.encode("utf-8")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -83,7 +83,7 @@ def build_lock(targets: list[str], configs: list[str]) -> dict:
 
 def _server_names(servers: list[ServerRef]) -> dict:
     names = {s.name: "" for s in servers}  # 'files' are the names: added or removed ones show
-    return {"digest": _sha("\0".join(sorted(names)).encode()), "files": names}
+    return {"digest": _sha("\0".join(sorted(names)).encode("utf-8", "surrogatepass")), "files": names}
 
 
 def _server_fingerprint(s: ServerRef) -> dict:

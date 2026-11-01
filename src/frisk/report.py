@@ -30,14 +30,16 @@ def _escape(cp: int) -> str:
 
 # C0 and C1 control characters, DEL, and the hidden Unicode frisk reports (bidi, zero-width,
 # tag characters, ...): a config or a scanned tree could use them to rewrite the terminal.
-_ESCAPES = {cp: _escape(cp) for cp in [*range(0x20), *range(0x7F, 0xA0),
+# Lone surrogates (a JSON "\ud800", or a file name that is not UTF-8) cannot be printed at all.
+_ESCAPES = {cp: _escape(cp) for cp in [*range(0x20), *range(0x7F, 0xA0), *range(0xD800, 0xE000),
                                          *(cp for lo, hi, _n, _s in SUSPECT_UNICODE for cp in range(lo, hi + 1))]}
 
 
 def printable(text: str) -> str:
     """Text as the text report prints it: control and hidden characters shown as escapes
-    (\\x1b, \\u202e). Every config-derived string and finding path goes through it; JSON and
-    SARIF escape them as JSON does."""
+    (\\x1b, \\u202e). Every config-derived string, finding path and excerpt (scanned content)
+    goes through it, and so do the target label and error messages; JSON and SARIF escape
+    them as JSON does."""
     return text.translate(_ESCAPES)
 
 
@@ -109,19 +111,19 @@ def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
         loc = _c(f"{printable(f.path)}:{f.line}", "dim")
         lines.append(f"[{mark}] {f.category:<{_CATEGORY_WIDTH}} {loc}  {f.description}")
         if f.excerpt:
-            lines.append(_c(f"          | {f.excerpt}", "dim"))
+            lines.append(_c(f"          | {printable(f.excerpt)}", "dim"))
     blocks = sum(1 for f in findings if f.severity == "block")
     warns = sum(1 for f in findings if f.severity == "warn")
     v = verdict(findings)
     banner = _c(f"  {v}  ", _VERDICT_COLOR[v])
     if not findings:
-        lines.append(_c(f"frisk: clean — no findings in {target}", "pass"))
+        lines.append(_c(f"frisk: clean — no findings in {printable(target)}", "pass"))
     lines.append("")
     if show_coverage:
         lines.append(_c(coverage_line(result.coverage), "dim"))
     lines.append(f"{_c('verdict', 'bold')}: {banner}  "
                  f"{blocks} blocking · {warns} warnings · {len(findings)} total  "
-                 f"({_c(target, 'dim')})")
+                 f"({_c(printable(target), 'dim')})")
     return "\n".join(lines)
 
 
@@ -189,7 +191,7 @@ def fingerprint(rule: str, path: str, line_text: str, occurrence: int) -> str:
     among results with the same first three, NUL-separated. The line number is deliberately
     absent, so inserting lines above a finding keeps it."""
     parts = (rule, path, line_text, str(occurrence))
-    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def to_sarif(result: ScanResult, version: str) -> str:

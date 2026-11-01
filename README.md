@@ -224,9 +224,10 @@ headers are never read. A URL whose host part cannot be told apart from its pass
 (an unencoded `#`, `?` or `/` in the password, a port that is not a number, or an `@` after
 the host) is shown as `<unparsable URL>`. In the text report (and `frisk verify`'s), control
 characters and the hidden Unicode frisk reports, in a server name, a cached package's
-version or dependencies, a location or a finding path, are shown as escapes (`\x1b`,
-`\u202e`), so a config cannot rewrite what your terminal shows; `--json` and `--sarif`
-escape them as JSON does.
+version or dependencies, a location, a finding path, a finding's excerpt (the scanned line
+itself), the target names and error messages, are shown as escapes (`\x1b`, `\u202e`), so
+neither a config nor a scanned package can rewrite what your terminal shows; a lone
+surrogate (`\ud800`) is shown the same way. `--json` and `--sarif` escape them as JSON does.
 
 ### Detect rug pulls (pin what you approved, catch silent changes)
 

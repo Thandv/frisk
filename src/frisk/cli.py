@@ -129,7 +129,7 @@ def _cmd_scan(argv: list[str]) -> int:
             servers.extend(records)
             audits.append(audit_text(cfg, records))
     except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
-        print(f"frisk: {e}", file=sys.stderr)
+        print(f"frisk: {printable(str(e))}", file=sys.stderr)
         return 2
     findings = result.sort().findings
 
@@ -138,7 +138,7 @@ def _cmd_scan(argv: list[str]) -> int:
     elif args.sarif:
         print(to_sarif(result, __version__))
     elif args.quiet:
-        print(f"frisk: {verdict(findings)}  ({label})")
+        print(f"frisk: {verdict(findings)}  ({printable(label)})")
     else:
         if audits:
             print("\n".join(audits))
@@ -167,7 +167,7 @@ def _cmd_lock(argv: list[str]) -> int:
         lock = pin.build_lock(args.targets, args.mcp_config)
         pin.write_lock(lock, args.lockfile)
     except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
-        print(f"frisk lock: {e}", file=sys.stderr)
+        print(f"frisk lock: {printable(str(e))}", file=sys.stderr)
         return 2
     n = len(lock["entries"])
     print(_c(f"frisk: pinned {n} entr{'y' if n == 1 else 'ies'} → {args.lockfile}", "pass"))
@@ -183,7 +183,7 @@ def _cmd_verify(argv: list[str]) -> int:
     try:
         report = pin.verify_lock(pin.read_lock(args.lockfile))
     except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
-        print(f"frisk verify: {e}", file=sys.stderr)
+        print(f"frisk verify: {printable(str(e))}", file=sys.stderr)
         return 2
 
     if args.json:

@@ -15,3 +15,9 @@
   compared paths as written, so a symlink to `$HOME` (one committed in a repo, or a `$HOME`
   that is itself a link) made the walk-up or a directory argument scan all of `$HOME`,
   printing excerpts of whatever matched there.
+- The text report also escapes control characters in a finding's excerpt (the scanned line,
+  which a malicious package writes: cursor moves, line erases, an OSC 52 clipboard write or
+  'conceal' could hide its own BLOCK line), in the target names on the verdict and `-q` lines
+  and in error messages (a project key). A lone surrogate in a server name (valid JSON) is
+  shown as `\ud800`; it used to stop the text and `--sarif` reports with a traceback and
+  `frisk lock` with exit 2.
