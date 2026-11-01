@@ -269,10 +269,11 @@ def _suspect_class(lo: int, hi: int) -> str:
 _SUSPECT_RE = re.compile("[" + "".join(_suspect_class(lo, hi) for lo, hi, _n, _s in SUSPECT_UNICODE) + "]")
 _ENTRY_OF = {cp: i for i, (lo, hi, _n, _s) in enumerate(SUSPECT_UNICODE) for cp in range(lo, hi + 1)}
 _RUN_ENTRIES = (0xE0000, 0xE0100)  # tag characters and variation selectors are judged as runs
-# A subdivision id in tag characters: a 2-letter region, 1-4 letters or digits, the cancel tag.
-_TAG_LETTER = "[" + _suspect_class(0xE0061, 0xE007A) + "]"
-_TAG_ALNUM = "[" + _suspect_class(0xE0030, 0xE0039) + _suspect_class(0xE0061, 0xE007A) + "]"
-_FLAG_TAGS = re.compile(_TAG_LETTER + "{2}" + _TAG_ALNUM + "{1,4}" + re.escape(chr(0xE007F)))
+# The tag runs of the three recommended (RGI) subdivision flags: England, Scotland, Wales.
+# Any other run, even one shaped like a subdivision id, can spell hidden text a few letters
+# per black flag, so it blocks.
+_FLAG_TAGS = re.compile("|".join(
+    re.escape("".join(chr(0xE0000 + ord(c)) for c in sub) + chr(0xE007F)) for sub in ("gbeng", "gbsct", "gbwls")))
 _BLACK_FLAG = chr(0x1F3F4)
 
 

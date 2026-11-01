@@ -47,7 +47,7 @@ verdict:   BLOCK    4 blocking · 4 warnings · 8 total  (examples/malicious-ski
 | **Destructive ops** | `rm -rf` of `/`, a system directory (`/etc`, `/usr`, …), `~`/`$HOME`, a home credential directory (`~/.ssh`, `~/.aws`, …) or a glob over them (any flag spelling; temp and build paths pass), `dd` or `mkfs` onto a `/dev` device (not `/dev/null` or a file), fork bombs, `chmod 777` |
 | **Prompt injection** | "ignore previous instructions", fake tool-call markup, role overrides, "POST data to URL"; in agent-instruction files (`SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `agents/`/`commands/` markdown, `.cursorrules`, `*.mdc`), telling the agent to copy, read or send a key or credential file |
 | **Tool poisoning** (MCP) | hidden directives in tool descriptions: "do not tell the user", `<IMPORTANT>` blocks, read-then-send |
-| **Obfuscation** | zero-width characters, bidi overrides and Unicode tag characters used to hide instructions (block; emoji joiners and subdivision flags pass); runs of variation selectors, invisible operators, soft hyphens, U+180E and a byte-order mark after the start (warn) |
+| **Obfuscation** | zero-width characters, bidi overrides and Unicode tag characters used to hide instructions (block; emoji joiners and the England, Scotland and Wales flags pass); runs of variation selectors, invisible operators, soft hyphens, U+180E and a byte-order mark after the start (warn) |
 
 Code rules (RCE, exfiltration, destructive) run on scripts — by extension (`.py`, `.sh`,
 `.js`/`.ts`/`.tsx`/`.jsx`, `.ps1`, `.vbs`, `.applescript` and more) or by a `#!` first line,

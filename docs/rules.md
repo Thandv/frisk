@@ -259,7 +259,7 @@ Run with the text rules.
 ### unicode.invisible
 
 - Severity: `block` · Category: `obfuscation` · OWASP LLM Top 10 (2025): LLM01:2025 Prompt Injection
-- Matches: Zero-width characters (space, joiner, non-joiner, word joiner), bidirectional controls (marks, embeddings, overrides, isolates) or tag characters (U+E0000 to U+E007F) anywhere in the text. A zero-width joiner directly between two emoji (as in a family emoji) and the tag sequence of a subdivision flag (black flag, a short tag-letter id, cancel tag) are allowed. Only the first reported occurrence of each character class is reported.
+- Matches: Zero-width characters (space, joiner, non-joiner, word joiner), bidirectional controls (marks, embeddings, overrides, isolates) or tag characters (U+E0000 to U+E007F) anywhere in the text. A zero-width joiner directly between two emoji (as in a family emoji) and the tag sequence of one of the three recommended subdivision flags (England, Scotland, Wales: black flag, tag letters, cancel tag) are allowed; any other tag run blocks, since tag letters can spell hidden text a few at a time. Only the first reported occurrence of each character class is reported.
 - Likely false positive: Text in right-to-left languages that uses directional marks on purpose.
 - On a hit: Reveal the characters (for example with a hex view); hidden text an agent reads but a human does not see is a classic injection carrier.
 
