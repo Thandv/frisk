@@ -134,11 +134,14 @@ CODE_RULES = [
     # Destructive operations
     ("destroy.rm_rf", "destructive", "block",
      # Recursive and force in any spelling (-rf, -fr, -r -f, --recursive --force); the target
-     # is the root, the home directory or a glob over either or the current directory,
-     # optionally quoted. Other paths, such as temp directories, do not match.
+     # is the root, a top-level system directory, the home directory or a credential
+     # directory in it, or a glob over one of them or the current directory, optionally
+     # quoted. Paths below those, such as temp and build directories, do not match.
      _r(r"\brm\s+(?=" + _ARGS + r"(?:-[a-z]*r|--recursive\b))(?=" + _ARGS + r"(?:-[a-z]*f|--force\b))"
-        + _ARGS + r"[\"']?(?:(?:/|~/?|\$HOME/?|\$\{HOME\}/?)\*?|\*)[\"']?(?=[\s;&|)]|$)"),
-     "recursive force delete of a root/home/glob path"),
+        + _ARGS + r"[\"']?(?:(?:~|\$HOME|\$\{HOME\})[\"']?(?:/[\"']?\.(?:ssh|aws|gnupg|config|kube|docker))?"
+        r"|/(?:etc|usr|bin|sbin|var|System|Library|opt|private|home|Users|root)?|\*)"
+        r"[\"']?(?:/?\*|/)?[\"']?(?=[\s;&|)]|$)"),
+     "recursive force delete of a root, system, home or credential directory"),
     ("destroy.disk", "destructive", "block",
      # dd writing to a device (not the null/zero/stdio sinks), mkfs on a device, or a
      # redirect into a raw disk. dd to a regular file does not match.

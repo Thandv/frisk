@@ -44,7 +44,7 @@ verdict:   BLOCK    4 blocking · 4 warnings · 8 total  (examples/malicious-ski
 |---|---|
 | **Remote code execution** | `curl … \| bash` (also `\| sudo -E bash`, `\| /bin/sh`, `bash <(curl …)`, `sh -c "$(curl …)"`), `eval`/`exec`, `os.system`, `shell=True`, pickle, base64-exec |
 | **Secret exfiltration** | reads of `.ssh`/`.aws`/`.gnupg`, secret env vars, macOS keychain, network egress |
-| **Destructive ops** | `rm -rf` of `/`, `~`/`$HOME` or a glob over them (any flag spelling; temp paths pass), `dd` or `mkfs` onto a `/dev` device (not `/dev/null` or a file), fork bombs, `chmod 777` |
+| **Destructive ops** | `rm -rf` of `/`, a system directory (`/etc`, `/usr`, …), `~`/`$HOME`, a home credential directory (`~/.ssh`, `~/.aws`, …) or a glob over them (any flag spelling; temp and build paths pass), `dd` or `mkfs` onto a `/dev` device (not `/dev/null` or a file), fork bombs, `chmod 777` |
 | **Prompt injection** | "ignore previous instructions", fake tool-call markup, role overrides, "POST data to URL"; in agent-instruction files (`SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `agents/`/`commands/` markdown, `.cursorrules`, `*.mdc`), telling the agent to copy, read or send a key or credential file |
 | **Tool poisoning** (MCP) | hidden directives in tool descriptions: "do not tell the user", `<IMPORTANT>` blocks, read-then-send |
 | **Obfuscation** | zero-width characters, bidi overrides and Unicode tag characters used to hide instructions (block; emoji joiners and subdivision flags pass); runs of variation selectors, invisible operators, soft hyphens, U+180E and a byte-order mark after the start (warn) |

@@ -135,7 +135,7 @@ Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, 
 ### destroy.rm_rf
 
 - Severity: `block` · Category: `destructive` · OWASP LLM Top 10 (2025): LLM06:2025 Excessive Agency
-- Matches: A recursive, forced `rm` (`-rf`, `-fr`, `-r -f`, `--recursive --force`, in any order) whose target is `/`, `~`, `$HOME` or `${HOME}` (optionally quoted), or a glob over one of them or a bare `*`. Other paths, such as temporary directories (`/tmp/x`, `$TMPDIR/x`), do not match.
+- Matches: A recursive, forced `rm` (`-rf`, `-fr`, `-r -f`, `--recursive --force`, in any order) whose target is `/`; a top-level system directory (`/etc`, `/usr`, `/bin`, `/sbin`, `/var`, `/opt`, `/private`, `/System`, `/Library`, `/home`, `/Users`, `/root`); `~`, `$HOME` or `${HOME}`; a credential directory in the home directory (`.ssh`, `.aws`, `.gnupg`, `.config`, `.kube`, `.docker`); or a glob over one of them or a bare `*`. Targets may be quoted and end in `/` or `/*`. Paths below those, such as temporary and build directories (`/tmp/x`, `$TMPDIR/x`, `/usr/local/x`, `./build`), do not match.
 - Likely false positive: A script that empties its own working directory with a bare `*`.
 - On a hit: Reject unless the path is a clearly scoped temporary directory.
 

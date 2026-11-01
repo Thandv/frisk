@@ -62,6 +62,30 @@ class TestRmRfTargets(RuleCase):
         self.assert_cases()
 
 
+
+SYSTEM_DIRS = ("/etc", "/usr", "/bin", "/sbin", "/var", "/System", "/Library", "/opt", "/private",
+               "/home", "/Users", "/root")
+HOME_SECRET_DIRS = (".ssh", ".aws", ".gnupg", ".config", ".kube", ".docker")
+
+
+class TestRmRfSystemAndSecretDirs(RuleCase):
+    """Owner decision (2026-11-01): system directories and the home credential directories
+    block too, in every home spelling, quoted or not, with or without a trailing / or glob."""
+    rid = "destroy.rm_rf"
+    attacks = tuple(
+        [f"rm -rf {d}{tail}" for d in SYSTEM_DIRS for tail in ("", "/", "/*")]
+        + [f"rm {flags} {q}{h}/{s}{tail}{q}"
+           for flags in ("-rf", "-r -f") for h in ("~", "$HOME", "${HOME}") for s in HOME_SECRET_DIRS
+           for tail in ("", "/", "/*") for q in ("", '"')]
+        + ['rm -rf "$HOME"/.ssh', "rm -rf '/etc/'", "rm -fr /usr/*"])
+    legit = ("rm -rf /usr/local/lib/x", "rm -rf /var/folders/ab/T/build", "rm -rf /private/tmp/x",
+             "rm -rf /opt/homebrew/Caskroom/x", "rm -rf /etcetera", "rm -rf ~/.cache/pip", "rm -rf ~/.sshx",
+             "rm -rf ~/.config/tool/cache", "rm -rf $HOME/project/dist", "rm -rf /home/dev/project/build",
+             "rm -rf node_modules", "rm -rf ./build dist", "rm -rf $TMPDIR/x", "rm -rf /tmp/*")
+
+    def test_system_and_credential_dirs_block_build_and_temp_paths_pass(self) -> None:
+        self.assert_cases()
+
 class TestDiskWrites(RuleCase):
     rid = "destroy.disk"
     attacks = ("dd if=/dev/zero of=/dev/sda", "dd if=img of=/dev/disk2 bs=1m", "mkfs.ext4 /dev/sdb1",
