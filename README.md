@@ -47,6 +47,12 @@ verdict:   BLOCK    3 blocking · 4 warnings · 7 total  (examples/malicious-ski
 | **Tool poisoning** (MCP) | hidden directives in tool descriptions: "do not tell the user", `<IMPORTANT>` blocks, read-then-send |
 | **Obfuscation** | zero-width characters, bidi overrides and Unicode tag characters used to hide instructions (block; emoji joiners and subdivision flags pass); runs of variation selectors, invisible operators, soft hyphens, U+180E and a byte-order mark after the start (warn) |
 
+Code rules (RCE, exfiltration, destructive) run on scripts — by extension (`.py`, `.sh`,
+`.js`/`.ts`/`.tsx`/`.jsx`, `.ps1`, `.vbs`, `.applescript` and more) or by a `#!` first line,
+whatever the name — and on the shell commands inside other files: fenced code blocks,
+Makefile recipes, Dockerfile `RUN` instructions, justfile recipes and `package.json`
+`scripts`. Text rules (injection, tool poisoning, hidden Unicode) run on every file.
+
 Every rule id, its severity, what it matches and what to do about a hit:
 [docs/rules.md](docs/rules.md).
 
@@ -69,6 +75,9 @@ frisk ./skill --json                   # machine-readable report
 frisk ./skill --sarif > frisk.sarif    # SARIF 2.1.0 for GitHub code scanning
 frisk ./skill --fail-on warn           # CI gate: also fail on warnings
 ```
+
+Every readable file under the target is scanned; scripts, build files and `package.json`
+scripts get the code rules too (see [What it detects](#what-it-detects)).
 
 ### What was not scanned (coverage)
 

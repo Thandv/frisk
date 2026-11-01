@@ -9,7 +9,7 @@ Severity: **block** fails a scan by default; **warn** fails only with `--fail-on
 
 ## Code rules
 
-Run on script files (`.py`, `.sh`, `.js` and the other code extensions) and on fenced code blocks in every other text file.
+Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks in every other text file, and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command.
 
 <a id="rce.pipe_installer"></a>
 ### rce.pipe_installer

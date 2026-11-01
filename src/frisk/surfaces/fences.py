@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..rules import CODE_EXTS, FENCE_RE
+from ..rules import FENCE_RE, is_code
 from . import Span
 
 
 def extract(path: Path, text: str) -> list[Span]:
-    if path.suffix.lower() in CODE_EXTS:
+    if is_code(path, text):
         return []  # a code file is already scanned as code in full (see plain)
     return [Span(m.start(1), m.end(1), "code") for m in FENCE_RE.finditer(text)]

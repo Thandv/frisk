@@ -14,12 +14,14 @@ Severities:
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 # --- file classification ----------------------------------------------------
 
 CODE_EXTS = {
-    ".py", ".sh", ".bash", ".zsh", ".fish", ".js", ".mjs", ".cjs", ".ts",
-    ".rb", ".pl", ".php", ".ps1", ".bat", ".cmd", ".lua", ".r",
+    ".py", ".sh", ".bash", ".zsh", ".ksh", ".fish", ".command", ".js", ".mjs", ".cjs", ".jsx",
+    ".ts", ".mts", ".cts", ".tsx", ".rb", ".pl", ".php", ".ps1", ".psm1", ".bat", ".cmd",
+    ".vbs", ".applescript", ".lua", ".r",
 }
 TEXT_EXTS = {
     ".md", ".markdown", ".txt", ".mdc", ".rst", ".yaml", ".yml", ".json", ".toml",
@@ -47,6 +49,11 @@ EXECUTABLE_MAGIC = {
     b"\xcf\xfa\xed\xfe": "Mach-O",
     b"\xca\xfe\xba\xbe": "Mach-O universal or Java class",
 }
+
+
+def is_code(path: Path, text: str) -> bool:
+    """A script: a code extension, or a first line that is a shebang, whatever the extension."""
+    return path.suffix.lower() in CODE_EXTS or text.startswith("#!")
 
 
 def executable_magic(data: bytes) -> str | None:
