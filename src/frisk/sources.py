@@ -19,6 +19,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .debug import log as _root_log, ms_since
 
@@ -86,9 +87,35 @@ _INTERPRETERS = {"python", "python3", "node", "bun", "deno", "ruby", "bash", "sh
 class ServerRef:
     name: str
     kind: str          # "local" | "package" | "remote" | "unknown"
-    ref: str           # local path, package name, or URL
+    ref: str           # local path, package name, or URL; print it only through display_ref
     scannable: bool
     detail: str = ""
+
+
+def display_ref(s: ServerRef) -> str:
+    """The server's ref as it may be printed. Every audit output (text, --json, --sarif, -q)
+    shows a ref only through this function, and so must any later output of server
+    locations (project labels, cache paths).
+
+    A URL (any remote ref, or a ref containing '://') keeps its scheme, host, port and
+    path; userinfo, query and fragment, where tokens live, are dropped, and a URL without a
+    scheme and host shows as '<unparsable URL>'. Env values and headers are never read into
+    a ServerRef, so they cannot reach the output.
+    """
+    if s.kind == "remote" or "://" in s.ref:
+        return _safe_url(s.ref)
+    return s.ref
+
+
+def _safe_url(url: str) -> str:
+    try:
+        parts = urlsplit(url)
+    except ValueError:  # for example an unclosed IPv6 bracket
+        return "<unparsable URL>"
+    host = parts.netloc.rpartition("@")[2]
+    if not parts.scheme or not host:
+        return "<unparsable URL>"
+    return f"{parts.scheme}://{host}{parts.path}"
 
 
 def _classify(name: str, spec: dict) -> ServerRef:

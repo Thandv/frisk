@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 from .engine import Coverage, Finding, ScanResult, sort_findings, verdict, worst_severity
 from .rules import RULE_META, owasp_for
-from .sources import ServerRef
+from .sources import ServerRef, display_ref
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 _C = {
@@ -45,7 +45,7 @@ def audit_text(path: str, records: list[AuditRecord]) -> str:
         tag = _c("SKIP ", "dim") if rec.verdict is None else _c(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
         lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {s.detail}")
         if rec.verdict is None:
-            lines.append(_c(f"           → {s.ref}", "dim"))
+            lines.append(_c(f"           → {display_ref(s)}", "dim"))
     return "\n".join(lines)
 
 

@@ -143,6 +143,10 @@ MCP config audit: claude_desktop_config.json
   [SKIP ] npm-tool              package  npm package — fetch+scan not yet supported (roadmap)
 ```
 
+A skipped server's location is printed without secrets: a URL shows only its scheme,
+host, port and path (no `user:password@`, query string or fragment), and env values and
+headers are never read.
+
 ### Detect rug pulls (pin what you approved, catch silent changes)
 
 The sneakiest supply-chain attack: a server shows clean content when you approve it,
