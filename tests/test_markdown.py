@@ -62,6 +62,23 @@ class TestCodeForms(TempDir):
             with self.subTest(label):
                 self.assertEqual(self.lines("guide.md", text, "exfil.net_lib"), [])
 
+    def test_mid_line_opener_with_a_language_tag_opens_a_fence(self) -> None:
+        # Review: main's fence pattern caught this in every text file; t3 made it prose.
+        text = "Run: ```sh\n" + INSTALLER + "\n```\n"
+        for name in ("guide.md", "notes.txt", "tool.yaml"):
+            with self.subTest(name):
+                self.assertEqual(self.lines(name, text), [2])
+
+    def test_backticks_inside_a_sentence_do_not_open_a_fence(self) -> None:
+        text = "Use ``` to start a fence.\n\n```\n" + INSTALLER + "\n```\n"
+        self.assertEqual(self.lines("guide.md", text), [4])
+
+    def test_a_fence_closes_only_on_its_own_character_at_least_as_long(self) -> None:
+        for label, text in (("shorter closer", "a\n````\n```\n" + INSTALLER + "\n````\n"),
+                            ("other character", "a\n~~~\n```\n" + INSTALLER + "\n~~~\n")):
+            with self.subTest(label):
+                self.assertEqual(self.lines("guide.md", text), [4])
+
     def test_fences_surface_no_longer_owns_markdown(self) -> None:
         text = "a\n```sh\n" + INSTALLER + "\n```\n"
         self.assertEqual(self.lines("guide.md", text), [3])  # once: markdown only
