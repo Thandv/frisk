@@ -137,11 +137,32 @@ frisk --mcp-config ~/Library/Application\ Support/Claude/claude_desktop_config.j
 ```
 MCP config audit: claude_desktop_config.json
 
-  [PASS ] book-bible            local    local source via python3
-  [BLOCK] sketchy-server        local    local source via node
-  [SKIP ] some-remote           remote   remote HTTP/SSE server — behavior not statically verifiable
-  [SKIP ] npm-tool              package  npm package — fetch+scan not yet supported (roadmap)
+  [PASS ] notes-server           local  local source via python3
+  [BLOCK] sketchy-server         local  local source via node
+  [SKIP ] some-remote            remote  remote HTTP/SSE server — behavior not statically verifiable
+           → https://mcp.example.com/sse
+  [SKIP ] npm-tool               package  npm package — fetch+scan not yet supported (roadmap)
+           → some-npm-mcp
 ```
+
+The findings and the verdict follow, as for any scan.
+
+How each server's source is found, the way the client launches it:
+
+- A remote `url` and a package run by `npx`, `uvx`, `pipx` (or `npm`, `pnpm`, `bunx`,
+  `pip`) are not scanned: frisk does not fetch anything.
+- `uv run` is local source, rooted at `--directory`/`--project`, else at the project of the
+  script it runs, else at the config's `cwd`. `uv tool run` is a package, like `uvx`.
+- For an interpreter (`python`, `node`, `bun`, `deno`, `ruby`, `bash`, `sh`, with any version
+  suffix) the first script argument (a code extension or a `#!` first line) is the entry
+  point, scanned from the nearest directory holding `pyproject.toml`, `package.json` or
+  `.git`, at most 3 levels above the script and never `$HOME` or above (else the script's
+  own directory). With no script argument, the first existing path argument is scanned.
+- Any other command given as a path is scanned as that file; its arguments are data.
+
+Relative paths resolve against the server's `cwd` in the config, never against the
+directory you run frisk from; with no absolute `cwd`, a relative script is `unknown`.
+`$HOME`, or a directory above it, is never scanned as a server's source.
 
 A skipped server's location is printed without secrets: a URL shows only its scheme,
 host, port and path (no `user:password@`, query string or fragment), and env values and

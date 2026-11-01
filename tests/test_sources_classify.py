@@ -53,13 +53,12 @@ class TestClassifyTable(unittest.TestCase):
                        "could not resolve a local source to scan")),
             ("empty spec", {},
              ServerRef("s", "unknown", "?", False, "could not resolve a local source to scan")),
-            # Today `uv` counts as a package runner and the first non-flag argument
-            # (here the --directory value) is taken as the package name, so a local
-            # uv project is reported as an unscannable pypi package. Pinned as-is;
-            # FR-E4 changes this row to classify it as local source.
+            # Changed on purpose by FR-E4 t3: `uv` used to count as a package runner (the
+            # --directory value was taken as the package name, so this was an unscannable
+            # pypi package). `uv run` is local source rooted at --directory.
             ("uv --directory <dir> run server.py",
              {"command": "uv", "args": ["--directory", d, "run", "server.py"]},
-             ServerRef("s", "package", d, False, PYPI_DETAIL)),
+             ServerRef("s", "local", d, True, "local source via uv")),
         ]
         for label, spec, expected in rows:
             with self.subTest(label):
