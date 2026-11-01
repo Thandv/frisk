@@ -15,7 +15,7 @@ Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, 
 ### rce.pipe_installer
 
 - Severity: `block` · Category: `rce` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A `curl` or `wget` command whose output is piped into a shell or a Python interpreter on the same line or across backslash-continued lines, where the shell may be named by a path (`/bin/sh`) or reached through `sudo` or `env` with options; or a `curl`/`wget` download run by a shell through process substitution (`bash <(…)`) or `sh -c "$(…)"`.
+- Matches: A `curl` or `wget` command whose output is piped into a shell or a Python interpreter on the same line or across backslash-continued lines (before or after the `|`), where the shell may be named by a path (`/bin/sh`) or reached through `sudo` or `env` with options; or a `curl`/`wget` download run by a shell through process substitution (`bash <(…)`) or `sh -c "$(…)"`.
 - Likely false positive: Install instructions in a README that tell a human to run a vendor's official installer.
 - On a hit: Do not run it. Download the script, read it, and pin it by hash; prefer a package manager.
 

@@ -111,7 +111,8 @@ class TestExfilInstruction(RuleCase):
 class TestPipeToShellForms(RuleCase):
     rid = "rce.pipe_installer"
     attacks = (FETCH + " | /bin/sh", FETCH + " | env sh", FETCH + " | sudo -E bash", FETCH + " | /usr/bin/env bash",
-               "bash <(" + FETCH + ")", 'sh -c "$(' + FETCH + ')"', FETCH + " \\\n  | bash", WGET + " | sh")
+               "bash <(" + FETCH + ")", 'sh -c "$(' + FETCH + ')"', FETCH + " \\\n  | bash", WGET + " | sh",
+               FETCH + " |\\\n  bash")
     legit = (FETCH + " | /usr/bin/shasum", FETCH + " | env grep x", "diff <(" + FETCH + ") <(" + FETCH + ")",
              'sh -c "echo $(date)"', 'V="$(' + FETCH + ')"', FETCH + " -o i.sh\ncat i.sh | sh")
 

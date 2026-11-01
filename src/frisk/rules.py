@@ -77,9 +77,9 @@ _ARGS = r"(?:[^\s;&|]+[ \t]+)*?"
 CODE_RULES = [
     # Remote code execution / piped installers
     ("rce.pipe_installer", "rce", "block",
-     # Piped (lines may continue with a backslash; the shell may be reached through a path,
+     # Piped (lines may continue with a backslash before or after the pipe; the shell may be reached through a path,
      # sudo or env with options), or the download run via process substitution or sh -c.
-     _r(r"\b(curl|wget)\b(?:[^\n|]|\\\n)*\|\s*(?:(?:\S*/)?(?:sudo|env)(?:\s+-\S+)*\s+)*"
+     _r(r"\b(curl|wget)\b(?:[^\n|]|\\\n)*\|(?:\s|\\\n)*(?:(?:\S*/)?(?:sudo|env)(?:\s+-\S+)*\s+)*"
         r"(?:\S*/)?(bash|sh|zsh|python[0-9.]*)\b"
         r"|\b(?:bash|sh|zsh)\s+(?:<\(|-c\s+[\"']?\$\()\s*(?:curl|wget)\b"),
      "pipe-to-shell remote installer (curl|wget ... | sh)"),
