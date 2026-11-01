@@ -388,7 +388,7 @@ def _at_or_above_home(path: Path) -> bool:
 
 
 def parse_mcp_config(path: str | Path) -> list[ServerRef]:
-    """Every server in the config: the top-level mcpServers (or servers), then each
+    """Every server in the config: the top-level mcpServers and servers, then each
     project's mcpServers in a .claude.json, named 'server (project)' with $HOME shown as ~.
 
     A config whose top level, mcpServers, projects or project entry is not a JSON object
@@ -434,8 +434,15 @@ def _launch_digest(spec: object) -> str:
 
 
 def _servers(obj: dict, where: str | Path) -> dict:
-    """The server map: 'mcpServers', else 'servers' (VS Code); {} when neither is set."""
-    return _object(obj, "mcpServers" if obj.get("mcpServers") is not None else "servers", where)
+    """Every server in 'mcpServers' and in 'servers': Claude Code reads the first, VS Code the
+    second, so a config holding both is audited whole and neither map can hide the other. A
+    'servers' name already taken is suffixed ' (servers)' (again if need be), never dropped."""
+    servers = dict(_object(obj, "mcpServers", where))
+    for name, spec in _object(obj, "servers", where).items():
+        while name in servers:
+            name += " (servers)"
+        servers[name] = spec
+    return servers
 
 
 def _object(obj: dict, key: str, where: str | Path) -> dict:

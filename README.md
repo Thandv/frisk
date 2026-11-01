@@ -175,7 +175,9 @@ or `url`) is reported as `invalid`, and the other servers are still audited. `--
 `verdict` (`null` when skipped).
 
 Claude Code's `~/.claude.json` works too (`frisk ~/.claude.json`): its top-level servers and
-every project's `mcpServers` are audited. A project server is named `server (project)`,
+every project's `mcpServers` are audited. A config that holds both `mcpServers` (Claude Code,
+Cursor, Claude Desktop) and `servers` (VS Code) is audited whole, since each client runs its
+own map; a name found in both is listed twice, the second as `name (servers)`. A project server is named `server (project)`,
 with your home directory shown as `~`, for example `db (~/work/app)`. A config whose top
 level, `mcpServers`, `projects` or a project entry is not a JSON object stops with exit
 code 2 rather than being audited in part, and so does a config frisk cannot read (no
