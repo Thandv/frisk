@@ -236,7 +236,8 @@ How each server's source is found, the way the client launches it:
   own directory). With no script argument, the first existing path argument is scanned.
 - Any other command given as a path is scanned as that file; its arguments are data. If
   that file is a console-script wrapper or bin shim (a small Python script that calls an
-  entry point it imports from a package, as pip, pipx and uv generate; a shell shim that
+  entry point it imports from a package, as pip, pipx and uv generate, also when they start
+  it through `/bin/sh` for a long or spaced interpreter path; a shell shim that
   execs node; or a file inside a node package, where an npm bin link points), the server
   is `wrapper` and not scanned: the package that really runs is not read, so it warns
   instead of passing on the wrapper alone. The wrapper itself is still read, so a payload

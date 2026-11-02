@@ -113,6 +113,8 @@ _PKG_RUNNERS = {"npx": "npm", "npm": "npm", "pnpm": "npm", "bunx": "npm",
 _INTERPRETERS = {"python", "node", "bun", "deno", "ruby", "bash", "sh"}
 _PROJECT_MARKERS = ("pyproject.toml", "package.json", ".git")
 _WRAPPER_MAX_BYTES = 4096  # a generated console-script wrapper or bin shim is a few hundred bytes
+# The second line of a wrapper pip or uv starts through /bin/sh: the shell runs it, Python reads it as a string.
+_SH_EXEC_PYTHON = "'''exec' "
 _WALK_UP_LEVELS = 3
 # Options that take a value, so the value is not mistaken for the subcommand, script or package.
 _UV_VALUE_FLAGS = {"--directory", "--project", "--from", "--with", "--with-editable", "--with-requirements",
@@ -440,8 +442,11 @@ def _first_existing(args: list[str], cwd: Path | None) -> Path | None:
 def _wrapped_package(exe: Path) -> str:
     """What a console-script wrapper or bin shim at `exe` runs, or '' when it is not one:
     a file inside a node package (an npm bin link resolves there); a small Python script
-    that imports a name from a package and calls that name in sys.exit(...), as pip, pipx
-    and uv generate; or a small shell shim that execs node (pnpm, cmd-shim)."""
+    that imports a name from a package and calls that name (or a method of it) in
+    sys.exit(...), as pip, pipx and uv generate, also in the form they start through /bin/sh
+    (an interpreter path that is long or holds a space, or a relocatable environment: the
+    line after '#!/bin/sh' starts with the exec trick, three quotes then exec); or a small
+    shell shim that execs node (pnpm, cmd-shim)."""
     real = Path(os.path.realpath(exe))
     parts = real.parts
     if "node_modules" in parts:
@@ -458,11 +463,11 @@ def _wrapped_package(exe: Path) -> str:
     if len(head) > _WRAPPER_MAX_BYTES or not head.startswith(b"#!"):
         return ""
     shebang, _, body = head.decode("utf-8", "replace").partition("\n")
-    if "python" in shebang:
+    if "python" in shebang or ("sh" in shebang and body.startswith(_SH_EXEC_PYTHON)):
         for line in body.splitlines():
-            words = line.split()  # 'from M import F' (or 'F as G'): a generated wrapper calls it
+            words = line.split()  # 'from M import F' (or 'F as G'): a generated wrapper calls F, or F.method
             if (len(words) in (4, 6) and words[0] == "from" and words[2] == "import" and words[1] != "__future__"
-                    and f"sys.exit({words[-1]}(" in body):
+                    and (f"sys.exit({words[-1]}(" in body or f"sys.exit({words[-1]}." in body)):
                 return f"the Python package '{words[1].split('.')[0]}'"
     elif "sh" in shebang and ("exec node " in body or 'exec "$basedir/node"' in body):
         return "a node package"

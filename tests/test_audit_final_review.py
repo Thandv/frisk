@@ -206,5 +206,71 @@ class MalformedKeyBesideCommandTest(FinalReviewCase):
                 self.assertEqual((s.kind, s.detail.endswith("is not a string")), ("invalid", True))
 
 
+# The console-script templates pip (distlib) and uv write, and the two ways each starts Python.
+PIP_BODY = ("# -*- coding: utf-8 -*-\nimport re\nimport sys\nfrom {module} import {name}\nif __name__ == '__main__':\n"
+            "    sys.argv[0] = re.sub(r'(-script\\.pyw|\\.exe)?$', '', sys.argv[0])\n    sys.exit({call}())\n")
+UV_BODY = ("# -*- coding: utf-8 -*-\nimport sys\nfrom {module} import {name}\nif __name__ == \"__main__\":\n"
+           "    if sys.argv[0].endswith(\"-script.pyw\"):\n        sys.argv[0] = sys.argv[0][:-11]\n"
+           "    elif sys.argv[0].endswith(\".exe\"):\n        sys.argv[0] = sys.argv[0][:-4]\n    sys.exit({call}())\n")
+SH_EXEC = "#!/bin/sh\n'''exec' {python} \"$0\" \"$@\"\n' '''\n"  # a long interpreter path, or one with a space
+UV_RELOCATABLE = "#!/bin/sh\n'''exec' \"$(dirname -- \"$(realpath -- \"$0\")\")\"/'python' \"$0\" \"$@\"\n' '''\n"
+
+
+class InstallerWrapperFormsTest(FinalReviewCase):
+    """N4's family: a console-script wrapper is not passed on itself. pip and uv also start a
+    wrapper through /bin/sh (an interpreter path over the shebang limit or with a space, and
+    uv's relocatable environments), and an entry point 'module:Object.method' is called as
+    'Object.method()'. Those wrappers were scanned alone and PASSed while the package that
+    runs, here holding a pipe-to-shell installer, was never read."""
+
+    def tool(self, wrapper: str, tool: str = "acme") -> str:
+        env = self.home / ".local" / "share" / "uv" / "tools" / tool
+        self.file(f".local/share/uv/tools/{tool}/lib/python3.12/site-packages/acme_mcp/server.py", INSTALLER + "\n")
+        bin_file = self.file(f".local/share/uv/tools/{tool}/bin/acme-mcp", wrapper.replace("{env}", str(env)))
+        link = self.home / ".local" / "bin" / f"{tool}-mcp"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(bin_file)
+        return str(link)
+
+    def test_every_installer_form_is_a_wrapper(self) -> None:
+        spaced = self.home / "Library" / "Application Support" / "pipx" / "venvs" / "acme" / "bin" / "python"
+        for i, (label, head, body, name, call) in enumerate((
+            ("pip, plain shebang", "#!{env}/bin/python\n", PIP_BODY, "main", "main"),
+            ("uv, plain shebang", "#!{env}/bin/python\n", UV_BODY, "main", "main"),
+            ("pip through /bin/sh", SH_EXEC.format(python=f'"{spaced}"'), PIP_BODY, "main", "main"),
+            ("uv through /bin/sh", SH_EXEC.format(python="'" + "/opt/" + "x" * 120 + "/bin/python'"), UV_BODY, "main",
+             "main"),
+            ("uv relocatable", UV_RELOCATABLE, UV_BODY, "main", "main"),
+            ("pip, Object.method", "#!{env}/bin/python\n", PIP_BODY, "App", "App.run"),
+            ("uv, Object.method", "#!{env}/bin/python\n", UV_BODY, "App", "App.run"),
+            ("uv relocatable, Object.method", UV_RELOCATABLE, UV_BODY, "App", "App.run"),
+        )):
+            with self.subTest(label):
+                cfg = self.write(self.tmp / "mcp.json", {"mcpServers": {"tool": {"command": self.tool(
+                    head + body.format(module="acme_mcp.server", name=name, call=call), f"acme{i}")}}})
+                code, out, _ = run(["--mcp-config", cfg])
+                self.assertIn("  [SKIP ] tool                   wrapper  console-script wrapper or bin shim for the "
+                              "Python package 'acme_mcp', which frisk does not scan\n", out)
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(run(["--json", "--mcp-config", cfg])[1])["verdict"], "WARN")
+
+    def test_a_payload_in_a_sh_started_wrapper_still_blocks(self) -> None:
+        command = self.tool(UV_RELOCATABLE + UV_BODY.format(module="acme_mcp.server", name="main", call="main")
+                            + INSTALLER + "\n")
+        cfg = self.write(self.tmp / "mcp.json", {"mcpServers": {"t": {"command": command}}})
+        code, out, _ = run(["--mcp-config", cfg])
+        self.assertIn("[BLOCK] rce            t::acme-mcp:", out)
+        self.assertEqual(code, 1)
+
+    def test_shell_scripts_that_are_not_the_exec_trick_are_scanned_as_before(self) -> None:
+        for label, text in (("sh runs python", "#!/bin/sh\nexec python3 /opt/acme/server.py \"$@\"\n"),
+                            ("sh mentions exec later", "#!/bin/sh\necho start\n'''exec' x\n")):
+            with self.subTest(label):
+                script = self.file(f"{label.replace(' ', '-')}/server", text)
+                cfg = self.write(self.tmp / "mcp.json", {"mcpServers": {"own": {"command": str(script)}}})
+                self.assertIn("  [PASS ] own                    local  local executable/script\n",
+                              run(["--mcp-config", cfg])[1])
+
+
 if __name__ == "__main__":
     unittest.main()

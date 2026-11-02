@@ -19,3 +19,10 @@
   now classified and scanned as usual; a `url` that is not a string warns as
   `<unparsable URL>`, and a `cwd` that is not a string is ignored, as when it is missing. An
   entry with no command and such a `url` is still `invalid`.
+- Console-script wrappers in the other forms pip and uv write are not passed on themselves
+  either: a wrapper started through `/bin/sh` (its second line runs Python with `'''exec'`,
+  which pip and uv write when the interpreter's path is over the shebang limit or holds a
+  space, and uv for a relocatable environment) and a wrapper for an entry point
+  `module:Object.method` (`sys.exit(Object.method())`). Both were scanned as one file and
+  PASSed while the package that runs was never read; they are now `wrapper` and WARN, and
+  the wrapper file itself is still read.
