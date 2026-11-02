@@ -66,9 +66,11 @@ def display_target(target: str) -> str:
 
 
 def _normalize_git(url: str) -> str:
+    """The URL git clones: the github.com/owner/repo shorthand, in any case (as is_git_url
+    reads it), becomes https://github.com/owner/repo, owner and repository as written."""
     url = url.strip()
-    if url.startswith("github.com/"):
-        return "https://" + url
+    if url.lower().startswith("github.com/"):
+        return "https://github.com/" + url[len("github.com/"):]
     return url
 
 

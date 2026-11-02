@@ -50,3 +50,7 @@
   the same way, so a token in such a URL (`url.https://user:token@host/.insteadOf`) is never
   stored, and any other word (a local path, a git config key or option) is pinned as given.
   A server that sets one of these, locked before, reports DRIFT once naming it: lock again.
+- The `github.com/owner/repo` shorthand is cloned from `https://github.com/` in any letter
+  case. frisk took `GitHub.com/Acme/Tool` for a git target but passed it to git as written,
+  which git reads as a local path, so the clone failed; the host is now lowercased, owner
+  and repository keep their case. `frisk verify` re-clones such a pinned target the same way.

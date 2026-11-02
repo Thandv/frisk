@@ -336,7 +336,9 @@ class GitTargetCredentialTest(unittest.TestCase):
                     code, out = self.outputs([*flags, "--lockfile", self.lockfile], git)
                     self.assertEqual(code, 0)
                     self.assertNotIn(CANARY, out)
-                self.assertTrue(git.urls[-1].endswith(shown))  # verify re-clones the clean target
+                # verify re-clones the clean target (FR-FX1 9: from github.com in any case; was
+                # 'GitHub.com/acme/tool' as typed for the mixed-case one)
+                self.assertEqual(git.urls[-1], "https://github.com/acme/tool")
                 code, out = self.outputs([target], FakeGit(fail=True))
                 self.assertEqual(code, 2)
                 self.assertNotIn(CANARY, out)
@@ -359,6 +361,22 @@ class GitTargetCredentialTest(unittest.TestCase):
         self.assertEqual(list(pin.read_lock(self.lockfile)["entries"]), [local])
         self.assertEqual(self.outputs(["verify", "--lockfile", self.lockfile], git)[0], 0)
         self.assertEqual(git.urls, [])
+
+    def test_a_mixed_case_shorthand_is_cloned_from_github(self) -> None:
+        # FR-FX1 9: is_git_url reads the shorthand in any case, but only a lowercase
+        # 'github.com/' was cloned as https://github.com/...; 'GitHub.com/Acme/Tool' went to git
+        # as written, which git reads as a local path and fails on. The host is lowercased;
+        # owner and repository keep their case.
+        git = FakeGit()
+        for target, cloned in (("GitHub.com/Acme/Tool", "https://github.com/Acme/Tool"),
+                               (" GITHUB.COM/Acme/Tool.git", "https://github.com/Acme/Tool.git"),
+                               ("github.com/acme/tool", "https://github.com/acme/tool")):
+            with self.subTest(target):
+                self.assertEqual(self.outputs([target], git)[0], 0)
+                self.assertEqual(git.urls[-1], cloned)
+        self.assertEqual(self.outputs(["lock", "GitHub.com/Acme/Tool", "--lockfile", self.lockfile], git)[0], 0)
+        self.assertEqual(self.outputs(["verify", "--lockfile", self.lockfile], git)[0], 0)
+        self.assertEqual(git.urls[-1], "https://github.com/Acme/Tool")
 
     def test_two_repositories_differing_by_path_stay_apart(self) -> None:
         a = "https://" + CANARY + "@git.example.invalid/acme/a.git"
