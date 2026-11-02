@@ -426,6 +426,15 @@ Add `frisk` to any MCP client so an agent can check a tool before adding it:
 Tools exposed: `scan_text(text)`, `scan_artifact(source)`, `vet_mcp_server(repo)` —
 each returns a `{verdict, findings, advice}` JSON the agent can act on.
 
+`frisk-mcp` speaks MCP protocol versions `2024-11-05`, `2025-03-26` and `2025-06-18`:
+`initialize` answers with the client's version when it is one of these, else with
+`2025-06-18`. It answers `ping` with `{}`. A malformed request gets a JSON-RPC error and the
+server keeps serving: `-32700` (id `null`) for a line that is not JSON or not UTF-8,
+`-32600` for a request that is not an object or whose `method`, `params` or `arguments` has
+the wrong type, `-32601` for an unknown method, `-32602` for an unknown tool, and `-32603`
+if handling a request fails inside frisk. A tool that cannot do its job (a path that does
+not exist, a clone that fails, a missing argument) answers with an `isError` result.
+
 ## GitHub Action
 
 ```yaml

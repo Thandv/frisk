@@ -26,9 +26,11 @@ class TestHandle(unittest.TestCase):
         return resp
 
     def test_initialize(self) -> None:
+        # FR-E5 t3: the version is negotiated (was always 2024-11-05); with none asked for,
+        # it is the newest frisk-mcp speaks.
         self.assertEqual(handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"}), {
             "jsonrpc": "2.0", "id": 1, "result": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": "2025-06-18",
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "frisk", "version": __version__}}})
 
@@ -71,9 +73,10 @@ class TestHandle(unittest.TestCase):
             "owasp": "LLM01:2025 Prompt Injection"}])
         self.assertTrue(summary["advice"].startswith("DO NOT install or run this."))
 
-    def test_tools_call_unknown_tool_is_an_error_result(self) -> None:
-        self.assertEqual(self.call("no-such-tool", {})["result"], {
-            "content": [{"type": "text", "text": "error: 'no-such-tool'"}], "isError": True})
+    def test_tools_call_unknown_tool_is_an_invalid_params_error(self) -> None:
+        # FR-E5 t3: an unknown tool is a JSON-RPC error, -32602 (was an isError result).
+        self.assertEqual(self.call("no-such-tool", {}), {
+            "jsonrpc": "2.0", "id": 9, "error": {"code": -32602, "message": "unknown tool: 'no-such-tool'"}})
 
     def test_tools_call_missing_argument_is_an_error_result(self) -> None:
         result = self.call("scan_text", {})["result"]
@@ -89,13 +92,14 @@ class TestHandle(unittest.TestCase):
     def test_notification_gets_no_response(self) -> None:
         self.assertIsNone(handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
 
-    def test_non_object_request_crashes(self) -> None:
-        # Today a request that is valid JSON but not an object raises inside handle()
-        # (it calls req.get). Pinned as-is; FR-E5 changes this to a JSON-RPC error.
+    def test_non_object_request_is_an_invalid_request_error(self) -> None:
+        # FR-E5 t3: a request that is valid JSON but not an object raised AttributeError
+        # inside handle() (pinned here until then); it is now a -32600 error with id null.
         not_objects: list[Any] = [[], [1], "x", 5, None]
         for req in not_objects:
-            with self.subTest(req=req), self.assertRaises(AttributeError):
-                handle(req)
+            with self.subTest(req=req):
+                self.assertEqual(handle(req), {"jsonrpc": "2.0", "id": None, "error": {
+                    "code": -32600, "message": "invalid request: not a JSON object"}})
 
 
 class TestMain(unittest.TestCase):
@@ -105,7 +109,8 @@ class TestMain(unittest.TestCase):
             main()
         return [json.loads(line) for line in stdout.getvalue().splitlines()]
 
-    def test_answers_requests_and_skips_blank_malformed_and_notifications(self) -> None:
+    def test_answers_requests_and_parse_errors_skips_blank_lines_and_notifications(self) -> None:
+        # FR-E5 t3: a line that is not JSON gets a -32700 reply with id null (was skipped).
         out = self.run_main([
             "\n",
             "{not json\n",
@@ -113,14 +118,17 @@ class TestMain(unittest.TestCase):
             json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n",
             json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}) + "\n",
         ])
-        self.assertEqual([r["id"] for r in out], [1, 2])
-        self.assertEqual(out[0]["result"]["serverInfo"]["name"], "frisk")
-        self.assertEqual(len(out[1]["result"]["tools"]), 3)
+        self.assertEqual([r["id"] for r in out], [None, 1, 2])
+        self.assertEqual(out[0]["error"], {"code": -32700, "message": "parse error"})
+        self.assertEqual(out[1]["result"]["serverInfo"]["name"], "frisk")
+        self.assertEqual(len(out[2]["result"]["tools"]), 3)
 
-    def test_non_object_line_crashes_the_loop(self) -> None:
-        # Pinned as-is: one non-object line ends the whole server. FR-E5 changes it.
-        with self.assertRaises(AttributeError):
-            self.run_main(["[1]\n", json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}) + "\n"])
+    def test_non_object_line_no_longer_ends_the_loop(self) -> None:
+        # FR-E5 t3: one non-object line ended the whole server (AttributeError, pinned here
+        # until then); it now gets a -32600 reply and the next request is answered.
+        out = self.run_main(["[1]\n", json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}) + "\n"])
+        self.assertEqual([r["id"] for r in out], [None, 1])
+        self.assertEqual(out[0]["error"]["code"], -32600)
 
 
 if __name__ == "__main__":
