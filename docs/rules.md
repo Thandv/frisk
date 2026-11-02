@@ -313,9 +313,17 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 ### coverage.unscanned
 
 - Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: An MCP server in an audited config (`--mcp-config`, or a config file named as a target) that frisk did not scan: a remote server (`url`), an npx/uvx/pipx package that is not in the local cache (or whose cache entry is unusable, or of which several versions are cached and none is pinned), a package run by another runner, a server whose source could not be resolved (for example a relative script with no `cwd`), a console-script wrapper or bin shim whose package is not scanned (`wrapper`), or an entry that is not a valid server (`invalid`). One warning per server, plus one for a remote URL an entry names beside its command (the command itself is scanned), at `name::<location>` (the location as the audit prints it: a URL by its scheme, host and port only). So an audit with a skipped server is never PASS, and the text report says how many servers were not scanned.
+- Matches: Content frisk did not scan. A file over the size limit (`--max-file-bytes`, default 2 MiB; listed in coverage.skipped with reason `too_large`), not read at all; or the rest of a directory tree once a scan limit was hit: 20,000 files (`file_cap`), and in frisk-mcp also a byte total (`byte_cap`) or a time limit (`deadline`), reported at the target with the files scanned before it. And an MCP server in an audited config (`--mcp-config`, or a config file named as a target) that frisk did not scan: a remote server (`url`), an npx/uvx/pipx package that is not in the local cache (or whose cache entry is unusable, or of which several versions are cached and none is pinned), a package run by another runner, a server whose source could not be resolved (for example a relative script with no `cwd`), a console-script wrapper or bin shim whose package is not scanned (`wrapper`), or an entry that is not a valid server (`invalid`). One warning per server, plus one for a remote URL an entry names beside its command (the command itself is scanned), at `name::<location>` (the location as the audit prints it: a URL by its scheme, host and port only). So an audit with a skipped server is never PASS, and the text report says how many servers were not scanned.
 - Likely false positive: A remote server you trust, or a package you vetted some other way. The warning reports missing coverage, not malicious content.
 - On a hit: Do not run an unvetted package to get it cached. Scan its source instead: its repository with `frisk <git URL>`, or a downloaded copy (for example the unpacked `npm pack <pkg>` tarball). Pin a version in the config so a later audit matches the cached copy, and give a local server an absolute path or `cwd`. Review remote servers by other means.
+
+<a id="coverage.truncated"></a>
+### coverage.truncated
+
+- Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
+- Matches: A text scanned as a string (`--text`, a frisk-mcp `scan_text` call, a tool description or tool result in `frisk proxy`) longer than the size limit (2 MiB characters; `--max-file-bytes` for `--text`). Its first and last halves of the limit are pattern-matched, with line numbers from the start of the text; the hidden-Unicode check reads all of it. The middle is not pattern-matched, so the verdict is never PASS.
+- Likely false positive: A long, legitimate document passed as text.
+- On a hit: Scan the text in smaller parts, or as a file with a larger `--max-file-bytes`.
 
 <a id="coverage.no_servers"></a>
 ### coverage.no_servers

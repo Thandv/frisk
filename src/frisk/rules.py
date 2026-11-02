@@ -317,7 +317,10 @@ COVERAGE_RULES = [
     ("coverage.surface_error", "coverage", "warn",
      "a scan surface failed on a file, so part of it may not have been pattern-matched"),
     ("coverage.unscanned", "coverage", "warn",
-     "an MCP server frisk could not scan: remote, a package not in the local cache, or no source found"),
+     "content frisk did not scan: an MCP server (remote, a package not in the local cache, or no "
+     "source found), a file over the size limit, or the rest of a tree after a scan limit was hit"),
+    ("coverage.truncated", "coverage", "warn",
+     "text over the size limit: only its first and last parts were pattern-matched"),
     ("coverage.no_servers", "coverage", "warn",
      "an MCP config in which frisk found no servers, so nothing in it was audited"),
 ]
