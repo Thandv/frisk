@@ -308,3 +308,19 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 - Matches: One of frisk's scan surfaces (src/frisk/surfaces/) raised an error on a file. The other surfaces still ran on it and every other file was scanned; the file is also listed in coverage.skipped with reason surface_error and the surface named in detail.
 - Likely false positive: None expected: this signals a bug in frisk, not in the content.
 - On a hit: Report it, and review the file by hand until a fixed frisk scans it cleanly.
+
+<a id="coverage.unscanned"></a>
+### coverage.unscanned
+
+- Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
+- Matches: An MCP server in an audited config (`--mcp-config`, or a config file named as a target) that frisk did not scan: a remote server (`url`), an npx/uvx/pipx package that is not in the local cache (or whose cache entry is unusable, or of which several versions are cached and none is pinned), a package run by another runner, a server whose source could not be resolved (for example a relative script with no `cwd`), a console-script wrapper or bin shim whose package is not scanned (`wrapper`), or an entry that is not a valid server (`invalid`). One warning per server, plus one for a remote URL an entry names beside its command (the command itself is scanned), at `name::<location>` (the location as the audit prints it: a URL by its scheme, host and port only). So an audit with a skipped server is never PASS, and the text report says how many servers were not scanned.
+- Likely false positive: A remote server you trust, or a package you vetted some other way. The warning reports missing coverage, not malicious content.
+- On a hit: Do not run an unvetted package to get it cached. Scan its source instead: its repository with `frisk <git URL>`, or a downloaded copy (for example the unpacked `npm pack <pkg>` tarball). Pin a version in the config so a later audit matches the cached copy, and give a local server an absolute path or `cwd`. Review remote servers by other means.
+
+<a id="coverage.no_servers"></a>
+### coverage.no_servers
+
+- Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
+- Matches: An MCP config (`--mcp-config`, or a config file named as a target) in which frisk found no servers. frisk reads `mcpServers` and `servers`, at the top level and in each `projects` entry; other formats, such as VS Code's `settings.json` (`mcp.servers`) or Zed's `context_servers`, are not read, and neither is a misspelt key such as `mcpservers`. The warning names the file and those keys, so a config frisk did not understand is never reported clean.
+- Likely false positive: A config that really configures no servers, for example an empty `"mcpServers": {}`.
+- On a hit: Check the file is the config your client reads and that its servers sit under one of those keys; audit a supported config instead.

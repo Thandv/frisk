@@ -7,9 +7,10 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .engine import ScanResult, display_prefix, reroot, scan_path, scan_text, verdict, fails
-from .report import to_text, to_json, to_sarif, _c
-from .sources import is_git_url, materialize, parse_mcp_config
+from .engine import ScanResult, coverage_warning, display_prefix, reroot, scan_path, scan_text, verdict, fails
+from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
+from .sources import (SERVER_KEYS, display_ref, display_target, display_url, home_label, is_git_url, materialize,
+                      parse_mcp_config, split_configs)
 from . import pin, proxy
 from .debug import setup_debug
 
@@ -67,25 +68,28 @@ def _distinct(targets: list[str]) -> list[str]:
     return out
 
 
-def _audit_config(path: str) -> tuple[ScanResult, list[str]]:
-    result = ScanResult()
-    lines: list[str] = [_c(f"MCP config audit: {path}", "bold"), ""]
-    servers = parse_mcp_config(path)
-    if not servers:
-        lines.append("  (no servers found in config)")
-        return result, lines
-    for s in servers:
+def _audit_config(path: str) -> list[AuditRecord]:
+    """One record per server in the config, in config order; [] when it lists none.
+
+    A server frisk does not scan (remote, an uncached package, an unresolved or invalid
+    entry) carries a coverage.unscanned warning at 'name::<its ref>', so no audit with a
+    skipped server is ever PASS. So does a remote URL an entry names beside its command
+    (the command is scanned as usual), at 'name::<the URL>'.
+    """
+    records: list[AuditRecord] = []
+    for s in parse_mcp_config(path):
         if s.scannable:
-            server = reroot(scan_path(s.ref), f"{s.name}::", "mcp")
-            result.extend(server)
-            v = verdict(server.findings)
-            tag = _c(f"{v:<5}", {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}[v])
+            result = scan_path(s.ref)
         else:
-            tag = _c("SKIP ", "dim")
-        lines.append(f"  [{tag}] {s.name:<22} {_c(s.kind, 'dim')}  {s.detail}")
-        if not s.scannable:
-            lines.append(_c(f"           → {s.ref}", "dim"))
-    return result.sort(), lines
+            result = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
+            if s.kind == "wrapper":  # the wrapper itself is read: a payload in it still blocks
+                result.extend(scan_path(s.ref))
+        if s.url:
+            result.extend(coverage_warning(display_url(s.url), "coverage.unscanned",
+                                           "MCP server entry also names a remote URL, which is not scanned"))
+        server = reroot(result, f"{s.name}::", "mcp")
+        records.append(AuditRecord(s, server, verdict(server.findings) if s.scannable else None))
+    return records
 
 
 # --- scan (default) ---------------------------------------------------------
@@ -97,7 +101,8 @@ def _cmd_scan(argv: list[str]) -> int:
                     "(MCP servers, Claude Code skills/plugins/subagents, Cursor rules). "
                     "Subcommands: lock, verify.",
     )
-    p.add_argument("targets", nargs="*", help="local paths and/or git URLs to scan")
+    p.add_argument("targets", nargs="*",
+                   help="local paths and/or git URLs to scan; an MCP config file is audited as with --mcp-config")
     p.add_argument("--mcp-config", action="append", default=[], metavar="FILE",
                    help="audit every server in an MCP config file (repeatable)")
     p.add_argument("--text", metavar="STR", help="scan a raw string instead of a path")
@@ -114,31 +119,41 @@ def _cmd_scan(argv: list[str]) -> int:
         return 2
 
     result = ScanResult()
-    audit_lines: list[str] = []
-    label = ", ".join(args.targets + args.mcp_config) or "<text>"
+    audits: list[str] = []
+    servers: list[AuditRecord] = []
+    label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or "<text>"
     try:
         if args.text is not None:
             result.extend(scan_text(args.text, "<text>"))
-        for t in _distinct(args.targets):
+        # A config named as a target is audited, never text-scanned: its env values must not show.
+        targets, configs = split_configs(args.targets, args.mcp_config)
+        for t in _distinct(targets):
             result.extend(_scan_target(t))
-        for cfg in args.mcp_config:
-            server_result, lines = _audit_config(cfg)
-            result.extend(server_result)
-            audit_lines.extend(lines)
-    except (FileNotFoundError, RuntimeError, ValueError) as e:
-        print(f"frisk: {e}", file=sys.stderr)
+        for cfg in configs:
+            records = _audit_config(cfg)
+            if not records:  # nothing was audited: never PASS
+                where = home_label(cfg)
+                note = coverage_warning(where, "coverage.no_servers", f"no MCP servers found in {where} (frisk reads "
+                                        f"{SERVER_KEYS})")
+                result.extend(reroot(note, "", "mcp"))
+            for rec in records:
+                result.extend(rec.result)
+            servers.extend(records)
+            audits.append(audit_text(cfg, records))
+    except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
+        print(f"frisk: {printable(str(e))}", file=sys.stderr)
         return 2
     findings = result.sort().findings
 
     if args.json:
-        print(to_json(result, label))
+        print(to_json(result, label, servers if configs else None))
     elif args.sarif:
         print(to_sarif(result, __version__))
     elif args.quiet:
-        print(f"frisk: {verdict(findings)}  ({label})")
+        print(f"frisk: {verdict(findings)}  ({printable(label)})")
     else:
-        if audit_lines:
-            print("\n".join(audit_lines))
+        if audits:
+            print("\n".join(audits))
             print()
         print(to_text(result, label, show_coverage=bool(args.targets or args.mcp_config)))
 
@@ -163,8 +178,8 @@ def _cmd_lock(argv: list[str]) -> int:
     try:
         lock = pin.build_lock(args.targets, args.mcp_config)
         pin.write_lock(lock, args.lockfile)
-    except (FileNotFoundError, RuntimeError, ValueError) as e:
-        print(f"frisk lock: {e}", file=sys.stderr)
+    except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
+        print(f"frisk lock: {printable(str(e))}", file=sys.stderr)
         return 2
     n = len(lock["entries"])
     print(_c(f"frisk: pinned {n} entr{'y' if n == 1 else 'ies'} → {args.lockfile}", "pass"))
@@ -179,8 +194,8 @@ def _cmd_verify(argv: list[str]) -> int:
     args = p.parse_args(argv)
     try:
         report = pin.verify_lock(pin.read_lock(args.lockfile))
-    except (FileNotFoundError, RuntimeError, ValueError) as e:
-        print(f"frisk verify: {e}", file=sys.stderr)
+    except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
+        print(f"frisk verify: {printable(str(e))}", file=sys.stderr)
         return 2
 
     if args.json:
@@ -188,18 +203,24 @@ def _cmd_verify(argv: list[str]) -> int:
         print(json.dumps(report, indent=2))
     else:
         for r in report:
+            entry = printable(r["entry"])
             if r["status"] == "ok":
-                print(f"  [{_c('ok   ', 'pass')}] {r['entry']}")
+                print(f"  [{_c('ok   ', 'pass')}] {entry}")
             elif r["status"] == "error":
-                print(f"  [{_c('error', 'warn')}] {r['entry']}  {r.get('detail','')}")
+                print(f"  [{_c('error', 'warn')}] {entry}  {printable(r.get('detail', ''))}")
             else:
-                print(f"  [{_c('DRIFT', 'block')}] {r['entry']}")
+                print(f"  [{_c('DRIFT', 'block')}] {entry}")
+                if r.get("launch"):
+                    print(_c("           ~ changed: how it starts (command, args, cwd, URL, env or header names)",
+                             "block"))
+                for name in r.get("env", []):
+                    print(_c(f"           ~ {printable(name)} changed", "block"))
                 for f in r.get("changed", []):
-                    print(_c(f"           ~ changed: {f}", "block"))
+                    print(_c(f"           ~ changed: {printable(f)}", "block"))
                 for f in r.get("added", []):
-                    print(_c(f"           + added:   {f}", "warn"))
+                    print(_c(f"           + added:   {printable(f)}", "warn"))
                 for f in r.get("removed", []):
-                    print(_c(f"           - removed: {f}", "warn"))
+                    print(_c(f"           - removed: {printable(f)}", "warn"))
         drift = sum(1 for r in report if r["status"] != "ok")
         v = _c("DRIFT DETECTED", "block") if pin.has_drift(report) else _c("no drift", "pass")
         print(f"\nverify: {v}  ({drift} of {len(report)} entries changed)")

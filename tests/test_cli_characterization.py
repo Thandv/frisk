@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from _home import fake_home
 from frisk import __version__
 from frisk.cli import main
 
@@ -207,6 +208,9 @@ class TestVerifyCharacterization(unittest.TestCase):
 class TestMcpConfigAuditCharacterization(unittest.TestCase):
     """Pins today's full --mcp-config text output (FR-E4 reworks the audit)."""
 
+    def setUp(self) -> None:
+        fake_home(self)  # FR-E4 t5: package servers are looked up in an empty cache, never the real one
+
     def test_full_text_output_mixed_servers(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -225,17 +229,27 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             f"MCP config audit: {cfg}",
             "",
             "  [PASS ] local-srv              local  local source via python3",
-            "  [SKIP ] pkg-srv                package  npm package — fetch+scan not yet supported (roadmap)",
+            # FR-E4 t5: npx packages are looked up in the local cache (empty here); was
+            # "npm package — fetch+scan not yet supported (roadmap)".
+            "  [SKIP ] pkg-srv                package  not in local cache; frisk does not download",
             "           → acme-weather-mcp",
             "  [SKIP ] remote-srv             remote  remote HTTP/SSE server — behavior not statically verifiable",
-            "           → https://mcp.example.invalid/sse",
+            # FR-E4 owner decision (N3): a URL shows its host only (was: its path too)
+            "           → https://mcp.example.invalid/…",
             "  [SKIP ] ghost-srv              unknown  could not resolve a local source to scan",
             "           → /nonexistent.invalid/bin/ghost",
+            # FR-E4 t6: a summary line, and one coverage.unscanned warning per skipped server, so
+            # the verdict is WARN (was "frisk: clean — no findings in <cfg>" and PASS, with 3 of
+            # 4 servers unscanned). The exit code stays 0 under the default --fail-on block.
             "",
-            f"frisk: clean — no findings in {cfg}",
+            "  3 of 4 servers not scanned",
+            "",
+            "[warn ] coverage       ghost-srv::/nonexistent.invalid/bin/ghost:1  MCP server not scanned (unknown)",
+            "[warn ] coverage       pkg-srv::acme-weather-mcp:1  MCP server not scanned (package)",
+            "[warn ] coverage       remote-srv::https://mcp.example.invalid/…:1  MCP server not scanned (remote)",
             "",
             "scanned 2 files, skipped 0",  # FR-E2 t3: coverage line (server.py and mcp.json)
-            f"verdict:   PASS    0 blocking · 0 warnings · 0 total  ({cfg})",
+            f"verdict:   WARN    0 blocking · 3 warnings · 3 total  ({cfg})",
             "",
         ]))
 
@@ -256,6 +270,8 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             "",
             "  [BLOCK] bad-srv                local  local source via bash",
             "",
+            "  scanned 1 of 1 server",  # FR-E4 t6: the summary line
+            "",
             # FR-E2 t5: the category column is 14 wide (longest category), was 13.
             "[BLOCK] rce            bad-srv::run.sh:2  pipe-to-shell remote installer (curl|wget ... | sh)",
             "          | #!/bin/sh\\n" + INSTALLER + "\\n",
@@ -271,15 +287,18 @@ class TestMcpConfigAuditCharacterization(unittest.TestCase):
             cfg.write_text("{}", encoding="utf-8")
             code, out, _ = run(["--mcp-config", str(cfg)])
         self.assertEqual(code, 0)
+        keys = "'mcpServers' and 'servers', at the top level and in each 'projects' entry"
+        # FR-E4 owner decision (N5): a config with no servers warns, naming the file and the keys
+        # frisk reads (was: "(no servers found in config)", "frisk: clean" and PASS).
         self.assertEqual(out, "\n".join([
             f"MCP config audit: {cfg}",
             "",
-            "  (no servers found in config)",
+            f"  no MCP servers found (frisk reads {keys})",
             "",
-            f"frisk: clean — no findings in {cfg}",
+            f"[warn ] coverage       {cfg}:1  no MCP servers found in {cfg} (frisk reads {keys})",
             "",
             "scanned 0 files, skipped 0",  # FR-E2 t3: coverage line
-            f"verdict:   PASS    0 blocking · 0 warnings · 0 total  ({cfg})",
+            f"verdict:   WARN    0 blocking · 1 warnings · 1 total  ({cfg})",
             "",
         ]))
 

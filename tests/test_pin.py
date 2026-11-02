@@ -4,10 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _home import fake_home
 from frisk import pin
 
 
 class TestPinning(unittest.TestCase):
+    def setUp(self):
+        fake_home(self)  # FR-E4 t5: package servers are looked up in an empty cache, never the real one
+
     def test_source_content_drift(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "a.py"

@@ -6,19 +6,90 @@ import json
 import os
 import sys
 from collections import Counter
+from typing import NamedTuple
 
 from .engine import Coverage, Finding, ScanResult, sort_findings, verdict, worst_severity
-from .rules import RULE_META, owasp_for
+from .rules import RULE_META, SUSPECT_UNICODE, owasp_for
+from .sources import SERVER_KEYS, ServerRef, display_ref, display_url
 
 _USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 _C = {
     "block": "\033[31m", "warn": "\033[33m", "pass": "\033[32m",
     "dim": "\033[2m", "bold": "\033[1m", "reset": "\033[0m",
 }
+_VERDICT_COLOR = {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}
 
 
 def _c(s: str, key: str) -> str:
     return f"{_C[key]}{s}{_C['reset']}" if _USE_COLOR else s
+
+
+def _escape(cp: int) -> str:
+    return f"\\x{cp:02x}" if cp < 0x100 else f"\\u{cp:04x}" if cp < 0x10000 else f"\\U{cp:08x}"
+
+
+# C0 and C1 control characters, DEL, and the hidden Unicode frisk reports (bidi, zero-width,
+# tag characters, ...): a config or a scanned tree could use them to rewrite the terminal.
+# Lone surrogates (a JSON "\ud800", or a file name that is not UTF-8) cannot be printed at all.
+_ESCAPES = {cp: _escape(cp) for cp in [*range(0x20), *range(0x7F, 0xA0), *range(0xD800, 0xE000),
+                                         *(cp for lo, hi, _n, _s in SUSPECT_UNICODE for cp in range(lo, hi + 1))]}
+
+
+def printable(text: str) -> str:
+    """Text as the text report prints it: control and hidden characters shown as escapes
+    (\\x1b, \\u202e). Every config-derived string, finding path and excerpt (scanned content)
+    goes through it, and so do the target label and error messages; JSON and SARIF escape
+    them as JSON does."""
+    return text.translate(_ESCAPES)
+
+
+class AuditRecord(NamedTuple):
+    """One server of an MCP config audit: built by cli._audit_config, formatted here.
+
+    `result` is the server's scan (finding and skipped paths prefixed 'name::');
+    `verdict` is None when the server was not scanned.
+    """
+    server: ServerRef
+    result: ScanResult
+    verdict: str | None
+
+
+def audit_text(path: str, records: list[AuditRecord]) -> str:
+    """The text audit of one config: a header, one line per server in config order, then
+    how many servers were not scanned."""
+    lines = [_c(f"MCP config audit: {printable(path)}", "bold"), ""]
+    if not records:
+        lines.append(f"  no MCP servers found (frisk reads {SERVER_KEYS})")
+    for rec in records:
+        s = rec.server
+        tag = _c("SKIP ", "dim") if rec.verdict is None else _c(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
+        lines.append(f"  [{tag}] {printable(s.name):<22} {_c(s.kind, 'dim')}  {printable(_reason(s))}")
+        if rec.verdict is None:
+            lines.append(_c(f"           → {printable(display_ref(s))}", "dim"))
+    if records:
+        total, skipped = len(records), sum(1 for rec in records if rec.verdict is None)
+        noun = "server" if total == 1 else "servers"
+        summary = f"{skipped} of {total} {noun} not scanned" if skipped else f"scanned {total} of {total} {noun}"
+        lines += ["", "  " + _c(summary, "warn" if skipped else "dim")]
+    return "\n".join(lines)
+
+
+def _reason(s: ServerRef) -> str:
+    """The server's detail, plus what was not scanned with it: a cached package's
+    dependencies, and a remote URL the entry names beside its command."""
+    reason, deps = s.detail, s.unscanned_deps
+    if deps:
+        reason += f"; {len(deps)} dependenc{'y' if len(deps) == 1 else 'ies'} not scanned: {', '.join(deps)}"
+    if s.url:
+        reason += f"; the entry also names the remote URL {display_url(s.url)}, which is not scanned"
+    return reason
+
+
+def _audit_servers(records: list[AuditRecord]) -> list[dict]:
+    """The servers[] entries of the JSON report: name, kind, status, reason and verdict."""
+    return [{"name": rec.server.name, "kind": rec.server.kind,
+             "status": "skipped" if rec.verdict is None else "scanned",
+             "reason": _reason(rec.server), "verdict": rec.verdict} for rec in records]
 
 
 # Sized to the longest category any rule can report, so every line aligns.
@@ -40,29 +111,30 @@ def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
     lines: list[str] = []
     for f in findings:
         mark = _c("BLOCK", "block") if f.severity == "block" else _c("warn ", "warn")
-        loc = _c(f"{f.path}:{f.line}", "dim")
-        lines.append(f"[{mark}] {f.category:<{_CATEGORY_WIDTH}} {loc}  {f.description}")
+        loc = _c(f"{printable(f.path)}:{f.line}", "dim")
+        lines.append(f"[{mark}] {f.category:<{_CATEGORY_WIDTH}} {loc}  {printable(f.description)}")
         if f.excerpt:
-            lines.append(_c(f"          | {f.excerpt}", "dim"))
+            lines.append(_c(f"          | {printable(f.excerpt)}", "dim"))
     blocks = sum(1 for f in findings if f.severity == "block")
     warns = sum(1 for f in findings if f.severity == "warn")
     v = verdict(findings)
-    vkey = {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}[v]
-    banner = _c(f"  {v}  ", vkey)
+    banner = _c(f"  {v}  ", _VERDICT_COLOR[v])
     if not findings:
-        lines.append(_c(f"frisk: clean — no findings in {target}", "pass"))
+        lines.append(_c(f"frisk: clean — no findings in {printable(target)}", "pass"))
     lines.append("")
     if show_coverage:
         lines.append(_c(coverage_line(result.coverage), "dim"))
     lines.append(f"{_c('verdict', 'bold')}: {banner}  "
                  f"{blocks} blocking · {warns} warnings · {len(findings)} total  "
-                 f"({_c(target, 'dim')})")
+                 f"({_c(printable(target), 'dim')})")
     return "\n".join(lines)
 
 
-def to_json(result: ScanResult, target: str) -> str:
+def to_json(result: ScanResult, target: str, servers: list[AuditRecord] | None = None) -> str:
+    """The JSON report; `servers` (one entry per audited MCP server) is present only when
+    an MCP config was audited."""
     findings = result.findings
-    return json.dumps({
+    doc: dict[str, object] = {
         "target": target,
         "verdict": verdict(findings),
         "worst_severity": worst_severity(findings),
@@ -73,7 +145,10 @@ def to_json(result: ScanResult, target: str) -> str:
         },
         "findings": [{**f.as_dict(), "owasp": owasp_for(f.category)} for f in findings],
         "coverage": result.coverage.as_dict(),
-    }, indent=2)
+    }
+    if servers is not None:
+        doc["servers"] = _audit_servers(servers)
+    return json.dumps(doc, indent=2)
 
 
 _SARIF_LEVEL = {"block": "error", "warn": "warning"}
@@ -119,7 +194,7 @@ def fingerprint(rule: str, path: str, line_text: str, occurrence: int) -> str:
     among results with the same first three, NUL-separated. The line number is deliberately
     absent, so inserting lines above a finding keeps it."""
     parts = (rule, path, line_text, str(occurrence))
-    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def to_sarif(result: ScanResult, version: str) -> str:

@@ -262,6 +262,10 @@ COVERAGE_RULES = [
      "a .git directory below the top of the target, whose contents are not scanned"),
     ("coverage.surface_error", "coverage", "warn",
      "a scan surface failed on a file, so part of it may not have been pattern-matched"),
+    ("coverage.unscanned", "coverage", "warn",
+     "an MCP server frisk could not scan: remote, a package not in the local cache, or no source found"),
+    ("coverage.no_servers", "coverage", "warn",
+     "an MCP config in which frisk found no servers, so nothing in it was audited"),
 ]
 
 

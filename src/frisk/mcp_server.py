@@ -19,7 +19,7 @@ from . import __version__
 from .engine import scan_path, scan_text, verdict, worst_severity
 from .rules import owasp_for
 from .debug import log as _root_log, ms_since, setup_debug
-from .sources import materialize
+from .sources import display_target, materialize
 
 log = _root_log.getChild("mcp")
 
@@ -61,7 +61,7 @@ def _advice(v: str) -> str:
 def _scan_source(source: str) -> str:
     with materialize(source) as (root, _):
         findings = scan_path(root, root if root.is_dir() else None).findings
-    return _summary(findings, source)
+    return _summary(findings, display_target(source))
 
 
 TOOLS = {
