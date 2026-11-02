@@ -98,7 +98,8 @@ lines, `frisk-mcp` results and the lockfile all show it without `user:token@`, q
 fragment (`https://git.example.com/acme/tool.git`). Scheme, host, port and path stay, so
 two repositories stay apart; an ssh username such as `git@` stays too, a password beside it
 does not. If a clone of such a URL fails, git's own message is not shown, since it could
-echo the token.
+echo the token; a clone that has not finished after two minutes stops with `git clone
+timed out after 120 s` (exit code 2), never with the git command it ran.
 
 ### What was not scanned (coverage)
 

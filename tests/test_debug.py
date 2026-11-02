@@ -61,7 +61,9 @@ class DebugLogTests(unittest.TestCase):
             raise subprocess.TimeoutExpired("git", 120)
 
         def run():
-            with self.assertRaises(subprocess.TimeoutExpired):
+            # FR-E4 final review: a timed-out clone raises RuntimeError without the git command,
+            # whose URL can carry a token (it was the TimeoutExpired itself); the end line is unchanged.
+            with self.assertRaisesRegex(RuntimeError, r"^git clone timed out after 120 s$"):
                 _clone(timeout)
         self.assertIn("git clone end status=error error=TimeoutExpired", self._stderr("1", run))
 

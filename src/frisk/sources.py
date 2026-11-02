@@ -82,6 +82,8 @@ def materialize(target: str):
                 )
             except Exception as e:
                 log.debug("git clone end status=error error=%s ms=%d", type(e).__name__, ms_since(t0))
+                if isinstance(e, subprocess.TimeoutExpired):  # its message is the whole command, URL and token
+                    raise RuntimeError(f"git clone timed out after {e.timeout:g} s") from None
                 raise
             log.debug("git clone end status=exit rc=%d ms=%d", r.returncode, ms_since(t0))
             if r.returncode != 0:

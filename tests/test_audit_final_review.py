@@ -12,6 +12,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +22,10 @@ from unittest import mock
 from _home import fake_home
 from frisk import pin
 from frisk.cli import main
+from frisk.mcp_server import handle
 from frisk.sources import parse_mcp_config
+
+CANARY = "c4n" + "ary-" + "7d21" + "b9e4"
 
 
 def run(argv: list[str]) -> tuple[int, str, str]:
@@ -97,6 +102,64 @@ class SharedNameTest(FinalReviewCase):
                 "projects": {str(self.app): {"mcpServers": {"db": self.approved}}}}
         self.assertEqual([s.name for s in parse_mcp_config(self.write(self.cfg, data))],
                          ["db", "db (2)", "db (~/work/app)"])
+
+
+class HungClone:
+    """Stands in for subprocess.run in frisk.sources: the clone never finishes, so it raises
+    TimeoutExpired as the real one does, carrying the whole git command."""
+
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+
+    def __call__(self, argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        self.urls.append(argv[-2])
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])  # type: ignore[arg-type]
+
+
+class CloneTimeoutTest(FinalReviewCase):
+    """A clone that timed out raised TimeoutExpired, whose message is the whole git command:
+    the token in a git URL reached a traceback (scan, lock), frisk verify's error detail and
+    frisk-mcp's error text."""
+
+    URL = "https://user:" + CANARY + "@git.example.invalid/acme/tool.git"
+    CLEAN = "https://git.example.invalid/acme/tool.git"
+
+    def outputs(self, argv: list[str]) -> tuple[int, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("frisk.sources.subprocess.run", HungClone()), \
+                mock.patch.dict(os.environ, {"FRISK_DEBUG": "1"}), mock.patch("frisk.report._USE_COLOR", False), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(argv)
+        return code, out.getvalue() + err.getvalue()
+
+    def test_a_timed_out_clone_never_shows_the_token(self) -> None:
+        for argv in ([self.URL], ["--json", self.URL], ["-q", self.URL], ["lock", self.URL, "--lockfile",
+                                                                        str(self.tmp / "new.json")]):
+            with self.subTest(argv=argv[:-1]):
+                code, out = self.outputs(argv)
+                self.assertNotIn(CANARY, out)
+                self.assertEqual(code, 2)
+                self.assertIn("git clone timed out after 120 s", out)
+        older = self.tmp / "older.json"  # an older frisk stored the URL as typed
+        self.write(older, {"version": 1, "entries": {self.URL: {"digest": "x", "files": {}, "kind": "source",
+                                                               "recompute": {"type": "target", "value": self.URL}}}})
+        for flags in ([], ["--json"]):
+            with self.subTest(verify=flags):
+                code, out = self.outputs(["verify", *flags, "--lockfile", str(older)])
+                self.assertNotIn(CANARY, out)
+                self.assertEqual(code, 1)
+                self.assertIn("git clone timed out after 120 s", out)
+        with mock.patch("frisk.sources.subprocess.run", HungClone()):
+            resp = handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": "scan_artifact", "arguments": {"source": self.URL}}})
+        self.assertNotIn(CANARY, json.dumps(resp))
+        self.assertIn("git clone timed out after 120 s", resp["result"]["content"][0]["text"])
+
+    def test_a_timed_out_clone_of_a_clean_url_is_reported_too(self) -> None:
+        code, out = self.outputs([self.CLEAN])
+        self.assertEqual(code, 2)
+        self.assertIn("frisk: git clone timed out after 120 s", out)
+        self.assertNotIn("Traceback", out)
 
 
 if __name__ == "__main__":

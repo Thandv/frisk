@@ -7,3 +7,8 @@
   its name made `frisk verify` report no drift. A name an earlier server already has is now
   followed by ` (2)`, ` (3)`, ..., so the extra server shows as added (DRIFT), and a config
   that really holds such names verifies cleanly right after `frisk lock`.
+- A git clone that does not finish within two minutes stops with `git clone timed out after
+  120 s` (exit code 2 for a scan or `frisk lock`, an error entry in `frisk verify`). It used to
+  end in a traceback whose message was the whole git command, so the token in a git URL was
+  printed after all, also in `frisk verify`'s error detail (for a lockfile an older frisk
+  wrote with the token) and in `frisk-mcp`'s error text.
