@@ -25,7 +25,7 @@ Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md`
 ### rce.eval_b64
 
 - Severity: `block` · Category: `rce` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A call to `eval` or `exec` whose arguments decode base64 inside the same parentheses.
+- Matches: A call to `eval` or `exec` whose arguments decode base64 inside the same parentheses, within 400 characters of the call.
 - Likely false positive: Rare. Test code that exercises a decoder through `eval`.
 - On a hit: Treat as hostile: decode the payload offline (never execute it) and see what it does.
 
@@ -41,7 +41,7 @@ Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md`
 ### rce.shell_true
 
 - Severity: `block` · Category: `rce` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: `subprocess.run`, `call`, `check_output`, `check_call` or `Popen` with `shell=True` in the same call.
+- Matches: `subprocess.run`, `call`, `check_output`, `check_call` or `Popen` with `shell=True` in the same call, within 400 characters of it.
 - Likely false positive: A fixed, constant command string run through the shell.
 - On a hit: Ask for a list-argv call without the shell; reject it if user or model text reaches the command.
 
@@ -137,7 +137,7 @@ Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md`
 ### destroy.rm_rf
 
 - Severity: `block` · Category: `destructive` · OWASP LLM Top 10 (2025): LLM06:2025 Excessive Agency
-- Matches: A recursive, forced `rm` (`-rf`, `-fr`, `-r -f`, `--recursive --force`, in any order) whose target is `/`; a top-level system directory (`/etc`, `/usr`, `/bin`, `/sbin`, `/var`, `/opt`, `/private`, `/System`, `/Library`, `/home`, `/Users`, `/root`); `~`, `$HOME` or `${HOME}`; a credential directory in the home directory (`.ssh`, `.aws`, `.gnupg`, `.config`, `.kube`, `.docker`); or a glob over one of them or a bare `*`. Targets may be quoted and end in `/` or `/*`. Paths below those, such as temporary and build directories (`/tmp/x`, `$TMPDIR/x`, `/usr/local/x`, `./build`), do not match.
+- Matches: A recursive, forced `rm` (`-rf`, `-fr`, `-r -f`, `--recursive --force`, in any order; the flags and the target anywhere in the next 256 words of the same command) whose target is `/`; a top-level system directory (`/etc`, `/usr`, `/bin`, `/sbin`, `/var`, `/opt`, `/private`, `/System`, `/Library`, `/home`, `/Users`, `/root`); `~`, `$HOME` or `${HOME}`; a credential directory in the home directory (`.ssh`, `.aws`, `.gnupg`, `.config`, `.kube`, `.docker`); or a glob over one of them or a bare `*`. Targets may be quoted and end in `/` or `/*`. Paths below those, such as temporary and build directories (`/tmp/x`, `$TMPDIR/x`, `/usr/local/x`, `./build`), do not match. One finding per command, at its first `rm` word.
 - Likely false positive: A script that empties its own working directory with a bare `*`.
 - On a hit: Reject unless the path is a clearly scoped temporary directory.
 
