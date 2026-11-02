@@ -305,17 +305,22 @@ never as a whole file:
   `LD_LIBRARY_PATH`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`,
   `DYLD_FRAMEWORK_PATH` (and any other `DYLD_*`), `PERL5OPT`, `PERL5LIB`, `RUBYOPT`,
   `RUBYLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `BASH_ENV` and `ENV`; the program git
-  runs for ssh and where git finds its own programs (`GIT_SSH_COMMAND`, `GIT_EXEC_PATH`);
-  and the package index npm, pip or uv installs from (`npm_config_registry`,
-  `NPM_CONFIG_REGISTRY`, `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`, `UV_INDEX_URL`,
-  `UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`). A changed value is DRIFT and `frisk verify`
-  names the variable (`~ NODE_OPTIONS changed`), never its value. An index URL (each one,
-  when several are separated by whitespace) is pinned by its scheme, host, port and path
-  only, so a token in its `user:token@`, query or fragment is never stored, not even as a
-  hash: rotating it is not drift, while a changed host or path is. A word there that is not
-  such a URL, or whose host part cannot be told from a password, is pinned only as
-  `<unparsable URL>` and its length class, never as written. `PATH` is not pinned: it
-  differs between shells and machines, so every lock would drift.
+  runs for ssh, where git finds its own programs, and git configuration given in the
+  environment (`GIT_SSH_COMMAND`, `GIT_EXEC_PATH` and any `GIT_CONFIG_*`); and where npm, pip
+  or uv find packages: the package index (`npm_config_registry`, `NPM_CONFIG_REGISTRY`,
+  `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`, `UV_INDEX`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`,
+  `UV_DEFAULT_INDEX`), extra find-links locations (`PIP_FIND_LINKS`, `UV_FIND_LINKS`) and
+  npm's user config file (`npm_config_userconfig`, `NPM_CONFIG_USERCONFIG`). A changed value
+  is DRIFT and `frisk verify` names the variable (`~ NODE_OPTIONS changed`), never its
+  value. An index URL (each one, when several are separated by whitespace, after uv's
+  `name=` if it has one) is pinned by its scheme, host, port and path only, so a token in
+  its `user:token@`, query or fragment is never stored, not even as a hash: rotating it is
+  not drift, while a changed host or path is. A word there that is not such a URL, or whose
+  host part cannot be told from a password, is pinned only as `<unparsable URL>` and its
+  length class, never as written. In a find-links or `GIT_CONFIG_*` value, each word holding
+  `://` is pinned the same way, and any other word (a local path, a git config key or
+  option) as given. `PATH` is not pinned: it differs between shells and machines, so every
+  lock would drift.
 
 So the rest of the file can change (Claude Code rewrites `~/.claude.json` all the time) and
 a rotated secret is not drift, while a changed command, argument, URL or env name (`~

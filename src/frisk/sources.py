@@ -133,23 +133,29 @@ _NOT_CACHED = "not in local cache; frisk does not download"
 # Where parse_mcp_config looks for servers; other config formats are not read.
 SERVER_KEYS = "'mcpServers' and 'servers', at the top level and in each 'projects' entry"
 # Env variables that decide what code runs: a runtime's options, module and library paths,
-# preloads and startup files; the program git runs for ssh and where git finds its own
-# programs; the package index npm, pip or uv installs from. frisk lock pins their values, as
-# hashes only, and an index URL without its credentials (_env_pin); every other env value may
-# be a secret and is never read. Any DYLD_* variable counts too. PATH does not: it differs
-# between shells and machines, so every lock would drift.
+# preloads and startup files; the program git runs for ssh, where git finds its own programs
+# and git configuration; where npm, pip or uv find packages. frisk lock pins their values, as
+# hashes only, and a URL in them without its credentials (_env_pin); every other env value
+# may be a secret and is never read. Any variable named with a CODE_LOADING_PREFIXES prefix
+# counts too. PATH does not: it differs between shells and machines, so every lock would drift.
 CODE_LOADING_ENV = frozenset({
     "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH",
     "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "PERL5OPT", "PERL5LIB", "RUBYOPT",
     "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "BASH_ENV", "ENV", "LD_AUDIT",
     "GIT_SSH_COMMAND", "GIT_EXEC_PATH",
     "npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "UV_INDEX_URL",
-    "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX",
+    "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX", "PIP_FIND_LINKS", "UV_FIND_LINKS",
+    "npm_config_userconfig", "NPM_CONFIG_USERCONFIG",
 })
+CODE_LOADING_PREFIXES = ("DYLD_", "GIT_CONFIG_")
 # The code-loading variables whose value is a package index URL, or several separated by
 # whitespace (as pip and uv read a list). Such a URL can carry a token.
 _INDEX_ENV = frozenset({"npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL",
-                        "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX"})
+                        "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX"})
+# The find-links variables, whose words are URLs or local paths. _env_pin reads GIT_CONFIG_*
+# the same way: a git config key or value can hold a URL with a token
+# ('url.https://user:token@host/.insteadOf').
+_FIND_LINKS_ENV = frozenset({"PIP_FIND_LINKS", "UV_FIND_LINKS"})
 
 
 @dataclass
@@ -576,34 +582,41 @@ def _code_env(spec: object) -> dict[str, str]:
     if not isinstance(env, dict):
         return {}
     return {name: hashlib.sha256(json.dumps(_env_pin(name, value), default=str).encode("utf-8")).hexdigest()
-            for name, value in env.items() if name in CODE_LOADING_ENV or name.startswith("DYLD_")}
+            for name, value in env.items() if name in CODE_LOADING_ENV or name.startswith(CODE_LOADING_PREFIXES)}
 
 
 def _env_pin(name: str, value: object) -> object:
     """What frisk lock hashes of a code-loading variable's value: the value itself, except in a
     package index variable (_INDEX_ENV), where each whitespace-separated word is pinned by
-    _url_pin. A token in an index URL is then never stored, not even as a hash: rotating it is
-    not drift, while a changed host or path is."""
-    if name not in _INDEX_ENV:
+    _url_pin, and in a find-links or GIT_CONFIG_* variable, where each word holding '://' is.
+    A token in such a URL is then never stored, not even as a hash: rotating it is not drift,
+    while a changed host or path is. Any other word of those (a local path, a git config key
+    or option) is pinned as given."""
+    other = name in _FIND_LINKS_ENV or name.startswith("GIT_CONFIG_")
+    if name not in _INDEX_ENV and not other:
         return value
     if not isinstance(value, str):
         return _url_pin(json.dumps(value, default=str))
-    return re.sub(r"\S+", lambda word: _url_pin(word.group()), value)
+    return re.sub(r"\S+", lambda m: m.group() if other and "://" not in m.group() else _url_pin(m.group()), value)
 
 
 def _url_pin(word: str) -> str:
     """A URL as frisk lock pins it: scheme, host, port and path, without userinfo, query or
-    fragment. A word that is no such URL, or whose host part cannot be told from a password (a
-    port that is not a number, an '@' outside the host part), is '<unparsable URL>' and its
-    length class (the bit length of its length), never the word itself."""
+    fragment, after uv's 'name=' (UV_INDEX) if it has one. A word that is no such URL, or whose
+    host part cannot be told from a password (a port that is not a number, an '@' outside the
+    host part), is '<unparsable URL>' and its length class (the bit length of its length),
+    never the word itself."""
+    name, eq, url = word.partition("=")
+    named = name + eq if eq and ":" not in name else ""
+    url = url if named else word
     try:
-        parts = urlsplit(word)
+        parts = urlsplit(url)
         _ = parts.port  # raises ValueError for a port that is not a number
     except ValueError:
         parts = None
-    if parts is None or not parts.scheme or "://" not in word or word.count("@") != parts.netloc.count("@"):
+    if parts is None or not parts.scheme or "://" not in url or url.count("@") != parts.netloc.count("@"):
         return f"<unparsable URL>{len(word).bit_length()}"
-    return f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
+    return f"{named}{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
 
 
 def _launch_digest(spec: object) -> str:

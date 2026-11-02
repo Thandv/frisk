@@ -40,3 +40,13 @@
   keeps `"status": "skipped"`, its `→` location and its place in `N of M servers not
   scanned`, since the package it runs is still not read. A wrapper with no findings is
   `[SKIP ]` as before.
+- `frisk lock` also pins the remaining package sources: `UV_INDEX` (uv's current index
+  variable, `name=url` entries included), `PIP_FIND_LINKS` and `UV_FIND_LINKS`, npm's user
+  config file (`npm_config_userconfig`, `NPM_CONFIG_USERCONFIG`) and any `GIT_CONFIG_*`
+  variable (git configuration given in the environment, such as `GIT_CONFIG_KEY_0` /
+  `GIT_CONFIG_VALUE_0`, which can set `core.sshCommand` or redirect a fetch with
+  `url.<base>.insteadOf`). `UV_INDEX` is pinned like the other index variables, uv's index
+  name included. In a find-links or `GIT_CONFIG_*` value each word holding `://` is pinned
+  the same way, so a token in such a URL (`url.https://user:token@host/.insteadOf`) is never
+  stored, and any other word (a local path, a git config key or option) is pinned as given.
+  A server that sets one of these, locked before, reports DRIFT once naming it: lock again.
