@@ -225,10 +225,17 @@ def _cmd_verify(argv: list[str]) -> int:
                     print(_c(f"           + added:   {printable(f)}", "warn"))
                 for f in r.get("removed", []):
                     print(_c(f"           - removed: {printable(f)}", "warn"))
-        drift = sum(1 for r in report if r["status"] != "ok")
-        v = _c("DRIFT DETECTED", "block") if pin.has_drift(report) else _c("no drift", "pass")
-        print(f"\nverify: {v}  ({drift} of {len(report)} entries changed)")
-    return 1 if pin.has_drift(report) else 0
+        changed, failed = sum(1 for r in report if r["status"] == "DRIFT"), pin.unverified(report)
+        could_not = f"could not verify {failed} entr{'y' if failed == 1 else 'ies'}"
+        if changed:
+            v = _c("DRIFT DETECTED", "block")
+        elif failed:
+            v = _c(could_not, "warn")
+        else:
+            v = _c("no drift", "pass")
+        also = f"; {could_not}" if changed and failed else ""
+        print(f"\nverify: {v}  ({changed} of {len(report)} entries changed{also})")
+    return 1 if pin.has_drift(report) or pin.unverified(report) else 0
 
 
 def _cmd_proxy(argv: list[str]) -> int:

@@ -163,37 +163,45 @@ def _recompute(entry: dict, parsed: dict) -> dict:
 
 
 def verify_lock(lock: dict) -> list[dict]:
-    """Return a drift report: one record per locked entry with status and changed files.
-    Entries are named without credentials, also those an older frisk pinned with a token in
-    a git URL (that stored URL is still what gets cloned, so they keep verifying)."""
+    """Return a drift report: one record per locked entry with status ("ok", "DRIFT" or
+    "error": it could not be verified) and changed files. Each entry is verified on its own:
+    one that cannot be (a target that is gone, a malformed entry) is an error and the others
+    are still checked. Entries are named without credentials, also those an older frisk
+    pinned with a token in a git URL (that stored URL is still what gets cloned, so they
+    keep verifying)."""
     out = []
     parsed: dict = {}  # each MCP config is read once, however many entries pin it
-    for stored, old in lock.get("entries", {}).items():
+    for stored, old in lock["entries"].items():
         key = display_target(stored)
+        if not (isinstance(old, dict) and isinstance(old.get("digest"), str)
+                and isinstance(old.get("recompute"), dict)):
+            out.append({"entry": key, "status": "error", "detail": "not a valid lockfile entry"})
+            continue
         try:
-            new = _recompute(old, parsed)
-        except Exception as e:  # noqa: BLE001
-            out.append({"entry": key, "status": "error", "detail": str(e)[:120]})
-            continue
-        if new["digest"] == old["digest"]:
-            out.append({"entry": key, "status": "ok"})
-            continue
-        if _whole_config(old):
-            out.append({"entry": key, "status": "error", "detail": RELOCK_WHOLE_CONFIG})
-            continue
-        old_f, new_f = old.get("files", {}), new.get("files", {})
-        changed = sorted(f for f in new_f if f in old_f and new_f[f] != old_f[f])
-        added = sorted(set(new_f) - set(old_f))
-        removed = sorted(set(old_f) - set(new_f))
-        record = {"entry": key, "status": "DRIFT", "changed": changed, "added": added, "removed": removed}
-        if "launch" in old and new.get("launch", old["launch"]) != old["launch"]:
-            record["launch"] = "changed"
-        old_env, new_env = old.get("code_env", {}), new.get("code_env", {})
-        env = sorted(name for name in old_env.keys() | new_env.keys() if old_env.get(name) != new_env.get(name))
-        if env:
-            record["env"] = env  # the names of the code-loading env variables whose value changed
-        out.append(record)
+            out.append(_verify_entry(key, old, parsed))
+        except Exception as e:  # noqa: BLE001 - this entry is reported as unverified, the rest still are
+            out.append({"entry": key, "status": "error", "detail": str(e)[:120] or type(e).__name__})
     return out
+
+
+def _verify_entry(key: str, old: dict, parsed: dict) -> dict:
+    new = _recompute(old, parsed)
+    if new["digest"] == old["digest"]:
+        return {"entry": key, "status": "ok"}
+    if _whole_config(old):
+        return {"entry": key, "status": "error", "detail": RELOCK_WHOLE_CONFIG}
+    old_f, new_f = old.get("files", {}), new.get("files", {})
+    changed = sorted(f for f in new_f if f in old_f and new_f[f] != old_f[f])
+    added = sorted(set(new_f) - set(old_f))
+    removed = sorted(set(old_f) - set(new_f))
+    record = {"entry": key, "status": "DRIFT", "changed": changed, "added": added, "removed": removed}
+    if "launch" in old and new.get("launch", old["launch"]) != old["launch"]:
+        record["launch"] = "changed"
+    old_env, new_env = old.get("code_env", {}), new.get("code_env", {})
+    env = sorted(name for name in old_env.keys() | new_env.keys() if old_env.get(name) != new_env.get(name))
+    if env:
+        record["env"] = env  # the names of the code-loading env variables whose value changed
+    return record
 
 
 def _whole_config(entry: dict) -> bool:
@@ -204,7 +212,13 @@ def _whole_config(entry: dict) -> bool:
 
 
 def has_drift(report: list[dict]) -> bool:
-    return any(r["status"] in ("DRIFT", "error") for r in report)
+    """Whether an entry changed. An entry that could not be verified is not drift: see unverified()."""
+    return any(r["status"] == "DRIFT" for r in report)
+
+
+def unverified(report: list[dict]) -> int:
+    """How many entries could not be verified."""
+    return sum(1 for r in report if r["status"] == "error")
 
 
 def write_lock(lock: dict, path: str = LOCK_DEFAULT) -> None:
@@ -212,4 +226,9 @@ def write_lock(lock: dict, path: str = LOCK_DEFAULT) -> None:
 
 
 def read_lock(path: str = LOCK_DEFAULT) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    """The lockfile at `path`. Raises ValueError for one that is not a JSON object with an
+    'entries' object (one malformed entry is reported by verify_lock, not here)."""
+    lock = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(lock, dict) or not isinstance(lock.get("entries"), dict):
+        raise ValueError(f"{path}: not a frisk lockfile (expected a JSON object with an 'entries' object)")
+    return lock

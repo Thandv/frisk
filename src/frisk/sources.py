@@ -84,9 +84,11 @@ def materialize(target: str):
             # The URL is not logged: it can carry credentials.
             log.debug("git clone start args=6")
             try:
+                # git must never wait for a password: no terminal prompt and no stdin to read.
                 r = subprocess.run(
                     ["git", "clone", "--depth", "1", "--quiet", _normalize_git(target), tmp],
-                    capture_output=True, text=True, timeout=120,
+                    capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
+                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
                 )
             except Exception as e:
                 log.debug("git clone end status=error error=%s ms=%d", type(e).__name__, ms_since(t0))

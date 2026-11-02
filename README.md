@@ -291,6 +291,13 @@ frisk verify                                                          # fails if
 verify: DRIFT DETECTED  (1 of 3 entries changed)
 ```
 
+An entry frisk cannot verify (a target that is gone or cannot be cloned, a malformed
+entry) is listed as `[error]` with the reason and counted apart from drift: the summary
+says `could not verify N entries` (after the drift count when there is drift too), and
+the exit code is 1, as for drift. A lockfile that is not a JSON object with an `entries`
+object stops `frisk verify` with exit code 2 and one line. git never waits for a
+password: it runs with no stdin and `GIT_TERMINAL_PROMPT=0`.
+
 This pins local source and git targets as content. An MCP config, given with
 `--mcp-config` or named as a target (`frisk lock ~/.claude.json`), is pinned per server,
 never as a whole file:

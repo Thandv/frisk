@@ -435,8 +435,10 @@ class ConfigLockTest(ClaudeJsonCase):
         self.mutate(lambda d: d.update({"numStartups": 99}))
         code, out, err = run(["verify", "--lockfile", self.lockfile])
         self.assertEqual((code, err), (1, ""))
+        # FR-E5 t6: an entry frisk could not verify is counted apart from drift (this said
+        # 'DRIFT DETECTED  (1 of 1 entries changed)'); the exit code is still 1.
         self.assertEqual(out, f"  [error] {self.cfg}  {pin.RELOCK_WHOLE_CONFIG}\n\n"
-                              "verify: DRIFT DETECTED  (1 of 1 entries changed)\n")
+                              "verify: could not verify 1 entry  (0 of 1 entries changed)\n")
 
 
 class CodeLoadingEnvTest(ClaudeJsonCase):
