@@ -179,10 +179,12 @@ A server frisk could not scan is never passed over in silence: it raises a
 config's audit ends with `N of M servers not scanned` (or `scanned M of M servers`).
 `--fail-on warn` fails on it; the default `--fail-on block` does not. A server entry that
 is not a valid server (not a JSON object, a `command` that is not a string, no `command`
-or `url`) is reported as `invalid`, and the other servers are still audited. `--json` adds
-`servers`, one entry per audited server: `name`, `kind`, `status` (`scanned` or `skipped`),
-`reason` (the detail shown above, with a cached package's unscanned dependencies) and
-`verdict` (`null` when skipped).
+or `url`) is reported as `invalid`, and the other servers are still audited. A malformed
+key that a client running the command would ignore never hides that command: beside a
+`command`, a `url` that is not a string warns as `<unparsable URL>`, and a `cwd` that is
+not a string is ignored. `--json` adds `servers`, one entry per audited server: `name`,
+`kind`, `status` (`scanned` or `skipped`), `reason` (the detail shown above, with a cached
+package's unscanned dependencies) and `verdict` (`null` when skipped).
 
 A config in which frisk finds no servers is not clean either: it is WARN with
 `coverage.no_servers`, `no MCP servers found in <file> (frisk reads 'mcpServers' and

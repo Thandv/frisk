@@ -221,6 +221,8 @@ def _classify(name: str, spec: object, project: Path | None = None) -> ServerRef
     if problem or not isinstance(spec, dict):  # isinstance only narrows the type
         return ServerRef(name, "invalid", "?", scannable=False, detail=problem)
     url = spec.get("url") or spec.get("serverUrl") or ""
+    if not isinstance(url, str):  # beside a command (_invalid): still reported, as an unparsable URL
+        url = "?"
     cmd = (spec.get("command") or "").strip()
     if url and not cmd:
         return ServerRef(name, "remote", url, scannable=False,
@@ -260,11 +262,17 @@ def _classify_command(name: str, spec: dict, cmd: str, project: Path | None) -> 
 
 
 def _invalid(spec: object) -> str:
-    """Why a server entry is not one frisk can classify, or ''."""
+    """Why a server entry is not one frisk can classify, or ''. Only what frisk needs counts:
+    a url that is not a string makes an entry invalid when it has no command, and a cwd that
+    is not a string is ignored (_cwd). A client that runs the command ignores both (Claude
+    Code's stdio entries have neither key), so a malformed one never hides the command."""
     if not isinstance(spec, dict):
         return "server entry is not a JSON object"
-    for key, kind, what in (("command", str, "a string"), ("url", str, "a string"), ("serverUrl", str, "a string"),
-                            ("cwd", str, "a string"), ("args", list, "a list")):
+    command = spec.get("command")
+    checks = [("command", str, "a string"), ("args", list, "a list")]
+    if not (isinstance(command, str) and command.strip()):  # a remote entry: frisk reads its url
+        checks += [("url", str, "a string"), ("serverUrl", str, "a string")]
+    for key, kind, what in checks:
         if spec.get(key) is not None and not isinstance(spec[key], kind):
             return f"server entry's '{key}' is not {what}"
     if not (spec.get("command") or spec.get("url") or spec.get("serverUrl")):

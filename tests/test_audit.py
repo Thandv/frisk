@@ -173,7 +173,9 @@ class InvalidEntryTest(AuditCase):
             ("command not a string", {"command": ["node"]}, "server entry's 'command' is not a string"),
             ("args not a list", {"command": "node", "args": "index.js"}, "server entry's 'args' is not a list"),
             ("url not a string", {"url": {"href": "x"}}, "server entry's 'url' is not a string"),
-            ("cwd not a string", {"command": "node", "cwd": 7}, "server entry's 'cwd' is not a string"),
+            # FR-E4 final review (N1's family): a cwd that is not a string is ignored, so it no longer
+            # makes an entry invalid (was: {"command": "node", "cwd": 7}); a remote entry's url still does.
+            ("serverUrl not a string", {"serverUrl": 7}, "server entry's 'serverUrl' is not a string"),
         ):
             with self.subTest(label):
                 cfg = self.config({"ok": ok, "broken": entry, "bad": bad})
