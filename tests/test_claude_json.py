@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 from collections.abc import Callable
@@ -494,10 +495,14 @@ class CodeLoadingEnvTest(ClaudeJsonCase):
         self.env_config({"TOKEN": "a"})
         self.assertEqual(self.server_row()["env"], ["PYTHONPATH"])
 
-    def test_the_readme_lists_every_variable(self) -> None:
-        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
-        self.assertEqual(sorted(n for n in CODE_LOADING_ENV if f"`{n}`" not in readme), [])
-        self.assertIn("any other `DYLD_*`", readme)
+    def test_the_readme_lists_exactly_these_variables(self) -> None:
+        # FR-E4 final review S4: this checked only that each name in the list appears somewhere
+        # in the README, so a name dropped from the list left the suite green. The README's
+        # list and CODE_LOADING_ENV are now compared both ways.
+        readme = " ".join((Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8").split())
+        listed = readme.split("load code are pinned too, as hashes:", 1)[1].split("A changed value is DRIFT", 1)[0]
+        self.assertEqual(sorted(re.findall(r"`(\w+)`", listed)), sorted(CODE_LOADING_ENV))
+        self.assertIn("any other `DYLD_*`", listed)
 
     def test_an_older_lock_entry(self) -> None:
         # A 'server' entry written before code-loading values were pinned: no 'code_env', and
