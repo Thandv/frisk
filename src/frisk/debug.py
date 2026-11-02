@@ -13,11 +13,16 @@ log = logging.getLogger("frisk")
 # A URL's userinfo (up to the last '@' of the part after '://'; it comes first, so a user
 # named 'token' leaves the host), a value after a key/token/secret/password/authorization/
 # cookie name and '=' or ':', a Bearer or Basic credential (never an option after the word:
-# 'basic -javaagent:x' stays), and sk-, gh*_ and github_pat_ tokens.
+# 'basic -javaagent:x' stays), and sk-, gh*_ and github_pat_ tokens. A name is matched from
+# the start of its word (the lookahead finds it anywhere in the word), so each word is read
+# once: matched from each name in it, a long word of names with no '=' took quadratic time.
+# A token is tried first, so a word that starts like one is redacted whole, as before.
 _SECRET = re.compile(
     r"(?i)(?<=://)[^/?#\s]*(?=@)"
-    r"|((?:key|token|secret|password|authorization|cookie)\w*[\"']?\s*[=:]\s*[\"']?)(?:(?:bearer|basic)\s+)?\S+"
-    r"|\b(?:sk|gh[pousr]|github_pat)[-_][A-Za-z0-9_-]+|\b(?:bearer|basic)\s+(?!-)\S+")
+    r"|\b(?:sk|gh[pousr]|github_pat)[-_][A-Za-z0-9_-]+"
+    r"|((?<!\w)(?=\w*?(?:key|token|secret|password|authorization|cookie))\w+[\"']?\s*[=:]\s*[\"']?)"
+    r"(?:(?:bearer|basic)\s+)?\S+"
+    r"|\b(?:bearer|basic)\s+(?!-)\S+")
 
 
 def redact(text: str) -> str:
