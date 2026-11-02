@@ -1,11 +1,18 @@
 """Detection rules for the Frisk scanner.
 
-All content is treated as UNTRUSTED. Rules are pure regex matched against text;
-nothing here imports, executes, or evaluates scanned content.
+All content is treated as UNTRUSTED. Rules are regular expressions matched against
+text; nothing here imports, executes, or evaluates scanned content.
 
-Each rule is a tuple: (id, category, severity, compiled_regex, description).
+Each rule is a tuple: (id, category, severity, pattern, description), where the pattern
+is a compiled regex or, for destroy.rm_rf, a PerCommand (one match per shell command).
   CODE_RULES run against script files and fenced code blocks in markdown/JSON.
   TEXT_RULES run against the full text of any text/markdown/config file.
+
+Every pattern scans in linear time: each window between a rule's start and what it must
+find is bounded, and where a window could hold another start of the same rule (so that a
+run of starts would rescan it from each), the window stops there and the later start, which
+sees the same rest of the line, matches instead. tests/test_perf.py times each rule on
+1 MiB of adversarial text.
 
 Severities:
   block -> must not be installed; fails CI / scan verdict is BLOCK
@@ -14,6 +21,7 @@ Severities:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 # --- file classification ----------------------------------------------------
@@ -68,14 +76,44 @@ def _r(p: str) -> re.Pattern:
     return re.compile(p, re.IGNORECASE)
 
 
-# Argument words of one shell command, lazily: no newline or command separator inside.
-# At most 32 words, so a line of many rm words is scanned in linear time.
-_ARGS = r"(?:[^\s;&|]+[ \t]+){0,32}?"
+def _not_at(start: str, first: str, excluded: str) -> str:
+    """One character of a rule's window, other than `excluded`, at which `start` (another
+    start of the same rule) does not begin. `first` lists every character `start` can begin
+    with, so any other character is taken in one step."""
+    return rf"(?:[^{excluded}{first}]|(?!{start})[{first}])"
+
+
+class PerCommand:
+    """destroy.rm_rf's pattern: it matches once at the first rm word of each shell command,
+    then consumes the next _RM_SKIP argument words, so the rm words among them are not
+    started from again: a command of many rm words is read in linear time. Only a match
+    whose 'hit' group took part is a finding. A skipped rm word's own window (up to 32 words
+    after it) lies inside the first one's (up to _RM_WINDOW words), so it finds nothing the
+    first did not."""
+
+    def __init__(self, pattern: str) -> None:
+        self._rx = re.compile(pattern, re.IGNORECASE)
+
+    def finditer(self, text: str) -> Iterator[re.Match[str]]:
+        return (m for m in self._rx.finditer(text) if m.group("hit") is not None)
+
+    def search(self, text: str) -> re.Match[str] | None:
+        return next(self.finditer(text), None)
+
+
+# Argument words of one shell command: no newline or command separator inside. An rm word's
+# flags and target are looked for in its next _RM_WINDOW words; the next _RM_SKIP are then
+# consumed, so the window of any rm word among them (32 words, as before) lies inside this one.
+_RM_WINDOW, _RM_SKIP = 256, 224
+_ARGS = rf"(?:[^\s;&|]+[ \t]+){{0,{_RM_WINDOW}}}?"
+_RM_TARGET = (r"[\"']?(?:(?:~|\$HOME|\$\{HOME\})[\"']?(?:/[\"']?\.(?:ssh|aws|gnupg|config|kube|docker))?"
+              r"|/(?:etc|usr|bin|sbin|var|System|Library|opt|private|home|Users|root)?|\*)"
+              r"[\"']?(?:/?\*|/)?[\"']?(?=[\s;&|)]|$)")
 
 
 # --- code rules -------------------------------------------------------------
 
-CODE_RULES = [
+CODE_RULES: list[tuple[str, str, str, re.Pattern[str] | PerCommand, str]] = [
     # Remote code execution / piped installers
     ("rce.pipe_installer", "rce", "block",
      # Piped (lines may continue with a backslash before or after the pipe; the shell may be
@@ -87,13 +125,21 @@ CODE_RULES = [
         r"|\b(?:bash|sh|zsh)\s+(?:<\(|-c\s+[\"']?\$\()\s*(?:curl|wget)\b"),
      "pipe-to-shell remote installer (curl|wget ... | sh)"),
     ("rce.eval_b64", "rce", "block",
-     _r(r"(?<![.\w])(eval|exec)\s*\(\s*[^)]*b(ase)?64[._]?decode"),
+     # Within 400 characters of the same parentheses, whitespace included (a separate \s*
+     # before the window would try the window from every point of a whitespace run); the
+     # window stops at another eval( or exec(, which then matches the same decode.
+     _r(r"(?<![.\w])(eval|exec)\s*\(" + _not_at(r"(?<![.\w])(?:eval|exec)\s*\(", "e", ")") + "{0,400}"
+        r"b(ase)?64[._]?decode"),
      "execution of base64-decoded payload"),
     ("rce.python_exec", "rce", "block",
      _r(r"(?<![.\w])exec\s*\(|\bos\.system\s*\(|\bos\.popen\s*\(|(?<![.\w])eval\s*\("),
      "dynamic code/command execution (exec/eval/os.system/os.popen)"),
     ("rce.shell_true", "rce", "block",
-     _r(r"\bsubprocess\.(run|call|check_output|check_call|Popen)\s*\([^)]*shell\s*=\s*True"),
+     # Within 400 characters of the same call; the window stops at another subprocess call,
+     # which then matches the same shell=True.
+     _r(r"\bsubprocess\.(run|call|check_output|check_call|Popen)\s*\("
+        + _not_at(r"\bsubprocess\.(?:run|call|check_output|check_call|Popen)\s*\(", "s", ")") + "{0,400}"
+        r"shell\s*=\s*True"),
      "subprocess with shell=True"),
     ("rce.shell_eval", "rce", "block",
      _r(r"(^|[;&|]\s*)eval\s+[\"$`]"),
@@ -114,7 +160,9 @@ CODE_RULES = [
     # Reading a secret from an env var is NORMAL for any tool that authenticates;
     # it's exfiltration only when paired with egress. Warn, don't block.
     ("exfil.secret_env_read", "exfil", "warn",
-     _r(r"(os\.environ|getenv|process\.env|ENV\[|\$\{?)[^\n]{0,30}"
+     # Up to 30 characters on the line; the window stops at a '$', which then matches the
+     # same name. The lookahead skips positions where no name can begin.
+     _r(r"(os\.environ|getenv|process\.env|ENV\[|\$\{?)[^\n$]{0,30}(?=[tsap])"
         r"(TOKEN|SECRET|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|PASSWORD)"),
      "reads a secret-bearing env var (normal for auth; review only with network egress)"),
     ("exfil.secret_name", "exfil", "warn",
@@ -140,10 +188,8 @@ CODE_RULES = [
      # is the root, a top-level system directory, the home directory or a credential
      # directory in it, or a glob over one of them or the current directory, optionally
      # quoted. Paths below those, such as temp and build directories, do not match.
-     _r(r"\brm\s+(?=" + _ARGS + r"(?:-[a-z]*r|--recursive\b))(?=" + _ARGS + r"(?:-[a-z]*f|--force\b))"
-        + _ARGS + r"[\"']?(?:(?:~|\$HOME|\$\{HOME\})[\"']?(?:/[\"']?\.(?:ssh|aws|gnupg|config|kube|docker))?"
-        r"|/(?:etc|usr|bin|sbin|var|System|Library|opt|private|home|Users|root)?|\*)"
-        r"[\"']?(?:/?\*|/)?[\"']?(?=[\s;&|)]|$)"),
+     PerCommand(r"\brm\s+(?P<hit>(?=" + _ARGS + r"(?:-[a-z]*r|--recursive\b))(?=" + _ARGS + r"(?:-[a-z]*f|--force\b))"
+                r"(?=" + _ARGS + _RM_TARGET + r"))?" + rf"(?:[^\s;&|]+[ \t]+){{0,{_RM_SKIP}}}"),
      "recursive force delete of a root, system, home or credential directory"),
     ("destroy.disk", "destructive", "block",
      # dd writing to a device (not the null/zero/stdio sinks), mkfs on a device, or a
@@ -162,6 +208,9 @@ CODE_RULES = [
 
 # --- text rules (prose, markdown, JSON tool descriptions, config) -----------
 
+_EXFIL_VERBS = r"sends?|sending|sent|posts?|posted|posting|exfiltrat(?:e|es|ed|ing)|uploads?|uploaded|uploading"
+_BEFORE_TO = _not_at(r"\b(?:" + _EXFIL_VERBS + r")\b", "speu", r"\n")
+
 TEXT_RULES = [
     ("inject.ignore_prev", "injection", "block",
      _r(r"\bignore\s+(all\s+|the\s+)?(previous|prior|above|preceding)\s+(instructions|prompts?|context)"),
@@ -177,9 +226,12 @@ TEXT_RULES = [
      "embedded chat-template system role override"),
     ("inject.exfil_instr", "injection", "warn",
      # Any inflection of the verb; at most one newline in the match, so never a blank line.
-     _r(r"\b(sends?|sending|sent|posts?|posted|posting|exfiltrat(?:e|es|ed|ing)|uploads?|uploaded|uploading)\b"
-        r"(?:(?:[^\n]{0,40}\n)?[^\n]{0,40}\bto\b[^\n]{0,40}|[^\n]{0,40}\bto\b(?:[^\n]{0,40}\n)?[^\n]{0,40})"
-        r"https?://"),
+     # The text just before 'to', on its line, stops at another of these verbs, which then
+     # matches with the same 'to' and URL. The URL is found from its ':' (a literal the scan
+     # jumps to), so up to 40 characters may come before 'https' and, one more, 41 before 'http'.
+     _r(r"\b(" + _EXFIL_VERBS + r")\b(?:" + _BEFORE_TO + r"{0,40}\bto\b(?:[^\n]{0,40}\n)?[^\n]{0,45}"
+        r"|[^\n]{0,40}\n" + _BEFORE_TO + r"{0,40}\bto\b[^\n]{0,45})"
+        r":(?:(?<=https:)|(?<=http:))//"),
      "instruction to send data to an external URL"),
     # --- MCP tool-poisoning patterns (hidden directives in tool descriptions) ---
     ("inject.hide_from_user", "tool-poisoning", "block",
@@ -192,7 +244,10 @@ TEXT_RULES = [
      _r(r"\bbefore\s+(using|calling|invoking|you\s+use)\b[^\n]{0,40}\b(tool|function|this)\b"),
      "tool-poisoning: side-effect instruction prefixed to a tool description"),
     ("inject.read_then_send", "tool-poisoning", "warn",
-     _r(r"\b(read|cat|open)\b[^\n]{0,40}\b(\.ssh|\.aws|\.env\b|id_rsa|credentials)\b"),
+     # Up to 40 characters on the line; the window stops at another read/cat/open, which
+     # then matches the same file.
+     _r(r"\b(read|cat|open)\b" + _not_at(r"\b(?:read|cat|open)\b", "rco", r"\n") + "{0,40}"
+        r"\b(\.ssh|\.aws|\.env\b|id_rsa|credentials)\b"),
      "tool-poisoning: instruction to read sensitive files"),
 ]
 
@@ -263,7 +318,12 @@ COVERAGE_RULES = [
     ("coverage.surface_error", "coverage", "warn",
      "a scan surface failed on a file, so part of it may not have been pattern-matched"),
     ("coverage.unscanned", "coverage", "warn",
-     "an MCP server frisk could not scan: remote, a package not in the local cache, or no source found"),
+     "content frisk did not scan: an MCP server (remote, a package not in the local cache, or no "
+     "source found), or the rest of a tree after a scan limit was hit"),
+    ("coverage.too_large", "coverage", "block",
+     "a file over the size limit, not read: it fails the scan, since anything could be in it"),
+    ("coverage.truncated", "coverage", "warn",
+     "text over the size limit: only its first and last parts were pattern-matched"),
     ("coverage.no_servers", "coverage", "warn",
      "an MCP config in which frisk found no servers, so nothing in it was audited"),
 ]

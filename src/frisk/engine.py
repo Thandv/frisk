@@ -4,21 +4,44 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+import stat
+import time
 from bisect import bisect_right
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 from . import surfaces
+from .debug import log as _root_log
 from .rules import (
     ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
     INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
 )
 from .surfaces import Span
 
+log = _root_log.getChild("engine")
+
 _NEWLINE = re.compile("\n")
+
+# Scan bounds (ScanLimits' defaults). A file larger than MAX_FILE_BYTES is not read; a text
+# longer than MAX_FILE_BYTES characters is matched in a head and a tail window (scan_text).
+MAX_FILES = 20_000
+MAX_FILE_BYTES = 2 * 1024 * 1024
 
 SEVERITY_ORDER = {None: 0, "warn": 1, "block": 2}
 _INTERNAL_FIELDS = ("origin", "source_line")
+
+
+@dataclass(frozen=True)
+class ScanLimits:
+    """Bounds on one scan_path call. A file over max_file_bytes is not read (reason
+    too_large, a coverage.too_large block finding). The walk stops before the next file once
+    max_files files were looked at, max_bytes bytes were read, or deadline_s seconds have
+    passed (file_cap, byte_cap, deadline: a coverage.unscanned warning). So the verdict is
+    never PASS."""
+    max_files: int = MAX_FILES
+    max_file_bytes: int = MAX_FILE_BYTES
+    max_bytes: int | None = None
+    deadline_s: float | None = None
 
 
 @dataclass
@@ -95,7 +118,11 @@ def _excerpt(text: str, idx: int, span: int = 80) -> str:
     return snippet.strip()[:120]
 
 
-_RULES_FOR_KIND = {"code": CODE_RULES, "md_inline_code": CODE_RULES, "instruction": INSTRUCTION_RULES}
+# Kinds with their own rules; every other kind is a text kind: TEXT_RULES and the hidden-
+# Unicode check. scan_text over its bound splits those two: "window" (the rules on a head
+# or tail window) and "unicode" (the check on the whole text).
+_RULES_FOR_KIND = {"code": CODE_RULES, "md_inline_code": CODE_RULES, "instruction": INSTRUCTION_RULES,
+                   "window": TEXT_RULES, "unicode": []}
 _WARN_CAPPED_KINDS = {"md_inline_code"}  # a block finding from these spans reports as warn
 
 
@@ -125,7 +152,7 @@ def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Fin
             sev = "warn"
         for m in rx.finditer(seg):
             add(m.start(), rid, cat, sev, desc, _excerpt(seg, m.start()))
-    if span.kind not in _RULES_FOR_KIND:  # every text kind
+    if span.kind not in _RULES_FOR_KIND or span.kind == "unicode":  # every text kind
         for idx, rid, desc in hidden_unicode(seg, span.start == 0):
             cat, sev, _ = RULE_META[rid]
             add(idx, rid, cat, sev, desc, "")
@@ -141,10 +168,27 @@ def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
     return sort_findings(out)
 
 
-def scan_text(text: str, label: str = "<text>") -> ScanResult:
-    """Scan a raw string as both code and prose (used by the MCP server / --text)."""
+def scan_text(text: str, label: str = "<text>", max_chars: int = MAX_FILE_BYTES) -> ScanResult:
+    """Scan a raw string as both code and prose (--text, frisk-mcp, the proxy).
+
+    The one truncation policy for every caller: a text longer than `max_chars` has the rules
+    run on its first and last max_chars // 2 characters (lines count from the start of the
+    whole text), the hidden-Unicode check on all of it, and a coverage.truncated warning, so
+    the verdict is never PASS.
+    """
     whole = len(text)
-    findings = _scan_spans(text, [Span(0, whole, "code"), Span(0, whole, "text")], label)
+    if whole <= max_chars:
+        findings = _scan_spans(text, [Span(0, whole, "code"), Span(0, whole, "text")], label)
+    else:
+        half = max_chars // 2
+        windows = [Span(start, end, kind) for start, end in ((0, half), (whole - half, whole))
+                   for kind in ("code", "window")]
+        findings = _scan_spans(text, windows + [Span(0, whole, "unicode")], label)
+        category, severity, _ = RULE_META["coverage.truncated"]
+        findings = sort_findings(findings + [Finding(
+            label, 1, "coverage.truncated", category, severity,
+            f"text of {whole} characters is over the {max_chars}-character limit: only its first and last "
+            f"{half} were pattern-matched (the hidden-Unicode check read it all)", "")])
     for f in findings:
         f.origin = "text"
     return ScanResult(findings)
@@ -158,16 +202,17 @@ def coverage_warning(rel: str, rule: str, message: str) -> ScanResult:
 
 def _not_scanned(rel: str, reason: str, detail: str, rule: str | None = None,
                  message: str = "") -> ScanResult:
-    """A file that was not pattern-matched: a skipped entry, plus a warn finding if `rule`."""
+    """A file that was not pattern-matched: a skipped entry, plus a `rule` finding if given."""
     result = coverage_warning(rel, rule, message) if rule is not None else ScanResult()
     result.coverage.skipped.append(Skipped(rel, reason, detail))
     return result
 
 
-def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:
+def _read_text(path: Path, rel: str, max_bytes: int | None) -> tuple[str | None, ScanResult]:
     """The file's text (newlines normalised as text-mode reading does), plus coverage notes.
 
-    Text is None when the file cannot be pattern-matched at all. A text-like file that is
+    Text is None when the file cannot be pattern-matched at all, or is larger than
+    `max_bytes` (checked before reading). A text-like file that is
     not valid UTF-8 is still scanned, with undecodable bytes replaced, and also warns:
     one invalid byte must not hide the rest of the file.
     """
@@ -183,6 +228,11 @@ def _read_text(path: Path, rel: str) -> tuple[str | None, ScanResult]:
         return None, _not_scanned(rel, "binary", ext, "coverage.binary",
                                   f"archive not scanned: contents unscanned ({ext})")
     try:
+        size = path.stat().st_size
+        if max_bytes is not None and size > max_bytes:
+            return None, _not_scanned(rel, "too_large", f"{size} bytes", "coverage.too_large",
+                                      f"file not scanned: {size} bytes is over the {max_bytes}-byte limit; "
+                                      f"raise --max-file-bytes to scan it, or leave it out of the target")
         data = path.read_bytes()
     except OSError as e:
         name = type(e).__name__
@@ -219,9 +269,10 @@ def _in_target(path: Path, root: Path | None) -> str:
     return (path.relative_to(root) if root else path).as_posix()
 
 
-def scan_file(path: Path, root: Path | None = None) -> ScanResult:
+def scan_file(path: Path, root: Path | None = None, max_bytes: int | None = None) -> ScanResult:
+    """Scan one file; one larger than `max_bytes` (None: no bound) is not read."""
     rel = _in_target(path, root)
-    text, notes = _read_text(path, rel)
+    text, notes = _read_text(path, rel, max_bytes)
     if text is None:
         return notes
     failed: dict[str, None] = {}  # surface failures, in order, reported once per file
@@ -261,34 +312,94 @@ def _scan_reading(path: Path, text: str, rel: str, failed: dict[str, None]) -> l
     return _scan_spans(text, spans, rel)
 
 
-def scan_path(path: str | Path, root: Path | None = None) -> ScanResult:
+def scan_path(path: str | Path, root: Path | None = None, limits: ScanLimits | None = None) -> ScanResult:
+    """Scan a file or a directory tree within `limits` (default: ScanLimits())."""
+    limits = limits or ScanLimits()
     p = Path(path)
     if p.is_file():
-        return scan_file(p, root or p.parent)
+        return scan_file(p, root or p.parent, limits.max_file_bytes)
     result = ScanResult()
     base = root or p
-    _check_listable(p, base, result)
-    for f in sorted(p.rglob("*")):
-        inside = f.relative_to(p).parts
-        if ".git" in inside and not (inside[-1] == ".git" and f.is_file()):  # a gitfile is scanned
-            if inside.index(".git") == len(inside) - 1:  # the VCS directory itself, once
-                rel = _in_target(f, base)
-                if len(inside) > 1 and f.is_dir():
-                    # Below the top, a .git directory is an easy hiding place: warn.
-                    result.extend(_not_scanned(rel, "vcs_dir", "nested", "coverage.nested_vcs",
-                                               "nested .git directory not scanned"))
-                else:
-                    result.coverage.skipped.append(Skipped(rel, "vcs_dir"))
-            continue
-        if f.is_file():
-            result.extend(scan_file(f, base))
-        elif f.is_dir():
-            _check_listable(f, base, result)
+    stopped = _walk(p, base, limits, result)
+    # Skipped entries in the order a sorted listing of the whole tree gives (a directory
+    # before what is in it), whatever order the walk met them in.
+    result.coverage.skipped.sort(key=lambda s: s.path.split("/"))
+    if stopped is not None:
+        reason, detail, message = stopped
+        result.extend(_not_scanned(_in_target(p, base), reason, detail, "coverage.unscanned", message))
     return result.sort()
 
 
+def _walk(top: Path, base: Path, limits: ScanLimits, result: ScanResult) -> tuple[str, str, str] | None:
+    """Scan the files below `top` into `result`, each directory's entries in name order,
+    never entering .git directories or symlinked directories. Returns (reason, detail,
+    message) for the limit that stopped the walk, or None when it went through the tree."""
+    started = time.monotonic()
+    looked_at = read = 0
+
+    def unlistable(err: OSError) -> None:
+        name = type(err).__name__
+        where = Path(err.filename) if err.filename is not None else top
+        result.extend(_not_scanned(_in_target(where, base), "unreadable", name, "coverage.unreadable",
+                                   f"directory could not be listed: {name}"))
+
+    for dirpath, dirnames, filenames in os.walk(top, onerror=unlistable):
+        if limits.deadline_s is not None and time.monotonic() - started >= limits.deadline_s:
+            return _limit_hit(limits, looked_at, read, started)  # also between directories with no files
+        here = Path(dirpath)
+        dirnames.sort()
+        if ".git" in dirnames:  # the VCS directory itself, once; below the top it warns
+            dirnames.remove(".git")
+            _vcs_dir(here / ".git", base, nested=here != top, result=result)
+        for name in dirnames:
+            if os.path.islink(here / name):  # listed as entries, never entered
+                _check_listable(here / name, base, result)
+        for name in sorted(filenames):
+            hit = _limit_hit(limits, looked_at, read, started)
+            if hit is not None:
+                return hit
+            f = here / name
+            try:
+                st = os.stat(f)
+            except OSError as e:  # a dangling symlink, say: nothing to read, as before
+                log.debug("entry skipped (cannot stat) error=%s", type(e).__name__)
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                if name == ".git":
+                    _vcs_dir(f, base, nested=False, result=result)
+                continue
+            looked_at += 1
+            scanned = scan_file(f, base, limits.max_file_bytes)
+            if scanned.coverage.files_scanned:
+                read += st.st_size
+            result.extend(scanned)
+    return None
+
+
+def _limit_hit(limits: ScanLimits, looked_at: int, read: int, started: float) -> tuple[str, str, str] | None:
+    rest = "the rest of the tree was not scanned"
+    if limits.deadline_s is not None and time.monotonic() - started >= limits.deadline_s:
+        return "deadline", f"{limits.deadline_s:g} s", f"scan stopped after {limits.deadline_s:g} s: {rest}"
+    if looked_at >= limits.max_files:
+        return "file_cap", f"{limits.max_files} files", f"scan stopped after {limits.max_files} files: {rest}"
+    if limits.max_bytes is not None and read >= limits.max_bytes:
+        return "byte_cap", f"{limits.max_bytes} bytes", f"scan stopped after reading {limits.max_bytes} bytes: {rest}"
+    return None
+
+
+def _vcs_dir(entry: Path, base: Path, nested: bool, result: ScanResult) -> None:
+    """A .git entry that is not a file: not scanned. A directory below the top warns."""
+    rel = _in_target(entry, base)
+    if nested and entry.is_dir():
+        # Below the top, a .git directory is an easy hiding place: warn.
+        result.extend(_not_scanned(rel, "vcs_dir", "nested", "coverage.nested_vcs",
+                                   "nested .git directory not scanned"))
+    else:
+        result.coverage.skipped.append(Skipped(rel, "vcs_dir"))
+
+
 def _check_listable(directory: Path, base: Path, result: ScanResult) -> None:
-    """rglob silently skips a directory it cannot list; record it as unreadable instead."""
+    """A symlinked directory is not walked into; one that cannot be listed is recorded as unreadable."""
     try:
         with os.scandir(directory):
             pass

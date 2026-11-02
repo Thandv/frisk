@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 from pathlib import Path
 
 from . import __version__
-from .engine import ScanResult, coverage_warning, display_prefix, reroot, scan_path, scan_text, verdict, fails
+from .engine import (MAX_FILE_BYTES, ScanLimits, ScanResult, coverage_warning, display_prefix, reroot, scan_path,
+                     scan_text, verdict, fails)
 from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
 from .sources import (SERVER_KEYS, display_ref, display_target, display_url, home_label, is_git_url, materialize,
                       parse_mcp_config, split_configs)
@@ -15,10 +17,10 @@ from . import pin, proxy
 from .debug import setup_debug
 
 
-def _scan_target(target: str) -> ScanResult:
+def _scan_target(target: str, limits: ScanLimits) -> ScanResult:
     """Scan one target; paths follow docs/adr/0001-finding-paths.md."""
     with materialize(target) as (root, _label):
-        result = scan_path(root)
+        result = scan_path(root, limits=limits)
         if is_git_url(target):
             return reroot(result, "", "git")  # clone-relative
         return reroot(result, display_prefix(target, root.is_file()), "local")
@@ -68,7 +70,7 @@ def _distinct(targets: list[str]) -> list[str]:
     return out
 
 
-def _audit_config(path: str) -> list[AuditRecord]:
+def _audit_config(path: str, limits: ScanLimits | None = None) -> list[AuditRecord]:
     """One record per server in the config, in config order; [] when it lists none.
 
     A server frisk does not scan (remote, an uncached package, an unresolved or invalid
@@ -82,11 +84,11 @@ def _audit_config(path: str) -> list[AuditRecord]:
     for s in parse_mcp_config(path):
         own = ScanResult()  # a wrapper's own file
         if s.scannable:
-            result = scan_path(s.ref)
+            result = scan_path(s.ref, limits=limits)
         else:
             result = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
             if s.kind == "wrapper":  # the wrapper itself is read: a payload in it still blocks
-                own = scan_path(s.ref)
+                own = scan_path(s.ref, limits=limits)
                 result.extend(own)
         if s.url:
             result.extend(coverage_warning(display_url(s.url), "coverage.unscanned",
@@ -97,6 +99,13 @@ def _audit_config(path: str) -> list[AuditRecord]:
 
 
 # --- scan (default) ---------------------------------------------------------
+
+def _positive(value: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive number of bytes, not {value}")
+    return n
+
 
 def _cmd_scan(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
@@ -112,6 +121,9 @@ def _cmd_scan(argv: list[str]) -> int:
     p.add_argument("--text", metavar="STR", help="scan a raw string instead of a path")
     p.add_argument("--json", action="store_true", help="emit findings as JSON")
     p.add_argument("--sarif", action="store_true", help="emit SARIF 2.1.0 (GitHub code scanning)")
+    p.add_argument("--max-file-bytes", type=_positive, default=MAX_FILE_BYTES, metavar="N",
+                   help=f"skip files larger than N bytes (a block finding), and match only the first and last N/2 "
+                        f"characters of a longer --text (a warning) (default: {MAX_FILE_BYTES})")
     p.add_argument("--fail-on", choices=["block", "warn", "never"], default="block",
                    help="exit non-zero when the worst finding reaches this level (default: block)")
     p.add_argument("-q", "--quiet", action="store_true", help="print only the verdict line")
@@ -123,18 +135,19 @@ def _cmd_scan(argv: list[str]) -> int:
         return 2
 
     result = ScanResult()
+    limits = ScanLimits(max_file_bytes=args.max_file_bytes)
     audits: list[str] = []
     servers: list[AuditRecord] = []
     label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or "<text>"
     try:
         if args.text is not None:
-            result.extend(scan_text(args.text, "<text>"))
+            result.extend(scan_text(args.text, "<text>", args.max_file_bytes))
         # A config named as a target is audited, never text-scanned: its env values must not show.
         targets, configs = split_configs(args.targets, args.mcp_config)
         for t in _distinct(targets):
-            result.extend(_scan_target(t))
+            result.extend(_scan_target(t, limits))
         for cfg in configs:
-            records = _audit_config(cfg)
+            records = _audit_config(cfg, limits)
             if not records:  # nothing was audited: never PASS
                 where = home_label(cfg)
                 note = coverage_warning(where, "coverage.no_servers", f"no MCP servers found in {where} (frisk reads "
@@ -225,10 +238,17 @@ def _cmd_verify(argv: list[str]) -> int:
                     print(_c(f"           + added:   {printable(f)}", "warn"))
                 for f in r.get("removed", []):
                     print(_c(f"           - removed: {printable(f)}", "warn"))
-        drift = sum(1 for r in report if r["status"] != "ok")
-        v = _c("DRIFT DETECTED", "block") if pin.has_drift(report) else _c("no drift", "pass")
-        print(f"\nverify: {v}  ({drift} of {len(report)} entries changed)")
-    return 1 if pin.has_drift(report) else 0
+        changed, failed = sum(1 for r in report if r["status"] == "DRIFT"), pin.unverified(report)
+        could_not = f"could not verify {failed} entr{'y' if failed == 1 else 'ies'}"
+        if changed:
+            v = _c("DRIFT DETECTED", "block")
+        elif failed:
+            v = _c(could_not, "warn")
+        else:
+            v = _c("no drift", "pass")
+        also = f"; {could_not}" if changed and failed else ""
+        print(f"\nverify: {v}  ({changed} of {len(report)} entries changed{also})")
+    return 1 if pin.has_drift(report) or pin.unverified(report) else 0
 
 
 def _cmd_proxy(argv: list[str]) -> int:
@@ -245,12 +265,17 @@ def _cmd_proxy(argv: list[str]) -> int:
                                 description="Enforce frisk checks at runtime between an MCP client and server.")
     p.add_argument("--log", metavar="FILE", help="append proxy events to a file (default: stderr)")
     args = p.parse_args(opts)
-    logf = open(args.log, "a", encoding="utf-8") if args.log else sys.stderr
-    try:
-        return proxy.Proxy(server_cmd, log=logf).run()
-    except FileNotFoundError as e:
-        print(f"frisk proxy: cannot launch server: {e}", file=sys.stderr)
-        return 2
+    with contextlib.ExitStack() as stack:  # the --log file is closed on every path
+        try:
+            logf = stack.enter_context(open(args.log, "a", encoding="utf-8")) if args.log else sys.stderr
+        except OSError as e:
+            print(f"frisk proxy: cannot open the log file: {printable(str(e))}", file=sys.stderr)
+            return 2
+        try:
+            return proxy.Proxy(server_cmd, log=logf).run()
+        except proxy.LaunchError as e:  # not found, not executable, ...
+            print(f"frisk proxy: cannot launch server: {printable(str(e))}", file=sys.stderr)
+            return 2
 
 
 def main(argv: list[str] | None = None) -> int:
