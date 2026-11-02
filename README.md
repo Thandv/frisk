@@ -403,6 +403,16 @@ The proxy launches the real server, relays the protocol, and enforces:
 - a tool whose description **changed** since first seen is **flagged** (possible rug pull);
 - prompt-injection detected in a **tool result** gets a visible warning prepended before it reaches the model.
 
+It fails closed: nothing it could not inspect reaches the client. A tool entry that is
+not an object with a string `name` and a string `description` (a missing or null
+description counts as empty), or whose inspection raises, is dropped and the other tools
+are still judged; a tool-result content item that is not an object, or a text item whose
+`text` is not a string, is dropped. If inspecting a message's `tools` or `content` fails
+(either one is not a list, say), the client gets a JSON-RPC error for that id, code
+`-32603`, `frisk: inspection failed`, instead of the message. A JSON-RPC batch (an array)
+is inspected message by message, and a server line that is not JSON is dropped. Each of
+these is logged.
+
 Events are logged to stderr (add `--log frisk-proxy.log` to keep a file).
 
 ## Use it as an MCP server (let your agent vet *before* it installs)
