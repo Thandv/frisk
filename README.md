@@ -300,10 +300,16 @@ never as a whole file:
   a console-script wrapper as its own file (not the package it runs, which is not read).
 - The values of env variables that make a runtime load code are pinned too, as hashes:
   `NODE_OPTIONS`, `NODE_PATH`, `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, `LD_PRELOAD`,
-  `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` (and
-  any other `DYLD_*`), `PERL5OPT`, `PERL5LIB`, `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`,
-  `_JAVA_OPTIONS`, `BASH_ENV` and `ENV`. A changed value is DRIFT and `frisk verify` names
-  the variable (`~ NODE_OPTIONS changed`), never its value.
+  `LD_LIBRARY_PATH`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`,
+  `DYLD_FRAMEWORK_PATH` (and any other `DYLD_*`), `PERL5OPT`, `PERL5LIB`, `RUBYOPT`,
+  `RUBYLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `BASH_ENV` and `ENV`; the program git
+  runs for ssh and where git finds its own programs (`GIT_SSH_COMMAND`, `GIT_EXEC_PATH`);
+  and the package index npm, pip or uv installs from (`npm_config_registry`,
+  `NPM_CONFIG_REGISTRY`, `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`, `UV_INDEX_URL`,
+  `UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`). A changed value is DRIFT and `frisk verify`
+  names the variable (`~ NODE_OPTIONS changed`), never its value. A token inside such a
+  value (an index URL's `user:token@`) is part of the value, so changing it is drift too.
+  `PATH` is not pinned: it differs between shells and machines, so every lock would drift.
 
 So the rest of the file can change (Claude Code rewrites `~/.claude.json` all the time) and
 a rotated secret is not drift, while a changed command, argument, URL or env name (`~

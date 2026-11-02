@@ -132,13 +132,19 @@ _RELATIVE = "relative path and no absolute 'cwd' in the config: cannot tell whic
 _NOT_CACHED = "not in local cache; frisk does not download"
 # Where parse_mcp_config looks for servers; other config formats are not read.
 SERVER_KEYS = "'mcpServers' and 'servers', at the top level and in each 'projects' entry"
-# Env variables that make a runtime load code (options, module and library paths, preloads,
-# startup files): frisk lock pins their values (as hashes); every other env value may be a
-# secret and is never read. Any DYLD_* variable counts too.
+# Env variables that decide what code runs: a runtime's options, module and library paths,
+# preloads and startup files; the program git runs for ssh and where git finds its own
+# programs; the package index npm, pip or uv installs from. frisk lock pins their values, as
+# hashes only (an index URL can carry a token); every other env value may be a secret and is
+# never read. Any DYLD_* variable counts too. PATH does not: it differs between shells and
+# machines, so every lock would drift.
 CODE_LOADING_ENV = frozenset({
     "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH",
     "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "PERL5OPT", "PERL5LIB", "RUBYOPT",
-    "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "BASH_ENV", "ENV",
+    "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "BASH_ENV", "ENV", "LD_AUDIT",
+    "GIT_SSH_COMMAND", "GIT_EXEC_PATH",
+    "npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "UV_INDEX_URL",
+    "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX",
 })
 
 

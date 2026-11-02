@@ -16,3 +16,14 @@
   returned as `frisk-mcp`'s source. The clone still uses the target as given; `frisk verify`
   re-clones the clean one. A local path that happens to start with `github.com/` is
   unchanged.
+- `frisk lock` also pins the values, as hashes, of `LD_AUDIT`, `GIT_SSH_COMMAND`,
+  `GIT_EXEC_PATH`, `npm_config_registry`, `NPM_CONFIG_REGISTRY`, `PIP_INDEX_URL`,
+  `PIP_EXTRA_INDEX_URL`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL` and `UV_DEFAULT_INDEX`. Each
+  decides what code runs (an audit library loaded like `LD_PRELOAD`, the program git runs
+  for ssh, where git finds its own programs, the index npm, pip or uv installs a package
+  from), but a changed value was not drift. A changed value is now DRIFT, named as
+  `~ PIP_INDEX_URL changed`, never shown. A token inside such a value is part of it, so
+  changing it is drift too. `PATH` is deliberately not pinned: it differs between shells
+  and machines, so every lock would drift. A lock entry for a server that sets none of these
+  is unchanged and verifies as before; one written before this change for a server that
+  sets one of them reports DRIFT once with that line: lock again.

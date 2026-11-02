@@ -522,6 +522,40 @@ class CodeLoadingEnvTest(ClaudeJsonCase):
         self.assertEqual((code_, err), (1, ""))
         self.assertIn("           ~ NODE_OPTIONS changed\n", out)
 
+    ADDED = ("LD_AUDIT", "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "npm_config_registry", "NPM_CONFIG_REGISTRY",
+             "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX")
+
+    def test_the_variables_added_later_are_pinned_by_value(self) -> None:
+        # FR-E4 final review S3: each decides what code runs (an audit library loaded like
+        # LD_PRELOAD, the program git runs for ssh, where git finds its own programs, the index
+        # a package is installed from), but a changed value was not drift.
+        for name in self.ADDED:
+            with self.subTest(name):
+                self.env_config({name: "https://a.example.invalid/simple", "TOKEN": "a"})
+                self.lock()
+                self.env_config({name: "https://" + CANARY + ".example.invalid/simple", "TOKEN": "a"})
+                row = self.server_row()
+                self.assertEqual((row["status"], row["env"], "launch" in row), ("DRIFT", [name], False))
+
+    def test_a_lock_from_before_they_were_added(self) -> None:
+        # A server that sets none of them keeps its digest (the lockfile is byte for byte the
+        # same), so its older lock verifies; one that sets one reports DRIFT once, naming it.
+        before = CODE_LOADING_ENV - set(self.ADDED)
+        for env in ({}, {"NODE_OPTIONS": "--max-old-space-size=512", "TOKEN": "a"}):
+            with self.subTest(env=sorted(env)):
+                self.env_config(env)
+                with mock.patch("frisk.sources.CODE_LOADING_ENV", before):
+                    self.lock()
+                older = Path(self.lockfile).read_bytes()
+                self.assertEqual(self.server_row()["status"], "ok")
+                self.lock()
+                self.assertEqual(Path(self.lockfile).read_bytes(), older)
+        self.env_config({"NODE_OPTIONS": "--max-old-space-size=512", "PIP_INDEX_URL": "https://a.example.invalid/s"})
+        with mock.patch("frisk.sources.CODE_LOADING_ENV", before):
+            self.lock()
+        row = self.server_row()
+        self.assertEqual((row["status"], row["env"], "launch" in row), ("DRIFT", ["PIP_INDEX_URL"], False))
+
 
 if __name__ == "__main__":
     unittest.main()
