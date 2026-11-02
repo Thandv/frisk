@@ -32,3 +32,9 @@
   an email in the query) was pinned only by its length class since FR-FX1 10, so another
   host or owner of the same length class was no drift; it is pinned by host and path again,
   which hashes exactly as main did when it has no query or fragment.
+- A `GIT_CONFIG_*` value is pinned as written (after the redaction, which drops a URL's
+  `user:token@`), no longer word by word like a package index. Git runs some of these values
+  through the shell (`core.sshCommand`, a `!` credential helper), and the word rule dropped a
+  URL's query and pinned a word it could not read (a quoted URL, `SRC=https://…`) only by its
+  length class, so a command hidden there was not drift. A server that sets one, locked
+  before, reports DRIFT once naming it: lock again.

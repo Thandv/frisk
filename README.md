@@ -263,9 +263,10 @@ pasted into `command` shows only its program (`npx …`), and env values and hea
 never read. A URL whose host part cannot be told apart from its password
 (an unencoded `#`, `?` or `/` in the password, a port that is not a number, an `@` after
 the host, a backslash in the host part, where clients end the host, or anything but a host
-name or address before the path) is shown as `<unparsable URL>`. In the text report (and `frisk verify`'s), control
-characters and the hidden Unicode frisk reports, in a server name, a cached package's
-version or dependencies, a location, a finding path, a finding's excerpt (the scanned line
+name or address before the path) is shown as `<unparsable URL>`. In the text report (and
+`frisk verify`'s), control characters and the hidden Unicode frisk reports, in a server
+name, a cached package's version or dependencies, a location, a finding path, a finding's
+excerpt (the scanned line
 itself), the target names and error messages, are shown as escapes (`\x1b`, `\u202e`), so
 neither a config nor a scanned package can rewrite what your terminal shows; a lone
 surrogate (`\ud800`) is shown the same way. `--json` and `--sarif` escape them as JSON does.
@@ -319,10 +320,12 @@ never as a whole file:
   not drift, while a changed host or path is. A word there that is not such a URL, or whose
   host part cannot be told from a password or holds a backslash (where pip, uv and npm end
   the host: `https://evil\@pypi.org/simple` is fetched from `evil`), is pinned only as
-  `<unparsable URL>` and its length class, never as written. In a find-links or `GIT_CONFIG_*` value, each word holding
-  `://` is pinned the same way, and any other word (a local path, a git config key or
-  option) as given. `PATH` is not pinned: it differs between shells and machines, so every
-  lock would drift.
+  `<unparsable URL>` and its length class, never as written. In a find-links value, each
+  word holding `://` is pinned the same way, and any other word (a local path) as given. A
+  `GIT_CONFIG_*` value is pinned as written, after the redaction below, which drops a URL's
+  `user:token@`: git runs some values through the shell (`core.sshCommand`, a `!` credential
+  helper), where a URL's query or a quoted URL can hold a command. `PATH` is not pinned: it
+  differs between shells and machines, so every lock would drift.
 - Before anything is hashed, frisk's redaction (the patterns its debug lines use) replaces
   each secret in it with a fixed marker: a value after a `key`, `token`, `secret`,
   `password`, `authorization` or `cookie` name and `=` or `:` (`--api-key=…`,

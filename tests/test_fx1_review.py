@@ -306,5 +306,47 @@ class UrlHostTest(ReviewCase):
             self.assertEqual(_launch_digest({"url": base}), expected)
 
 
+
+class GitConfigValueTest(ReviewCase):
+    """sev 4: FR-FX1 8 pinned each word of a GIT_CONFIG_* value that holds '://' like an index
+    URL (_url_pin): without its query and fragment, and as '<unparsable URL>' plus its length
+    class when urlsplit cannot read it (a quoted URL, 'Name=https://...'). But git runs some
+    of these values through the shell (core.sshCommand, a '!' credential helper, aliases,
+    filters), where a query or a quoted word can hold a command, so changing one was no drift.
+    The value is now pinned as written after the redaction, which still drops a URL's
+    'user:token@'."""
+
+    def helper(self, value: str) -> dict:
+        return self.node(env={"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.helper",
+                              "GIT_CONFIG_VALUE_0": value})
+
+    def test_a_command_in_a_url_word_is_drift(self) -> None:
+        payload = "touch${IFS}/tmp/frisk-review-" + CANARY
+        cases = {
+            "in the query of a URL": (
+                "!f() { curl -s https://vault.example.invalid/git-cred; }; f",
+                "!f() { curl -s https://vault.example.invalid/git-cred;?$(" + payload + "); }; f"),
+            "a quoted URL word of the same length class": (
+                "!f() { curl -s 'https://vault.example.invalid/git/credential'; }; f",
+                "!f() { curl -s 'https://vault.example.invalid/c'$(" + payload[:12] + "); }; f"),
+            "a URL after 'Name='": ("!f() { env SRC=https://ci.example.invalid/run git-cred; }; f",
+                                    "!f() { env SRC=https://$(touch${IFS}p)@ci.example.invalid/run git-cred; }; f"),
+        }
+        for label, (before, after) in cases.items():
+            with self.subTest(label):
+                self.assert_drift(self.helper(before), self.helper(after), "GIT_CONFIG_VALUE_0")
+
+    def test_a_token_in_a_url_there_is_still_never_stored(self) -> None:
+        cases = {
+            "an insteadOf key": lambda s: self.node(env={"GIT_CONFIG_KEY_0": "url.https://x-access-token:" + s
+                                                         + "@github.com/.insteadOf"}),
+            "a quoted URL in a helper": lambda s: self.helper("!f() { curl -s 'https://bot:" + s
+                                                              + "@vault.example.invalid/cred'; }; f"),
+        }
+        for label, spec in cases.items():
+            with self.subTest(label):
+                self.assert_rotation_is_no_drift(spec)
+
+
 if __name__ == "__main__":
     unittest.main()

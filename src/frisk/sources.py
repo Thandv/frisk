@@ -154,9 +154,7 @@ CODE_LOADING_PREFIXES = ("DYLD_", "GIT_CONFIG_")
 # whitespace (as pip and uv read a list). Such a URL can carry a token.
 _INDEX_ENV = frozenset({"npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL",
                         "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX"})
-# The find-links variables, whose words are URLs or local paths. _env_pin reads GIT_CONFIG_*
-# the same way: a git config key or value can hold a URL with a token
-# ('url.https://user:token@host/.insteadOf').
+# The find-links variables, whose words are URLs or local paths.
 _FIND_LINKS_ENV = frozenset({"PIP_FIND_LINKS", "UV_FIND_LINKS"})
 
 
@@ -619,11 +617,13 @@ def _unparsable(text: str) -> str:
 def _env_pin(name: str, value: object) -> object:
     """What frisk lock hashes of a code-loading variable's value: the value itself, except in a
     package index variable (_INDEX_ENV), where each whitespace-separated word is pinned by
-    _url_pin, and in a find-links or GIT_CONFIG_* variable, where each word holding '://' is.
-    A token in such a URL is then never stored, not even as a hash: rotating it is not drift,
-    while a changed host or path is. Any other word of those (a local path, a git config key
-    or option) is pinned as given."""
-    other = name in _FIND_LINKS_ENV or name.startswith("GIT_CONFIG_")
+    _url_pin, and in a find-links variable, where each word holding '://' is. A token in such
+    a URL is then never stored, not even as a hash: rotating it is not drift, while a changed
+    host or path is. Any other word of those (a local path) is pinned as given. A GIT_CONFIG_*
+    value is pinned as written, like the rest: git runs some through the shell (core.sshCommand,
+    a '!' credential helper), where a URL's query or a quoted URL can hold a command, and
+    _pin_digest's redaction drops a URL's 'user:token@' there."""
+    other = name in _FIND_LINKS_ENV
     if name not in _INDEX_ENV and not other:
         return value
     if not isinstance(value, str):
