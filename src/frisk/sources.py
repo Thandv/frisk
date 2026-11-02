@@ -593,12 +593,13 @@ _JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 def _pin_digest(value: object) -> str:
     """sha256 of a config value as frisk lock stores it: a code-loading env value (_code_env),
     or how a server starts (_launch_digest). Every string in it passes through debug.redact
-    first (in its JSON text, so no nesting is walked), so a secret in it is pinned as a fixed
-    marker, never stored, not even as a hash: a value after 'key=' or 'password:' and the like,
-    a Bearer or Basic credential, an sk-/gh*_/github_pat_ token, a URL's 'user:password@'.
-    Rotating it is not drift; a changed option name, host or command still is. A value with no
-    secret hashes exactly as before."""
-    text = _JSON_STRING.sub(lambda m: json.dumps(redact(json.loads(m.group()))),
+    first (pinned, in its JSON text, so no nesting is walked), so a secret in it is pinned as a
+    fixed marker, never stored, not even as a hash: a value after 'key=' or 'password:' and the
+    like, a Bearer or Basic credential, an sk-/gh*_/github_pat_ token, a URL's 'user:password@'.
+    Rotating it is not drift; a changed option name, host or command still is, and so is what
+    follows a secret: it ends where a shell, a path list, an option list or JSON reads more than
+    text. A value with no secret hashes exactly as before."""
+    text = _JSON_STRING.sub(lambda m: json.dumps(redact(json.loads(m.group()), pinned=True)),
                             json.dumps(value, sort_keys=True, default=str))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

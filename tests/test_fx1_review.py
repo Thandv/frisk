@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 from _home import fake_home
+from frisk import pin
 from frisk.cli import main
 from frisk.debug import redact
 
@@ -51,6 +52,35 @@ class ReviewCase(unittest.TestCase):
 
     def node(self, **extra: object) -> dict:
         return {"command": "node", "args": [str(self.server)], **extra}
+
+    def lock(self) -> bytes:
+        self.assertEqual(run(["lock", "--mcp-config", str(self.cfg), "--lockfile", self.lockfile])[0], 0)
+        return Path(self.lockfile).read_bytes()
+
+    def row(self) -> dict:
+        (row,) = [r for r in pin.verify_lock(pin.read_lock(self.lockfile)) if r["entry"] == f"{self.cfg}::srv"]
+        return row
+
+    def assert_drift(self, before: dict, after: dict, named: str) -> None:
+        """Lock `before`, change it to `after`: DRIFT naming the launch or the variable."""
+        self.entry(before)
+        self.lock()
+        self.entry(after)
+        row = self.row()
+        self.assertEqual(row["status"], "DRIFT")
+        if named == "launch":
+            self.assertEqual(row.get("launch"), "changed")
+        else:
+            self.assertEqual(row.get("env"), [named])
+
+    def assert_rotation_is_no_drift(self, spec: object) -> None:
+        """`spec` (a function of the secret): the lockfile holds nothing derived from it."""
+        self.entry(spec(CANARY + "1"))  # type: ignore[operator]
+        pinned = self.lock()
+        self.assertNotIn(CANARY.encode(), pinned)
+        self.entry(spec(CANARY + "2"))  # type: ignore[operator]
+        self.assertEqual(self.row()["status"], "ok")
+        self.assertEqual(self.lock(), pinned)
 
 
 class RedactionTimeTest(ReviewCase):
@@ -93,6 +123,132 @@ class RedactionTimeTest(ReviewCase):
                             ("gh" + "p_abckey=" + CANARY, "[REDACTED]=" + CANARY)):
             with self.subTest(text.replace(CANARY, "<canary>")):
                 self.assertEqual(redact(text), shown)
+
+
+
+class PinnedRedactionTest(ReviewCase):
+    """sev 4: FR-FX1 10 hashes a value after redacting it with the debug pattern, whose secret
+    ran to the next whitespace (or, in a URL, over anything but '/?#' up to the last '@'). So
+    a change inside that span was not drift, and the span could hold what decides what runs: a
+    shell command after ';' or in '$(...)', the next entries of a path list after 'name:', the
+    rest of a compact JSON argument, an option after 'token=basic ', a host after a backslash
+    (which WHATWG URL parsers, pip and uv read as the end of the host). Each of these was
+    DRIFT on main or before FR-FX1 10 and 'no drift' after it. A secret there now ends at the
+    first character a shell, a path list, an option list, JSON or a URL host part reads."""
+
+    def env(self, name: str, value: str) -> dict:
+        return self.node(env={name: value})
+
+    def git_config(self, key: str, value: str) -> dict:
+        return self.node(env={"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": key, "GIT_CONFIG_VALUE_0": value})
+
+    def sh(self, script: str) -> dict:
+        return {"command": "sh", "args": ["-c", script]}
+
+    def test_a_change_after_a_secret_is_drift(self) -> None:
+        run_payload = "touch${IFS}/tmp/frisk-review-" + CANARY  # runs where a shell reads the value
+        cases = {
+            "GIT_SSH_COMMAND: a command after an ssh option named like a key": (
+                self.env("GIT_SSH_COMMAND", "ssh -o StrictHostKeyChecking=no"),
+                self.env("GIT_SSH_COMMAND", "ssh -o StrictHostKeyChecking=no;" + run_payload), "GIT_SSH_COMMAND"),
+            "GIT_SSH_COMMAND: the library ssh loads": (
+                self.env("GIT_SSH_COMMAND", "ssh -o SecurityKeyProvider=/usr/lib/libsk.so"),
+                self.env("GIT_SSH_COMMAND", "ssh -o SecurityKeyProvider=/tmp/evil.so"), "GIT_SSH_COMMAND"),
+            "PYTHONPATH: the entries after a directory named like a token": (
+                self.env("PYTHONPATH", "/srv/tokenizers:/srv/app"),
+                self.env("PYTHONPATH", "/srv/tokenizers:/tmp/evil"), "PYTHONPATH"),
+            "NODE_PATH: the entries after a directory named like a key": (
+                self.env("NODE_PATH", "/opt/monkey:/opt/app/node_modules"),
+                self.env("NODE_PATH", "/opt/monkey:/tmp/evil"), "NODE_PATH"),
+            "LD_LIBRARY_PATH: the entries after a directory named like a secret": (
+                self.env("LD_LIBRARY_PATH", "/usr/lib/libsecret:/opt/vendor/lib"),
+                self.env("LD_LIBRARY_PATH", "/usr/lib/libsecret:/tmp/evil"), "LD_LIBRARY_PATH"),
+            "a credential helper: a command substitution as the password": (
+                self.git_config("credential.helper", "!f() { echo username=bot; echo password=s3cr3t; }; f"),
+                self.git_config("credential.helper", "!f() { echo username=bot; echo password=$(" + run_payload
+                                + "); }; f"), "GIT_CONFIG_VALUE_0"),
+            "JAVA_TOOL_OPTIONS: an option after 'token=basic '": (
+                self.env("JAVA_TOOL_OPTIONS", "-Dapi.token=basic -Xmx512m"),
+                self.env("JAVA_TOOL_OPTIONS", "-Dapi.token=basic -javaagent:/tmp/evil.jar"), "JAVA_TOOL_OPTIONS"),
+            "sh -c: a command after an assignment named like a key": (
+                self.sh("API_KEY=abc exec node /srv/app/server.js"),
+                self.sh("API_KEY=abc;" + run_payload + "& exec node /srv/app/server.js"), "launch"),
+            "sh -c: a command substitution as a Bearer token": (
+                self.sh("exec mcp-proxy --header 'Authorization: Bearer abc' https://h.example.invalid/sse"),
+                self.sh("exec mcp-proxy --header 'Authorization: Bearer $(" + run_payload + ")' "
+                        "https://h.example.invalid/sse"), "launch"),
+            "sh -c: a command substitution as a URL's user": (
+                self.sh("git clone https://tok@github.com/acme/x x && exec node x/server.js"),
+                self.sh("git clone https://$(touch${IFS}pwned)@github.com/acme/x x && exec node x/server.js"),
+                "launch"),
+            "the rest of a compact JSON argument after an apiKey": (
+                self.node(args=[str(self.server), '--config={"apiKey":"abc","plugin":"/srv/p.js"}']),
+                self.node(args=[str(self.server), '--config={"apiKey":"abc","plugin":"/tmp/evil.js"}']), "launch"),
+            "a URL argument: the host before a backslash, where clients end the host": (
+                {"command": "npx", "args": ["-y", "mcp-remote", "https://user:tok@mcp.example.invalid/sse"]},
+                {"command": "npx", "args": ["-y", "mcp-remote", "https://evil.example.invalid\\@mcp.example.invalid/sse"]},
+                "launch"),
+        }
+        for label, (before, after, named) in cases.items():
+            with self.subTest(label):
+                self.assert_drift(before, after, named)
+
+    def test_each_character_that_ends_a_secret_is_needed(self) -> None:
+        # One character each: a change that only it separates from the secret is drift.
+        ssh, sh = (lambda v: self.env("GIT_SSH_COMMAND", "ssh -o StrictHostKeyChecking=" + v)), self.sh
+        cases = {
+            ";": (ssh("no"), ssh("no;reboot"), "GIT_SSH_COMMAND"),
+            "|": (ssh("no"), ssh("no|reboot"), "GIT_SSH_COMMAND"),
+            "&": (sh("API_KEY=abc exec node /srv/app/server.js"),
+                  sh("API_KEY=abc&reboot& exec node /srv/app/server.js"), "launch"),
+            "$( )": (self.git_config("credential.helper", "!f() { echo password=s3cr3t; }; f"),
+                     self.git_config("credential.helper", "!f() { echo password=$(reboot); }; f"),
+                     "GIT_CONFIG_VALUE_0"),
+            "a backquote": (self.git_config("credential.helper", "!f() { echo password=s3cr3t; }; f"),
+                            self.git_config("credential.helper", "!f() { echo password=`reboot`; }; f"),
+                            "GIT_CONFIG_VALUE_0"),
+            ":": (self.env("PYTHONPATH", "/srv/tokenizers:lib:app"),
+                  self.env("PYTHONPATH", "/srv/tokenizers:lib:evil"), "PYTHONPATH"),
+            "a quote and ',' in JSON": (self.node(args=[str(self.server), '--config={"apiKey":"abc","plugin":"p.js"}']),
+                                        self.node(args=[str(self.server), '--config={"apiKey":"abc","plugin":"e.js"}']),
+                                        "launch"),
+            "$( ) as a URL's user": (sh("git clone https://tok@github.com/acme/x x && exec node x/server.js"),
+                                     sh("git clone https://$(reboot)@github.com/acme/x x && exec node x/server.js"),
+                                     "launch"),
+            "an option after a name's Basic": (
+                self.env("JAVA_TOOL_OPTIONS", "-Dapi.token=basic -Xmx512m"),
+                self.env("JAVA_TOOL_OPTIONS", "-Dapi.token=basic -Djava.system.class.loader=evil.Loader"),
+                "JAVA_TOOL_OPTIONS"),
+            "an option after a lone Basic": (
+                self.env("JAVA_TOOL_OPTIONS", "-Dauth=basic -Xmx512m"),
+                self.env("JAVA_TOOL_OPTIONS", "-Dauth=basic -Djava.system.class.loader=evil.Loader"),
+                "JAVA_TOOL_OPTIONS"),
+        }
+        for label, (before, after, named) in cases.items():
+            with self.subTest(label):
+                self.assert_drift(before, after, named)
+
+    def test_a_secret_beside_them_is_still_never_stored(self) -> None:
+        cases = {
+            "a password before ';' in a credential helper":
+                lambda s: self.git_config("credential.helper",
+                                          "!f() { echo username=bot; echo password=" + s + "; }; f"),
+            "an assignment before a command in sh -c":
+                lambda s: self.sh("API_KEY=" + s + " exec node /srv/app/server.js"),
+            "a URL's user:password in sh -c":
+                lambda s: self.sh("git clone https://bot:" + s + "@github.com/acme/x x && exec node x/server.js"),
+            "a Bearer token in a quoted header":
+                lambda s: self.sh("exec mcp-proxy --header 'Authorization: Bearer " + s + "' https://h.example.invalid/sse"),
+            "an apiKey in a compact JSON argument":
+                lambda s: self.node(args=[str(self.server), '--config={"apiKey":"' + s + '","plugin":"/srv/p.js"}']),
+            "an ssh option named like a key":
+                lambda s: self.env("GIT_SSH_COMMAND", "ssh -o StrictHostKeyChecking=" + s + " -i /keys/deploy"),
+            "-Dpassword before 'token=basic' and an option":
+                lambda s: self.env("JAVA_TOOL_OPTIONS", "-Dpassword=" + s + " -Dapi.token=basic -Xmx512m"),
+        }
+        for label, spec in cases.items():
+            with self.subTest(label):
+                self.assert_rotation_is_no_drift(spec)
 
 
 if __name__ == "__main__":

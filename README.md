@@ -322,17 +322,22 @@ never as a whole file:
   `://` is pinned the same way, and any other word (a local path, a git config key or
   option) as given. `PATH` is not pinned: it differs between shells and machines, so every
   lock would drift.
-- Before anything is hashed, frisk's redaction (the one its debug lines use) replaces each
-  secret in it with a fixed marker: a value after a `key`, `token`, `secret`, `password`,
-  `authorization` or `cookie` name and `=` or `:` (`--api-key=…`, `-Dpassword=…`,
-  `Authorization: …`), a `Bearer` or `Basic` credential, an `sk-…`, `ghp_…` or
-  `github_pat_…` token, and a URL's `user:password@`. So a secret in the command, an
+- Before anything is hashed, frisk's redaction (the patterns its debug lines use) replaces
+  each secret in it with a fixed marker: a value after a `key`, `token`, `secret`,
+  `password`, `authorization` or `cookie` name and `=` or `:` (`--api-key=…`,
+  `-Dpassword=…`, `Authorization: …`), a `Bearer` or `Basic` credential, an `sk-…`, `ghp_…`
+  or `github_pat_…` token, and a URL's `user:password@`. Here a secret ends at the first
+  character other than a letter, a digit or one of `_.+=%@!*-` (in a URL's
+  `user:password@`, also `:` and `~`): a `;`, `|`, `&`, `$`, `(`, `/`, `:`, `,`, a quote, a
+  backslash or whitespace ends it, so what follows a secret (a shell command, the next entry
+  of a path list, the next option, a host) is still pinned. So a secret in the command, an
   argument or a code-loading value is never stored, not even as a hash, and rotating it is
-  not drift, while a changed option name, host or command still is. A server URL frisk
+  not drift, while a changed option name, host, path or command still is. A server URL frisk
   cannot split is pinned only as `<unparsable URL>` and its length class. The redaction goes
   by those patterns: a secret in another form (a bare token as an argument of its own) is
-  pinned as written, and a value that merely follows such a name (`--keyfile=…`) is pinned
-  without its value.
+  pinned as written, so is the part of a secret after such a character (after a `/` in a
+  base64 value, `;ss` in `password=p;ss`), and a value that merely follows such a name
+  (`--keyfile=key.pem`) is pinned without it.
 
 So the rest of the file can change (Claude Code rewrites `~/.claude.json` all the time) and
 a rotated secret is not drift, while a changed command, argument, URL or env name (`~

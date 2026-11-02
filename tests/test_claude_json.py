@@ -743,7 +743,7 @@ class PinRedactionTest(ClaudeJsonCase):
         for label, (spec, _change, named) in self.cases.items():
             with self.subTest(label):
                 self.entry(spec(CANARY))
-                with mock.patch("frisk.sources.redact", lambda text: text), \
+                with mock.patch("frisk.sources.redact", lambda text, pinned=False: text), \
                         mock.patch("frisk.sources._unparsable", lambda text: text):
                     self.lock()
                 code, out, err = run(["verify", "--lockfile", self.lockfile])
