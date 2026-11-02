@@ -125,9 +125,10 @@ CODE_RULES: list[tuple[str, str, str, re.Pattern[str] | PerCommand, str]] = [
         r"|\b(?:bash|sh|zsh)\s+(?:<\(|-c\s+[\"']?\$\()\s*(?:curl|wget)\b"),
      "pipe-to-shell remote installer (curl|wget ... | sh)"),
     ("rce.eval_b64", "rce", "block",
-     # Within 400 characters of the same parentheses; the window stops at another eval( or
-     # exec(, which then matches the same decode.
-     _r(r"(?<![.\w])(eval|exec)\s*\(\s*" + _not_at(r"(?<![.\w])(?:eval|exec)\s*\(", "e", ")") + "{0,400}"
+     # Within 400 characters of the same parentheses, whitespace included (a separate \s*
+     # before the window would try the window from every point of a whitespace run); the
+     # window stops at another eval( or exec(, which then matches the same decode.
+     _r(r"(?<![.\w])(eval|exec)\s*\(" + _not_at(r"(?<![.\w])(?:eval|exec)\s*\(", "e", ")") + "{0,400}"
         r"b(ase)?64[._]?decode"),
      "execution of base64-decoded payload"),
     ("rce.python_exec", "rce", "block",

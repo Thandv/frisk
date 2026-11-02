@@ -40,6 +40,7 @@ SEEDS: dict[str, tuple[str, ...]] = {
     "rce.pipe_installer": (CURL + " ", CURL + " |", CURL + " x | ", CURL + " x | sudo -a ", CURL + " x | a/",
                            CURL + " \\\n", "ba" + "sh <(", "sh -c ", "wg" + "et x |" + "/" * 30, "| "),
     "rce.eval_b64": (EVAL + "(", EXEC + "(", EVAL + "( b", EVAL + "(base64", EVAL + "(b64.", EVAL + "(" + "x" * 395,
+                     EVAL + "(" + " " * 300, EXEC + "(" + "\n" * 300,
                      EVAL + "(\n", "b64", "e"),
     "rce.python_exec": (EXEC + " ", "os.sys" + "tem ", EVAL + "  ", "os.", "e"),
     "rce.shell_true": ("subprocess.run(", "subprocess.run(" + "x" * 385, "subprocess.Popen( shell",
