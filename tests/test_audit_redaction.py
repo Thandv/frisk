@@ -312,6 +312,54 @@ class GitTargetCredentialTest(unittest.TestCase):
                 self.assertNotIn(CANARY, out)
         self.assertEqual(git.urls[-1], self.CLEAN)  # verify re-clones the clean URL; git's helper supplies auth
 
+    def test_the_github_shorthand_loses_its_query_and_fragment_too(self) -> None:
+        # FR-E4 final review S7: the shorthand is cloned as https://github.com/..., but only
+        # '://' forms lost their query and fragment, so it kept them in every output, the
+        # lockfile, git's own failure message and frisk-mcp's source.
+        from frisk.mcp_server import handle
+        clean = "github.com/acme/tool"
+        for target in (clean + "?t=" + CANARY, clean + "#" + CANARY, "GitHub.com/acme/tool?t=" + CANARY):
+            shown = target.split("?")[0].split("#")[0]
+            with self.subTest(target=target.replace(CANARY, "<canary>")):
+                git = FakeGit()
+                for flags in ([], ["--json"], ["--sarif"], ["-q"]):
+                    code, out = self.outputs([*flags, target], git)
+                    self.assertEqual(code, 0)
+                    self.assertNotIn(CANARY, out)
+                self.assertIn(f"verdict:   PASS    0 blocking · 0 warnings · 0 total  ({shown})",
+                              self.outputs([target], git)[1])
+                self.assertEqual(self.outputs(["lock", target, "--lockfile", self.lockfile], git)[0], 0)
+                data = Path(self.lockfile).read_bytes()
+                self.assertNotIn(CANARY.encode(), data)
+                self.assertEqual(json.loads(data)["entries"][shown]["recompute"]["value"], shown)
+                for flags in (["verify"], ["verify", "--json"]):
+                    code, out = self.outputs([*flags, "--lockfile", self.lockfile], git)
+                    self.assertEqual(code, 0)
+                    self.assertNotIn(CANARY, out)
+                self.assertTrue(git.urls[-1].endswith(shown))  # verify re-clones the clean target
+                code, out = self.outputs([target], FakeGit(fail=True))
+                self.assertEqual(code, 2)
+                self.assertNotIn(CANARY, out)
+                with mock.patch("frisk.sources.subprocess.run", git):
+                    resp = handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": "scan_artifact", "arguments": {"source": target}}})
+                self.assertEqual(json.loads(resp["result"]["content"][0]["text"])["source"], shown)
+
+    def test_a_local_path_named_like_the_shorthand_keeps_its_name(self) -> None:
+        # The other side of S7's fix: an existing path is no URL, so frisk lock pins it as
+        # named and frisk verify reads it in place, never cloning github.com/acme/tool instead.
+        here = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, here)
+        local = "github.com/acme/tool?v=2"
+        Path(local).mkdir(parents=True)
+        Path(local, "SKILL.md").write_text("hello\n", encoding="utf-8")
+        git = FakeGit()
+        self.assertEqual(self.outputs(["lock", local, "--lockfile", self.lockfile], git)[0], 0)
+        self.assertEqual(list(pin.read_lock(self.lockfile)["entries"]), [local])
+        self.assertEqual(self.outputs(["verify", "--lockfile", self.lockfile], git)[0], 0)
+        self.assertEqual(git.urls, [])
+
     def test_two_repositories_differing_by_path_stay_apart(self) -> None:
         a = "https://" + CANARY + "@git.example.invalid/acme/a.git"
         b = "https://" + CANARY + "@git.example.invalid/acme/b.git"

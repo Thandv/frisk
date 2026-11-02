@@ -48,7 +48,8 @@ def display_target(target: str) -> str:
     fragment, so a token in it is never shown or stored; scheme, host, port and path stay,
     so two repositories stay apart. An ssh username (git@) is kept, since ssh needs it and it
     is no secret, but a password beside it is dropped. A URL whose host part cannot be told
-    from a password is '<unparsable URL>'. Anything else, a local path, is unchanged."""
+    from a password is '<unparsable URL>'. The github.com/owner/repo shorthand, cloned as an
+    https URL, loses its query and fragment too. Anything else, a local path, is unchanged."""
     if "://" in target:
         parts = _split_url(target)
         if parts is None:
@@ -56,6 +57,8 @@ def display_target(target: str) -> str:
         user, _, host = parts.netloc.rpartition("@")
         kept = user.split(":", 1)[0] + "@" if parts.scheme == "ssh" and user else ""
         return f"{parts.scheme}://{kept}{host}{parts.path}"
+    if target.strip().lower().startswith("github.com/") and not os.path.exists(target):  # as is_git_url reads it
+        return target.split("?", 1)[0].split("#", 1)[0]
     user, at, rest = target.partition("@")
     if at and ":" in user and ":" in rest and not os.path.exists(target):  # scp-like 'user:password@host:path'
         return user.split(":", 1)[0] + "@" + rest

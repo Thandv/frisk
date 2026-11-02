@@ -97,7 +97,8 @@ or stores its credentials: the report label (text, `--json`, `-q`), error messag
 lines, `frisk-mcp` results and the lockfile all show it without `user:token@`, query or
 fragment (`https://git.example.com/acme/tool.git`). Scheme, host, port and path stay, so
 two repositories stay apart; an ssh username such as `git@` stays too, a password beside it
-does not. If a clone of such a URL fails, git's own message is not shown, since it could
+does not. The `github.com/owner/repo` shorthand, cloned as an https URL, loses its query
+and fragment the same way. If a clone of such a URL fails, git's own message is not shown, since it could
 echo the token; a clone that has not finished after two minutes stops with `git clone
 timed out after 120 s` (exit code 2), never with the git command it ran.
 
