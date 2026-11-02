@@ -323,6 +323,29 @@ class WrapperTest(AuditCase):
                         encoding="utf-8")
         self.assert_unscanned(shim, "a node package")
 
+    def test_a_file_named_node_modules_is_audited_like_any_file(self) -> None:
+        # FR-E4 final review S1: a regular file named node_modules as the command raised
+        # IndexError, so the whole audit and frisk lock ended in a traceback.
+        plain = self.home / "srv" / "node_modules"
+        nested = self.home / "lib" / "node_modules" / "acme" / "node_modules"  # a file inside the package acme
+        for path, text in ((plain, "#!/bin/sh\n" + INSTALLER + "\n"), (nested, "#!/bin/sh\necho acme\n")):
+            path.parent.mkdir(parents=True)
+            path.write_text(text, encoding="utf-8")
+        cfg = self.config({"plain": {"command": str(plain)}, "nested": {"command": str(nested)},
+                           "ok": self.local("ok")})
+        code, out = run(["--mcp-config", cfg])
+        self.assertIn("  [BLOCK] plain                  local  local executable/script\n", out)
+        self.assertIn("  [SKIP ] nested                 wrapper  console-script wrapper or bin shim for the node "
+                      "package 'acme', which frisk does not scan\n", out)
+        self.assertIn("[BLOCK] rce            plain::node_modules:2  ", out)
+        self.assertEqual(code, 1)
+        doc = json.loads(run(["--json", "--mcp-config", cfg])[1])
+        self.assertEqual([(s["name"], s["kind"], s["verdict"]) for s in doc["servers"]],
+                         [("plain", "local", "BLOCK"), ("nested", "wrapper", None), ("ok", "local", "PASS")])
+        lockfile = str(self.tmp / "lock.json")
+        self.assertEqual(run(["lock", "--mcp-config", cfg, "--lockfile", lockfile])[0], 0)
+        self.assertEqual(run(["verify", "--lockfile", lockfile])[0], 0)
+
     def test_a_payload_in_a_wrapper_still_blocks(self) -> None:
         command = self.uv_tool(self.UV_WRAPPER + INSTALLER + "\n")
         cfg = self.config({"tool": {"command": str(command)}})

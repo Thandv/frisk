@@ -449,8 +449,9 @@ def _wrapped_package(exe: Path) -> str:
     shell shim that execs node (pnpm, cmd-shim)."""
     real = Path(os.path.realpath(exe))
     parts = real.parts
-    if "node_modules" in parts:
-        i = len(parts) - 1 - parts[::-1].index("node_modules")
+    dirs = parts[:-1]  # the directories only: a regular file can be named node_modules too
+    if "node_modules" in dirs:
+        i = len(dirs) - 1 - dirs[::-1].index("node_modules")
         package = "/".join(parts[i + 1:i + 3] if parts[i + 1].startswith("@") else parts[i + 1:i + 2])
         if package != ".bin" and i + 2 < len(parts):
             return f"the node package '{package}'"
