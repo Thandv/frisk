@@ -423,7 +423,8 @@ The proxy launches the real server, relays the protocol, and enforces:
 - a tool whose description **changed** since first seen is **flagged** (possible rug pull);
 - prompt-injection detected in a **tool result** gets a visible warning prepended before it reaches the model.
 
-It fails closed: nothing it could not inspect reaches the client. A tool entry that is
+It fails closed on what it inspects (each tool's name, description and input schema in a
+tool list, and the text items of a tool result's `content`). A tool entry that is
 not an object with a string `name` and a string `description` (a missing or null
 description counts as empty), or whose inspection raises, is dropped and the other tools
 are still judged; a tool-result content item that is not an object, or a text item whose
@@ -431,7 +432,10 @@ are still judged; a tool-result content item that is not an object, or a text it
 (either one is not a list, say), the client gets a JSON-RPC error for that id, code
 `-32603`, `frisk: inspection failed`, instead of the message. A JSON-RPC batch (an array)
 is inspected message by message, and a server line that is not JSON is dropped. Each of
-these is logged.
+these is logged. Everything else is relayed as sent, uninspected: other tool fields
+(`title`, `annotations`, `outputSchema`), `structuredContent`, content items that are not
+text, resources, prompts, the server's `instructions`, and requests the server sends the
+client (such as `sampling/createMessage`).
 
 A tool result longer than frisk's text limit (2 MiB characters) is still delivered,
 prefixed `[frisk: partially scanned — ...]`: its start and end are pattern-matched and all of
