@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -264,12 +265,17 @@ def _cmd_proxy(argv: list[str]) -> int:
                                 description="Enforce frisk checks at runtime between an MCP client and server.")
     p.add_argument("--log", metavar="FILE", help="append proxy events to a file (default: stderr)")
     args = p.parse_args(opts)
-    logf = open(args.log, "a", encoding="utf-8") if args.log else sys.stderr
-    try:
-        return proxy.Proxy(server_cmd, log=logf).run()
-    except FileNotFoundError as e:
-        print(f"frisk proxy: cannot launch server: {e}", file=sys.stderr)
-        return 2
+    with contextlib.ExitStack() as stack:  # the --log file is closed on every path
+        try:
+            logf = stack.enter_context(open(args.log, "a", encoding="utf-8")) if args.log else sys.stderr
+        except OSError as e:
+            print(f"frisk proxy: cannot open the log file: {printable(str(e))}", file=sys.stderr)
+            return 2
+        try:
+            return proxy.Proxy(server_cmd, log=logf).run()
+        except proxy.LaunchError as e:  # not found, not executable, ...
+            print(f"frisk proxy: cannot launch server: {printable(str(e))}", file=sys.stderr)
+            return 2
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -432,6 +432,16 @@ are still judged; a tool-result content item that is not an object, or a text it
 is inspected message by message, and a server line that is not JSON is dropped. Each of
 these is logged.
 
+A tool result longer than frisk's text limit (2 MiB characters) is still delivered,
+prefixed `[frisk: partially scanned — ...]`: its start and end are pattern-matched and all of
+it is checked for hidden Unicode. Bytes from the server that are not UTF-8 never stop the
+relay (that line is dropped). The real server is stopped and reaped however the proxy
+ends: when the server exits, when the client closes the proxy's input (the server gets
+end of input and 5 s to exit, then SIGTERM, then SIGKILL after 5 s more), when the client
+stops reading (`client gone`), or on SIGTERM or SIGINT. The proxy exits with the server's
+status (128 + the signal number if a signal ended it). A server command that cannot be
+started, or a `--log` file that cannot be opened, is one line on stderr and exit code 2.
+
 Events are logged to stderr (add `--log frisk-proxy.log` to keep a file).
 
 ## Use it as an MCP server (let your agent vet *before* it installs)
