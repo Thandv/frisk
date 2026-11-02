@@ -97,9 +97,11 @@ or stores its credentials: the report label (text, `--json`, `-q`), error messag
 lines, `frisk-mcp` results and the lockfile all show it without `user:token@`, query or
 fragment (`https://git.example.com/acme/tool.git`). Scheme, host, port and path stay, so
 two repositories stay apart; an ssh username such as `git@` stays too, a password beside it
-does not. If a clone of such a URL fails, git's own message is not shown, since it could
-echo the token; a clone that has not finished after two minutes stops with `git clone
-timed out after 120 s` (exit code 2), never with the git command it ran.
+does not. The `github.com/owner/repo` shorthand, in any letter case, is cloned as
+`https://github.com/owner/repo` and loses its query and fragment the same way. If a clone
+of such a URL fails, git's own message is not shown, since it could echo the token; a
+clone that has not finished after two minutes stops with `git clone timed out after 120 s`
+(exit code 2), never with the git command it ran.
 
 ### What was not scanned (coverage)
 
@@ -184,7 +186,8 @@ key that a client running the command would ignore never hides that command: bes
 `command`, a `url` that is not a string warns as `<unparsable URL>`, and a `cwd` that is
 not a string is ignored. `--json` adds `servers`, one entry per audited server: `name`,
 `kind`, `status` (`scanned` or `skipped`), `reason` (the detail shown above, with a cached
-package's unscanned dependencies) and `verdict` (`null` when skipped).
+package's unscanned dependencies) and `verdict` (`null` when skipped, unless the server is
+a wrapper whose own file has findings: then their verdict, as on its text line).
 
 A config in which frisk finds no servers is not clean either: it is WARN with
 `coverage.no_servers`, `no MCP servers found in <file> (frisk reads 'mcpServers' and
@@ -241,7 +244,8 @@ How each server's source is found, the way the client launches it:
   execs node; or a file inside a node package, where an npm bin link points), the server
   is `wrapper` and not scanned: the package that really runs is not read, so it warns
   instead of passing on the wrapper alone. The wrapper itself is still read, so a payload
-  in it blocks.
+  in it blocks: when the wrapper has findings, the server's line shows their verdict
+  (`[BLOCK]` for a payload) instead of `[SKIP ]`, and it still counts as not scanned.
 
 Relative paths resolve against the server's `cwd` in the config or, for a project server in
 a `.claude.json` without one, against its project directory (Claude Code starts it there);
@@ -258,10 +262,11 @@ some providers put the access key in the path. A whole command line
 pasted into `command` shows only its program (`npx …`), and env values and headers are
 never read. A URL whose host part cannot be told apart from its password
 (an unencoded `#`, `?` or `/` in the password, a port that is not a number, an `@` after
-the host, or anything but a host name or address before the path) is shown as
-`<unparsable URL>`. In the text report (and `frisk verify`'s), control
-characters and the hidden Unicode frisk reports, in a server name, a cached package's
-version or dependencies, a location, a finding path, a finding's excerpt (the scanned line
+the host, a backslash in the host part, where clients end the host, or anything but a host
+name or address before the path) is shown as `<unparsable URL>`. In the text report (and
+`frisk verify`'s), control characters and the hidden Unicode frisk reports, in a server
+name, a cached package's version or dependencies, a location, a finding path, a finding's
+excerpt (the scanned line
 itself), the target names and error messages, are shown as escapes (`\x1b`, `\u202e`), so
 neither a config nor a scanned package can rewrite what your terminal shows; a lone
 surrogate (`\ud800`) is shown the same way. `--json` and `--sarif` escape them as JSON does.
@@ -299,10 +304,50 @@ never as a whole file:
   a console-script wrapper as its own file (not the package it runs, which is not read).
 - The values of env variables that make a runtime load code are pinned too, as hashes:
   `NODE_OPTIONS`, `NODE_PATH`, `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, `LD_PRELOAD`,
-  `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` (and
-  any other `DYLD_*`), `PERL5OPT`, `PERL5LIB`, `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`,
-  `_JAVA_OPTIONS`, `BASH_ENV` and `ENV`. A changed value is DRIFT and `frisk verify` names
-  the variable (`~ NODE_OPTIONS changed`), never its value.
+  `LD_LIBRARY_PATH`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`,
+  `DYLD_FRAMEWORK_PATH` (and any other `DYLD_*`), `PERL5OPT`, `PERL5LIB`, `RUBYOPT`,
+  `RUBYLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `BASH_ENV` and `ENV`; the program git
+  runs for ssh, where git finds its own programs, and git configuration given in the
+  environment (`GIT_SSH_COMMAND`, `GIT_EXEC_PATH` and any `GIT_CONFIG_*`); and where npm, pip
+  or uv find packages: the package index (`npm_config_registry`, `NPM_CONFIG_REGISTRY`,
+  `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`, `UV_INDEX`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`,
+  `UV_DEFAULT_INDEX`), extra find-links locations (`PIP_FIND_LINKS`, `UV_FIND_LINKS`) and
+  npm's user config file (`npm_config_userconfig`, `NPM_CONFIG_USERCONFIG`). A changed value
+  is DRIFT and `frisk verify` names the variable (`~ NODE_OPTIONS changed`), never its
+  value. An index URL (each one, when several are separated by whitespace, after uv's
+  `name=` if it has one) is pinned by its scheme, host, port and path only, so a token in
+  its `user:token@`, query or fragment is never stored, not even as a hash: rotating it is
+  not drift, while a changed host or path is. A backslash ends the host part of an http(s)
+  URL, as pip, uv and npm read it (`https://pypi.org\simple` is fetched from `pypi.org`,
+  `https://evil\@pypi.org/simple` from `evil`), and stays in the path. A word there that is
+  not such a URL, or whose host part cannot be told from a password, is pinned only as
+  `<unparsable URL>` and its length class, never as written. In a find-links value, each
+  word holding `://` is pinned the same way, and any other word (a local path) as given. A
+  `GIT_CONFIG_*` value is pinned as written, after the redaction below, which drops a URL's
+  `user:token@`: git runs some values through the shell (`core.sshCommand`, a `!` credential
+  helper), where a URL's query or a quoted URL can hold a command. `PATH` is not pinned: it
+  differs between shells and machines, so every lock would drift.
+- Before anything is hashed, frisk's redaction (the patterns its debug lines use) replaces
+  each secret in it with a fixed marker: a value after a `key`, `token`, `secret`,
+  `password`, `authorization` or `cookie` name and `=` or `:` (`--api-key=…`,
+  `-Dpassword=…`, `Authorization: …`; never after `==`, so a version pin such as
+  `keyring==24.0` stays pinned), a `Bearer` or `Basic` credential, an `sk-…`, `ghp_…`
+  or `github_pat_…` token, and a URL's `user:password@`. Here a secret ends at the first
+  character other than a letter, a digit or one of `_.+=%@!*-` (in a URL's
+  `user:password@`, also `:` and `~`): a `;`, `|`, `&`, `$`, `(`, `/`, `:`, `,`, a quote, a
+  backslash or whitespace ends it, so what follows a secret (a shell command, the next entry
+  of a path list, the next option, a host) is still pinned. So a secret in the command, an
+  argument or a code-loading value is never stored, not even as a hash, and rotating it is
+  not drift, while a changed option name, host, path or command still is. A server URL frisk
+  cannot split (a port that is not a number, as when a password holds an unencoded `/`, `?`
+  or `#`) is pinned only as `<unparsable URL>` and its length class; a backslash ends its
+  host part as in an index URL, and one with an `@` only after its host
+  (`https://server.example/@owner/server`, an email in the query) is pinned by its host and
+  path like any other. The redaction goes
+  by those patterns: a secret in another form (a bare token as an argument of its own) is
+  pinned as written, so is the part of a secret after such a character (after a `/` in a
+  base64 value, `;ss` in `password=p;ss`), and a value that merely follows such a name
+  (`--keyfile=key.pem`) is pinned without it.
 
 So the rest of the file can change (Claude Code rewrites `~/.claude.json` all the time) and
 a rotated secret is not drift, while a changed command, argument, URL or env name (`~
@@ -315,8 +360,10 @@ server`. A package server whose older pin had taken an option's value or a subco
 the package name (`uv run --directory …`, `uvx --python 3.12 …`, `pipx run …`,
 `npx --registry …`) reports DRIFT once with no changed file: run `frisk lock` again. A
 server that sets one of the code-loading variables above, locked before their values were
-pinned, reports DRIFT once with `~ NODE_OPTIONS changed` (or the variable it sets): lock it
-again.
+pinned (or before an index URL was pinned without its credentials), reports DRIFT once with
+`~ NODE_OPTIONS changed` (or the variable it sets): lock it again. So does a server whose
+pinned values held a secret or a URL frisk cannot split, locked before they were redacted
+(`~ changed: how it starts`, or the variable).
 
 A git URL is pinned without its credentials, and `frisk verify` re-clones that clean URL:
 for a private repository, git's own credential helper (or an ssh key) supplies the

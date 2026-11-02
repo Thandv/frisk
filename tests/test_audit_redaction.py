@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -21,7 +22,7 @@ from frisk import pin, report
 from frisk.cli import main
 from frisk.engine import ScanResult
 from frisk.report import AuditRecord, audit_text
-from frisk.sources import ServerRef, display_ref, display_target, display_url
+from frisk.sources import ServerRef, display_ref, display_target, display_url, is_git_url
 
 CANARY = "c4n" + "ary-" + "51f0" + "e2d7"
 
@@ -311,6 +312,72 @@ class GitTargetCredentialTest(unittest.TestCase):
                 self.assertNotIn(CANARY, out)
         self.assertEqual(git.urls[-1], self.CLEAN)  # verify re-clones the clean URL; git's helper supplies auth
 
+    def test_the_github_shorthand_loses_its_query_and_fragment_too(self) -> None:
+        # FR-E4 final review S7: the shorthand is cloned as https://github.com/..., but only
+        # '://' forms lost their query and fragment, so it kept them in every output, the
+        # lockfile, git's own failure message and frisk-mcp's source.
+        from frisk.mcp_server import handle
+        clean = "github.com/acme/tool"
+        for target in (clean + "?t=" + CANARY, clean + "#" + CANARY, "GitHub.com/acme/tool?t=" + CANARY):
+            shown = target.split("?")[0].split("#")[0]
+            with self.subTest(target=target.replace(CANARY, "<canary>")):
+                git = FakeGit()
+                for flags in ([], ["--json"], ["--sarif"], ["-q"]):
+                    code, out = self.outputs([*flags, target], git)
+                    self.assertEqual(code, 0)
+                    self.assertNotIn(CANARY, out)
+                self.assertIn(f"verdict:   PASS    0 blocking · 0 warnings · 0 total  ({shown})",
+                              self.outputs([target], git)[1])
+                self.assertEqual(self.outputs(["lock", target, "--lockfile", self.lockfile], git)[0], 0)
+                data = Path(self.lockfile).read_bytes()
+                self.assertNotIn(CANARY.encode(), data)
+                self.assertEqual(json.loads(data)["entries"][shown]["recompute"]["value"], shown)
+                for flags in (["verify"], ["verify", "--json"]):
+                    code, out = self.outputs([*flags, "--lockfile", self.lockfile], git)
+                    self.assertEqual(code, 0)
+                    self.assertNotIn(CANARY, out)
+                # verify re-clones the clean target (FR-FX1 9: from github.com in any case; was
+                # 'GitHub.com/acme/tool' as typed for the mixed-case one)
+                self.assertEqual(git.urls[-1], "https://github.com/acme/tool")
+                code, out = self.outputs([target], FakeGit(fail=True))
+                self.assertEqual(code, 2)
+                self.assertNotIn(CANARY, out)
+                with mock.patch("frisk.sources.subprocess.run", git):
+                    resp = handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": "scan_artifact", "arguments": {"source": target}}})
+                self.assertEqual(json.loads(resp["result"]["content"][0]["text"])["source"], shown)
+
+    def test_a_local_path_named_like_the_shorthand_keeps_its_name(self) -> None:
+        # The other side of S7's fix: an existing path is no URL, so frisk lock pins it as
+        # named and frisk verify reads it in place, never cloning github.com/acme/tool instead.
+        here = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, here)
+        local = "github.com/acme/tool?v=2"
+        Path(local).mkdir(parents=True)
+        Path(local, "SKILL.md").write_text("hello\n", encoding="utf-8")
+        git = FakeGit()
+        self.assertEqual(self.outputs(["lock", local, "--lockfile", self.lockfile], git)[0], 0)
+        self.assertEqual(list(pin.read_lock(self.lockfile)["entries"]), [local])
+        self.assertEqual(self.outputs(["verify", "--lockfile", self.lockfile], git)[0], 0)
+        self.assertEqual(git.urls, [])
+
+    def test_a_mixed_case_shorthand_is_cloned_from_github(self) -> None:
+        # FR-FX1 9: is_git_url reads the shorthand in any case, but only a lowercase
+        # 'github.com/' was cloned as https://github.com/...; 'GitHub.com/Acme/Tool' went to git
+        # as written, which git reads as a local path and fails on. The host is lowercased;
+        # owner and repository keep their case.
+        git = FakeGit()
+        for target, cloned in (("GitHub.com/Acme/Tool", "https://github.com/Acme/Tool"),
+                               (" GITHUB.COM/Acme/Tool.git", "https://github.com/Acme/Tool.git"),
+                               ("github.com/acme/tool", "https://github.com/acme/tool")):
+            with self.subTest(target):
+                self.assertEqual(self.outputs([target], git)[0], 0)
+                self.assertEqual(git.urls[-1], cloned)
+        self.assertEqual(self.outputs(["lock", "GitHub.com/Acme/Tool", "--lockfile", self.lockfile], git)[0], 0)
+        self.assertEqual(self.outputs(["verify", "--lockfile", self.lockfile], git)[0], 0)
+        self.assertEqual(git.urls[-1], "https://github.com/Acme/Tool")
+
     def test_two_repositories_differing_by_path_stay_apart(self) -> None:
         a = "https://" + CANARY + "@git.example.invalid/acme/a.git"
         b = "https://" + CANARY + "@git.example.invalid/acme/b.git"
@@ -379,6 +446,32 @@ class GitTargetCredentialTest(unittest.TestCase):
                 self.assertNotIn(CANARY, text)
                 if not git.fail:
                     self.assertEqual(json.loads(text)["source"], self.CLEAN)
+
+
+class GitTargetCheckTimeTest(unittest.TestCase):
+    """FR-E4 final review S5: is_git_url tried 'git@<host>:<path>' split at every ':', so a
+    long target took quadratic time: 20,000 characters about 2 s of CPU, 1 MiB one to two
+    hours. frisk verify checks each lockfile target this way (a committed lockfile could
+    stall CI), and so do a CLI target and a frisk-mcp source. Now about 10 ms for 1 MiB.
+    The NUL byte, which a lockfile or frisk-mcp value can carry, makes Path.exists return
+    False on every Python, so the pattern runs (without it, Python 3.9 to 3.13 raise 'File
+    name too long' first). CPU time, so machine load does not matter; 2 s is a wide margin."""
+
+    def test_a_long_target_is_checked_in_linear_time(self) -> None:
+        for label, target in (("a run of ':'", "git@" + ":" * (1 << 20) + "\0 x"),
+                              ("'a:' repeated", "git@" + "a:" * (1 << 19) + "\0 x")):
+            with self.subTest(label):
+                t0 = time.process_time()
+                self.assertFalse(is_git_url(target))
+                self.assertLess(time.process_time() - t0, 2.0)
+
+    def test_the_same_targets_are_git_urls(self) -> None:
+        for target, expected in (("git@git.example.invalid:acme/tool.git", True),
+                                 ("git@[::1]:acme/tool.git", True),  # a host that holds ':'
+                                 ("git@git.example.invalid:", False), ("git@:acme/tool.git", False),
+                                 ("git@git.example.invalid acme:tool.git", False)):
+            with self.subTest(target):
+                self.assertEqual(is_git_url(target), expected)
 
 
 if __name__ == "__main__":

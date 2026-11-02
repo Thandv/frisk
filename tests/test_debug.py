@@ -93,13 +93,17 @@ class DebugLogTests(unittest.TestCase):
         self.assertIn("not an MCP config (unreadable JSON) error=JSONDecodeError", err)
 
     def test_secrets_are_redacted(self):
+        # FR-FX1 10 added a URL's userinfo and a Basic credential (frisk lock redacts with the
+        # same patterns before hashing).
         shapes = ("key=v1secret", '{"api_key": "v2secret"}',
-                  "Authorization: Bearer v3secret", "sk-v4secret")
+                  "Authorization: Bearer v3secret", "sk-v4secret",
+                  "https://token:v5secret@h.example.invalid/x", "Basic v6secret")
         err = self._stderr("1", lambda: [logging.getLogger("frisk.test").debug("x %s", s)
                                          for s in shapes])
-        self.assertEqual(err.count("[REDACTED]"), 4)
-        for s in ("v1secret", "v2secret", "v3secret", "v4secret"):
+        self.assertEqual(err.count("[REDACTED]"), 6)
+        for s in ("v1secret", "v2secret", "v3secret", "v4secret", "v5secret", "v6secret"):
             self.assertNotIn(s, err)
+        self.assertIn("https://[REDACTED]@h.example.invalid/x", err)
 
 
 if __name__ == "__main__":

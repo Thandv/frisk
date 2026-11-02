@@ -24,12 +24,15 @@ from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
 from . import pkgcache
-from .debug import log as _root_log, ms_since
+from .debug import log as _root_log, ms_since, redact
 from .rules import CODE_EXTS
 
 log = _root_log.getChild("sources")
 
-_GIT_URL = re.compile(r"^(https?://[^\s]+?(\.git)?|git@[^\s]+:[^\s]+|github\.com/[^\s/]+/[^\s/]+)$",
+# In 'git@<host>:<path>' the first ':' after the host's first character ends the host. That
+# leaves one split to try, so the check is linear ('git@[^\s]+:' tried one at every ':',
+# quadratic in a long target), and it accepts exactly the same strings.
+_GIT_URL = re.compile(r"^(https?://[^\s]+?(\.git)?|git@[^\s][^\s:]*:[^\s]+|github\.com/[^\s/]+/[^\s/]+)$",
                       re.IGNORECASE)
 
 
@@ -45,7 +48,8 @@ def display_target(target: str) -> str:
     fragment, so a token in it is never shown or stored; scheme, host, port and path stay,
     so two repositories stay apart. An ssh username (git@) is kept, since ssh needs it and it
     is no secret, but a password beside it is dropped. A URL whose host part cannot be told
-    from a password is '<unparsable URL>'. Anything else, a local path, is unchanged."""
+    from a password is '<unparsable URL>'. The github.com/owner/repo shorthand, cloned as an
+    https URL, loses its query and fragment too. Anything else, a local path, is unchanged."""
     if "://" in target:
         parts = _split_url(target)
         if parts is None:
@@ -53,6 +57,8 @@ def display_target(target: str) -> str:
         user, _, host = parts.netloc.rpartition("@")
         kept = user.split(":", 1)[0] + "@" if parts.scheme == "ssh" and user else ""
         return f"{parts.scheme}://{kept}{host}{parts.path}"
+    if target.strip().lower().startswith("github.com/") and not os.path.exists(target):  # as is_git_url reads it
+        return target.split("?", 1)[0].split("#", 1)[0]
     user, at, rest = target.partition("@")
     if at and ":" in user and ":" in rest and not os.path.exists(target):  # scp-like 'user:password@host:path'
         return user.split(":", 1)[0] + "@" + rest
@@ -60,9 +66,11 @@ def display_target(target: str) -> str:
 
 
 def _normalize_git(url: str) -> str:
+    """The URL git clones: the github.com/owner/repo shorthand, in any case (as is_git_url
+    reads it), becomes https://github.com/owner/repo, owner and repository as written."""
     url = url.strip()
-    if url.startswith("github.com/"):
-        return "https://" + url
+    if url.lower().startswith("github.com/"):
+        return "https://github.com/" + url[len("github.com/"):]
     return url
 
 
@@ -126,14 +134,31 @@ _RELATIVE = "relative path and no absolute 'cwd' in the config: cannot tell whic
 _NOT_CACHED = "not in local cache; frisk does not download"
 # Where parse_mcp_config looks for servers; other config formats are not read.
 SERVER_KEYS = "'mcpServers' and 'servers', at the top level and in each 'projects' entry"
-# Env variables that make a runtime load code (options, module and library paths, preloads,
-# startup files): frisk lock pins their values (as hashes); every other env value may be a
-# secret and is never read. Any DYLD_* variable counts too.
+# Env variables that decide what code runs: a runtime's options, module and library paths,
+# preloads and startup files; the program git runs for ssh, where git finds its own programs
+# and git configuration; where npm, pip or uv find packages. frisk lock pins their values, as
+# hashes only, and a URL in them without its credentials (_env_pin); every other env value
+# may be a secret and is never read. Any variable named with a CODE_LOADING_PREFIXES prefix
+# counts too. PATH does not: it differs between shells and machines, so every lock would drift.
 CODE_LOADING_ENV = frozenset({
     "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH",
     "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "PERL5OPT", "PERL5LIB", "RUBYOPT",
-    "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "BASH_ENV", "ENV",
+    "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "BASH_ENV", "ENV", "LD_AUDIT",
+    "GIT_SSH_COMMAND", "GIT_EXEC_PATH",
+    "npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "UV_INDEX_URL",
+    "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX", "PIP_FIND_LINKS", "UV_FIND_LINKS",
+    "npm_config_userconfig", "NPM_CONFIG_USERCONFIG",
 })
+CODE_LOADING_PREFIXES = ("DYLD_", "GIT_CONFIG_")
+# The code-loading variables whose value is a package index URL, or several separated by
+# whitespace (as pip and uv read a list). Such a URL can carry a token.
+_INDEX_ENV = frozenset({"npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL",
+                        "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX"})
+# The find-links variables, whose words are URLs or local paths.
+_FIND_LINKS_ENV = frozenset({"PIP_FIND_LINKS", "UV_FIND_LINKS"})
+# The URL schemes WHATWG URL parsers (node, so Claude Code and npm; uv) treat as special: in
+# them a backslash ends the host part as a '/' does, and pip's urllib3 ends it there too.
+_SPECIAL_SCHEMES = frozenset({"http", "https", "ws", "wss", "ftp", "file"})
 
 
 @dataclass
@@ -153,8 +178,9 @@ class ServerRef:
     # A remote URL the entry names beside its command: the command is what gets classified and
     # scanned; the URL is not scanned and is shown only through display_url.
     url: str = ""
-    # sha256 of the value of each code-loading env variable the entry sets (CODE_LOADING_ENV),
-    # for frisk lock; never the value itself, never printed.
+    # sha256 of the value of each code-loading env variable the entry sets (CODE_LOADING_ENV;
+    # an index URL without its credentials, _env_pin), for frisk lock; never the value itself,
+    # never printed.
     code_env: dict[str, str] = field(default_factory=dict)
 
 
@@ -198,18 +224,39 @@ def display_url(url: str) -> str:
     return f"{parts.scheme}://{host}" + ("/…" if elided else "")
 
 
-def _split_url(url: str) -> SplitResult | None:
+def _split_url(url: str, pin: bool = False) -> SplitResult | None:
     """The URL's parts, or None when its host part cannot be told from a password: no
-    scheme or host, a port that is not a number, or an '@' outside the host part (an
-    unencoded '#', '?' or '/' in a password has cut the host part short)."""
+    scheme or host, a port that is not a number, an '@' outside the host part (an unencoded
+    '#', '?' or '/' in a password has cut the host part short), or a backslash in the host
+    part, where WHATWG URL parsers (node, so Claude Code and npm), pip and uv end the host
+    ('https://evil\\@host/' is evil). For frisk lock (pin) the host part ends where those
+    clients end it (_client_host), and an '@' after it is allowed: only a hash is stored,
+    and the host is the one a client connects to ('https://server.example/@owner/server',
+    an email in the query)."""
     try:
-        parts = urlsplit(url)
+        parts = urlsplit(_client_host(url) if pin else url)
         _ = parts.port  # raises ValueError for a port that is not a number, such as 'user:pass' cut short
     except ValueError:  # also an unclosed IPv6 bracket
         return None
-    if not parts.scheme or not parts.netloc.rpartition("@")[2] or ("@" in url and "@" not in parts.netloc):
+    if not parts.scheme or not parts.netloc.rpartition("@")[2] or "\\" in parts.netloc:
+        return None
+    if not pin and "@" in url and "@" not in parts.netloc:
         return None
     return parts
+
+
+def _client_host(url: str) -> str:
+    """The URL with its host part ended where clients end it, for frisk lock: in an http(s),
+    ws(s), ftp or file URL, WHATWG URL parsers (node, so Claude Code and npm; uv) and pip's
+    urllib3 end it at a backslash too, which urlsplit does not ('https://evil\\@pypi.org/simple'
+    is fetched from evil, 'https://pypi.org\\simple' from pypi.org). A '/' is put before that
+    backslash, which stays in the path: the host pinned is the one they connect to, and a
+    changed path is still a change."""
+    scheme, sep, rest = url.partition("://")
+    host = re.split(r"[/?#\\]", rest, maxsplit=1)[0]
+    if not sep or scheme.lower() not in _SPECIAL_SCHEMES or not rest.startswith("\\", len(host)):
+        return url
+    return f"{scheme}{sep}{host}/{rest[len(host):]}"
 
 
 def _classify(name: str, spec: object, project: Path | None = None) -> ServerRef:
@@ -449,8 +496,9 @@ def _wrapped_package(exe: Path) -> str:
     shell shim that execs node (pnpm, cmd-shim)."""
     real = Path(os.path.realpath(exe))
     parts = real.parts
-    if "node_modules" in parts:
-        i = len(parts) - 1 - parts[::-1].index("node_modules")
+    dirs = parts[:-1]  # the directories only: a regular file can be named node_modules too
+    if "node_modules" in dirs:
+        i = len(dirs) - 1 - dirs[::-1].index("node_modules")
         package = "/".join(parts[i + 1:i + 3] if parts[i + 1].startswith("@") else parts[i + 1:i + 2])
         if package != ".bin" and i + 2 < len(parts):
             return f"the node package '{package}'"
@@ -557,26 +605,90 @@ def _code_env(spec: object) -> dict[str, str]:
     env = spec.get("env") if isinstance(spec, dict) else None
     if not isinstance(env, dict):
         return {}
-    return {name: hashlib.sha256(json.dumps(value, default=str).encode("utf-8")).hexdigest()
-            for name, value in env.items() if name in CODE_LOADING_ENV or name.startswith("DYLD_")}
+    return {name: _pin_digest(_env_pin(name, value))
+            for name, value in env.items() if name in CODE_LOADING_ENV or name.startswith(CODE_LOADING_PREFIXES)}
+
+
+_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def _pin_digest(value: object) -> str:
+    """sha256 of a config value as frisk lock stores it: a code-loading env value (_code_env),
+    or how a server starts (_launch_digest). Every string in it passes through debug.redact
+    first (pinned, in its JSON text, so no nesting is walked), so a secret in it is pinned as a
+    fixed marker, never stored, not even as a hash: a value after 'key=' or 'password:' and the
+    like, a Bearer or Basic credential, an sk-/gh*_/github_pat_ token, a URL's 'user:password@'.
+    Rotating it is not drift; a changed option name, host or command still is, and so is what
+    follows a secret: it ends where a shell, a path list, an option list or JSON reads more than
+    text. A value with no secret hashes exactly as before."""
+    text = _JSON_STRING.sub(lambda m: json.dumps(redact(json.loads(m.group()), pinned=True)),
+                            json.dumps(value, sort_keys=True, default=str))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _unparsable(text: str) -> str:
+    """How frisk lock pins a URL it cannot split: by its length class (the bit length of its
+    length), never as written."""
+    return f"<unparsable URL>{len(text).bit_length()}"
+
+
+def _env_pin(name: str, value: object) -> object:
+    """What frisk lock hashes of a code-loading variable's value: the value itself, except in a
+    package index variable (_INDEX_ENV), where each whitespace-separated word is pinned by
+    _url_pin, and in a find-links variable, where each word holding '://' is. A token in such
+    a URL is then never stored, not even as a hash: rotating it is not drift, while a changed
+    host or path is. Any other word of those (a local path) is pinned as given. A GIT_CONFIG_*
+    value is pinned as written, like the rest: git runs some through the shell (core.sshCommand,
+    a '!' credential helper), where a URL's query or a quoted URL can hold a command, and
+    _pin_digest's redaction drops a URL's 'user:token@' there."""
+    other = name in _FIND_LINKS_ENV
+    if name not in _INDEX_ENV and not other:
+        return value
+    if not isinstance(value, str):
+        return _url_pin(json.dumps(value, default=str))
+    return re.sub(r"\S+", lambda m: m.group() if other and "://" not in m.group() else _url_pin(m.group()), value)
+
+
+def _url_pin(word: str) -> str:
+    """A URL as frisk lock pins it: scheme, host, port and path, without userinfo, query or
+    fragment, after uv's 'name=' (UV_INDEX) if it has one. A word that is no such URL, or whose
+    host part cannot be told from a password (a port that is not a number, an '@' outside the
+    host part) or from the host a client uses (a backslash in it, other than one that ends an
+    http(s) host part, which is read as clients read it: _client_host), is '<unparsable URL>'
+    and its length class (the bit length of its length), never the word itself."""
+    name, eq, url = word.partition("=")
+    named = name + eq if eq and ":" not in name else ""
+    url = _client_host(url if named else word)
+    try:
+        parts = urlsplit(url)
+        _ = parts.port  # raises ValueError for a port that is not a number
+    except ValueError:
+        parts = None
+    if (parts is None or not parts.scheme or "://" not in url or url.count("@") != parts.netloc.count("@")
+            or "\\" in parts.netloc):  # in a scheme _client_host leaves as written
+        return _unparsable(word)
+    return f"{named}{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
 
 
 def _launch_digest(spec: object) -> str:
     """sha256 of how a server is started: command, args, cwd, type, its URL without
     credentials, query or fragment (the path counts: a changed endpoint is a change), and the
     NAMES of its env vars and headers. Their values are left out, so rotating a secret is not
-    a change (a URL frisk cannot split is hashed whole)."""
+    a change; a secret in an arg or the command is redacted (_pin_digest), and a URL frisk
+    cannot split is pinned by its length class (_unparsable), never whole. A URL with an '@'
+    only after its host is pinned like any other (_split_url)."""
     shape: object = spec
     if isinstance(spec, dict):
         url = spec.get("url") or spec.get("serverUrl")
-        parts = _split_url(url) if isinstance(url, str) else None
+        parts = _split_url(url, pin=True) if isinstance(url, str) else None
         launch = {key: spec.get(key) for key in ("command", "args", "cwd", "type")}
-        launch["url"] = f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}" if parts else url
+        launch["url"] = (f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}" if parts
+                         else _unparsable(url) if isinstance(url, str) else url)
         for key in ("env", "headers"):
             value = spec.get(key)
             launch[key] = sorted(value) if isinstance(value, dict) else type(value).__name__
         shape = launch
-    return hashlib.sha256(json.dumps(shape, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return _pin_digest(shape)
 
 
 def _servers(obj: dict, where: str | Path) -> dict:

@@ -10,13 +10,41 @@ import time
 
 log = logging.getLogger("frisk")
 
-_SECRET = re.compile(
-    r"(?i)((?:key|token|secret|password|authorization|cookie)\w*[\"']?\s*[=:]\s*[\"']?)(?:bearer\s+)?\S+"
-    r"|\b(?:sk|gh[pousr]|github_pat)[-_][A-Za-z0-9_-]+|\bbearer\s+\S+")
+# A URL's userinfo (up to the last '@' of the part after '://'; it comes first, so a user
+# named 'token' leaves the host), a value after a key/token/secret/password/authorization/
+# cookie name and '=' or ':' (never '==', a comparison or a version pin: 'keyring==24.0'
+# names what runs), a Bearer or Basic credential (never an option after the word:
+# 'basic -javaagent:x' stays), and sk-, gh*_ and github_pat_ tokens. A name is matched from
+# the start of its word (the lookahead finds it anywhere in the word), so each word is read
+# once: matched from each name in it, a long word of names with no '=' took quadratic time.
+# A token is tried first, so a word that starts like one is redacted whole, as before.
+def _secrets(userinfo: str, value: str) -> re.Pattern[str]:
+    """The secrets, where `userinfo` and `value` are the characters a URL's userinfo and a
+    secret value may span."""
+    return re.compile(
+        rf"(?i)(?<=://){userinfo}*(?=@)"
+        r"|\b(?:sk|gh[pousr]|github_pat)[-_][A-Za-z0-9_-]+"
+        r"|((?<!\w)(?=\w*?(?:key|token|secret|password|authorization|cookie))\w+[\"']?\s*(?:=(?!=)|:)\s*[\"']?)"
+        rf"(?:(?:bearer|basic)\s+(?!-))?{value}+"
+        rf"|\b(?:bearer|basic)\s+(?!-){value}+")
 
 
-def redact(text: str) -> str:
-    return _SECRET.sub(lambda m: (m.group(1) or "") + "[REDACTED]", text)
+# In a debug line a secret runs to the next whitespace (in a URL, up to the host part).
+_SECRET = _secrets(r"[^/?#\s]", r"\S")
+# In a value frisk lock hashes, a redacted span is not drift when it changes, so it must not
+# hold what decides what runs: there a secret is a run of the characters of a token or
+# password that no shell, path list, option list, JSON text or URL host part gives a meaning
+# to. A ';', '|', '&', '$', '(', '/', ':', ',', a quote, a backslash (where URL parsers end a
+# host) or whitespace ends it, and what follows (a command, the next path, option or host)
+# stays pinned.
+_PINNED = _secrets(r"[\w.+=%:@!*~-]", r"[\w.+=%@!*-]")
+
+
+def redact(text: str, pinned: bool = False) -> str:
+    """Text with each secret replaced by '[REDACTED]': a debug line, or (pinned) a value
+    frisk lock hashes (sources._pin_digest), where a secret ends at the first character that
+    could change what runs."""
+    return (_PINNED if pinned else _SECRET).sub(lambda m: (m.group(1) or "") + "[REDACTED]", text)
 
 
 class _Stderr(logging.StreamHandler):

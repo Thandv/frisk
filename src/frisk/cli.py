@@ -73,22 +73,26 @@ def _audit_config(path: str) -> list[AuditRecord]:
 
     A server frisk does not scan (remote, an uncached package, an unresolved or invalid
     entry) carries a coverage.unscanned warning at 'name::<its ref>', so no audit with a
-    skipped server is ever PASS. So does a remote URL an entry names beside its command
-    (the command is scanned as usual), at 'name::<the URL>'.
+    skipped server is ever PASS, and its record has no verdict. A wrapper is read, though
+    the package it runs is not: when the wrapper's own file has findings, the record has
+    the verdict of all its findings (WARN or BLOCK). A remote URL an entry names beside its
+    command (the command is scanned as usual) also warns, at 'name::<the URL>'.
     """
     records: list[AuditRecord] = []
     for s in parse_mcp_config(path):
+        own = ScanResult()  # a wrapper's own file
         if s.scannable:
             result = scan_path(s.ref)
         else:
             result = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
             if s.kind == "wrapper":  # the wrapper itself is read: a payload in it still blocks
-                result.extend(scan_path(s.ref))
+                own = scan_path(s.ref)
+                result.extend(own)
         if s.url:
             result.extend(coverage_warning(display_url(s.url), "coverage.unscanned",
                                            "MCP server entry also names a remote URL, which is not scanned"))
         server = reroot(result, f"{s.name}::", "mcp")
-        records.append(AuditRecord(s, server, verdict(server.findings) if s.scannable else None))
+        records.append(AuditRecord(s, server, verdict(server.findings) if s.scannable or own.findings else None))
     return records
 
 
