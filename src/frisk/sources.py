@@ -29,7 +29,10 @@ from .rules import CODE_EXTS
 
 log = _root_log.getChild("sources")
 
-_GIT_URL = re.compile(r"^(https?://[^\s]+?(\.git)?|git@[^\s]+:[^\s]+|github\.com/[^\s/]+/[^\s/]+)$",
+# In 'git@<host>:<path>' the first ':' after the host's first character ends the host. That
+# leaves one split to try, so the check is linear ('git@[^\s]+:' tried one at every ':',
+# quadratic in a long target), and it accepts exactly the same strings.
+_GIT_URL = re.compile(r"^(https?://[^\s]+?(\.git)?|git@[^\s][^\s:]*:[^\s]+|github\.com/[^\s/]+/[^\s/]+)$",
                       re.IGNORECASE)
 
 

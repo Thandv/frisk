@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -21,7 +22,7 @@ from frisk import pin, report
 from frisk.cli import main
 from frisk.engine import ScanResult
 from frisk.report import AuditRecord, audit_text
-from frisk.sources import ServerRef, display_ref, display_target, display_url
+from frisk.sources import ServerRef, display_ref, display_target, display_url, is_git_url
 
 CANARY = "c4n" + "ary-" + "51f0" + "e2d7"
 
@@ -379,6 +380,32 @@ class GitTargetCredentialTest(unittest.TestCase):
                 self.assertNotIn(CANARY, text)
                 if not git.fail:
                     self.assertEqual(json.loads(text)["source"], self.CLEAN)
+
+
+class GitTargetCheckTimeTest(unittest.TestCase):
+    """FR-E4 final review S5: is_git_url tried 'git@<host>:<path>' split at every ':', so a
+    long target took quadratic time: 20,000 characters about 2 s of CPU, 1 MiB one to two
+    hours. frisk verify checks each lockfile target this way (a committed lockfile could
+    stall CI), and so do a CLI target and a frisk-mcp source. Now about 10 ms for 1 MiB.
+    The NUL byte, which a lockfile or frisk-mcp value can carry, makes Path.exists return
+    False on every Python, so the pattern runs (without it, Python 3.9 to 3.13 raise 'File
+    name too long' first). CPU time, so machine load does not matter; 2 s is a wide margin."""
+
+    def test_a_long_target_is_checked_in_linear_time(self) -> None:
+        for label, target in (("a run of ':'", "git@" + ":" * (1 << 20) + "\0 x"),
+                              ("'a:' repeated", "git@" + "a:" * (1 << 19) + "\0 x")):
+            with self.subTest(label):
+                t0 = time.process_time()
+                self.assertFalse(is_git_url(target))
+                self.assertLess(time.process_time() - t0, 2.0)
+
+    def test_the_same_targets_are_git_urls(self) -> None:
+        for target, expected in (("git@git.example.invalid:acme/tool.git", True),
+                                 ("git@[::1]:acme/tool.git", True),  # a host that holds ':'
+                                 ("git@git.example.invalid:", False), ("git@:acme/tool.git", False),
+                                 ("git@git.example.invalid acme:tool.git", False)):
+            with self.subTest(target):
+                self.assertEqual(is_git_url(target), expected)
 
 
 if __name__ == "__main__":
