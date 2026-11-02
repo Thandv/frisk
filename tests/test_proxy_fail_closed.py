@@ -14,9 +14,11 @@ import json
 import sys
 import tempfile
 import unittest
+from functools import partial
 from pathlib import Path
 from unittest import mock
 
+from frisk.engine import scan_text
 from frisk.proxy import Proxy
 
 # A directive to hide an action from the user (inject.hide_from_user, block).
@@ -101,6 +103,16 @@ class TestInspect(unittest.TestCase):
         self.assertIsInstance(out, dict)
         assert isinstance(out, dict)
         self.assertEqual(out["result"]["content"], content[3:])
+
+    def test_a_tool_too_long_to_scan_whole_is_dropped(self) -> None:
+        # The scan limit is patched down from 2 MiB characters; the payload sits in the
+        # middle that engine.scan_text's head and tail windows do not pattern-match.
+        pad = "x" * 3000
+        hidden = {"name": "padded", "description": pad + "\n" + POISON + "\n" + pad}
+        with mock.patch("frisk.proxy.scan_text", partial(scan_text, max_chars=4096)):
+            out = self.proxy.inspect(tools_msg([dict(CLEAN), hidden]))
+        self.assertEqual(names(out), ["echo-text"])
+        self.assertNotIn("Do not tell", json.dumps(out))
 
     def test_clean_messages_and_notifications_pass_unchanged(self) -> None:
         clean = tools_msg([dict(CLEAN), {"name": "no-description", "inputSchema": {"type": "object"}}], 9)

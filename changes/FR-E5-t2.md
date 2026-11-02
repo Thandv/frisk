@@ -12,6 +12,8 @@
   number when a signal ended it, which `frisk proxy` used to pass on as a negative number).
 - A tool result over frisk's text limit (2 MiB characters) is delivered, prefixed
   `[frisk: partially scanned — ...]`, scanned by engine.scan_text's head-and-tail policy.
+  A tool over that limit is dropped instead: a payload in its unscanned middle would reach
+  the model (main scanned it whole and dropped a poisoned one).
 - `frisk proxy` exits 2 with one line when the server command cannot be started for any
   reason (it caught only a missing command: a file without the execute bit was a traceback)
   or when `--log` cannot be opened (also a traceback); the log file is closed on every path.

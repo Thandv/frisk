@@ -141,7 +141,8 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
 Text scanned as a string (`--text`, frisk-mcp's `scan_text`, tool descriptions and results
 in `frisk proxy`) longer than the same limit (2 MiB characters; `--max-file-bytes` sets it
 for `--text`) has its first and last halves of the limit pattern-matched, the hidden-Unicode
-check run on all of it, and a `coverage.truncated` warning, so it is never PASS.
+check run on all of it, and a `coverage.truncated` warning, so it is never PASS. In
+`frisk proxy`, a tool that long is dropped; a tool result that long is delivered, marked.
 
 In an MCP config audit, each server frisk could not scan also raises a
 `coverage.unscanned` warning, and a config in which it finds no servers raises
@@ -418,7 +419,7 @@ Wrap the server command in your client config:
 ```
 
 The proxy launches the real server, relays the protocol, and enforces:
-- a tool with a **block**-level finding is **dropped** (the model never sees it);
+- a tool with a **block**-level finding, or too long to scan whole (over 2 MiB characters), is **dropped** (the model never sees it);
 - a tool whose description **changed** since first seen is **flagged** (possible rug pull);
 - prompt-injection detected in a **tool result** gets a visible warning prepended before it reaches the model.
 

@@ -146,7 +146,9 @@ class Proxy:
         findings = scan_text(_tool_text(tool), name).findings
         sev = worst_severity(findings)
 
-        if sev == "block":
+        # A tool too long to scan whole (coverage.truncated) is dropped too: a block-level
+        # payload could sit in its unscanned middle. Only a result is delivered partially scanned.
+        if sev == "block" or any(f.rule == "coverage.truncated" for f in findings):
             self.stats["dropped"] += 1
             self._log(f"BLOCKED tool '{name}': {findings[0].description}")
             return False  # drop it — the client/model never sees this tool
