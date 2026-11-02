@@ -24,7 +24,7 @@ from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
 from . import pkgcache
-from .debug import log as _root_log, ms_since
+from .debug import log as _root_log, ms_since, redact
 from .rules import CODE_EXTS
 
 log = _root_log.getChild("sources")
@@ -583,8 +583,30 @@ def _code_env(spec: object) -> dict[str, str]:
     env = spec.get("env") if isinstance(spec, dict) else None
     if not isinstance(env, dict):
         return {}
-    return {name: hashlib.sha256(json.dumps(_env_pin(name, value), default=str).encode("utf-8")).hexdigest()
+    return {name: _pin_digest(_env_pin(name, value))
             for name, value in env.items() if name in CODE_LOADING_ENV or name.startswith(CODE_LOADING_PREFIXES)}
+
+
+_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def _pin_digest(value: object) -> str:
+    """sha256 of a config value as frisk lock stores it: a code-loading env value (_code_env),
+    or how a server starts (_launch_digest). Every string in it passes through debug.redact
+    first (in its JSON text, so no nesting is walked), so a secret in it is pinned as a fixed
+    marker, never stored, not even as a hash: a value after 'key=' or 'password:' and the like,
+    a Bearer or Basic credential, an sk-/gh*_/github_pat_ token, a URL's 'user:password@'.
+    Rotating it is not drift; a changed option name, host or command still is. A value with no
+    secret hashes exactly as before."""
+    text = _JSON_STRING.sub(lambda m: json.dumps(redact(json.loads(m.group()))),
+                            json.dumps(value, sort_keys=True, default=str))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _unparsable(text: str) -> str:
+    """How frisk lock pins a URL it cannot split: by its length class (the bit length of its
+    length), never as written."""
+    return f"<unparsable URL>{len(text).bit_length()}"
 
 
 def _env_pin(name: str, value: object) -> object:
@@ -617,7 +639,7 @@ def _url_pin(word: str) -> str:
     except ValueError:
         parts = None
     if parts is None or not parts.scheme or "://" not in url or url.count("@") != parts.netloc.count("@"):
-        return f"<unparsable URL>{len(word).bit_length()}"
+        return _unparsable(word)
     return f"{named}{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
 
 
@@ -625,18 +647,20 @@ def _launch_digest(spec: object) -> str:
     """sha256 of how a server is started: command, args, cwd, type, its URL without
     credentials, query or fragment (the path counts: a changed endpoint is a change), and the
     NAMES of its env vars and headers. Their values are left out, so rotating a secret is not
-    a change (a URL frisk cannot split is hashed whole)."""
+    a change; a secret in an arg or the command is redacted (_pin_digest), and a URL frisk
+    cannot split is pinned by its length class (_unparsable), never whole."""
     shape: object = spec
     if isinstance(spec, dict):
         url = spec.get("url") or spec.get("serverUrl")
         parts = _split_url(url) if isinstance(url, str) else None
         launch = {key: spec.get(key) for key in ("command", "args", "cwd", "type")}
-        launch["url"] = f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}" if parts else url
+        launch["url"] = (f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}" if parts
+                         else _unparsable(url) if isinstance(url, str) else url)
         for key in ("env", "headers"):
             value = spec.get(key)
             launch[key] = sorted(value) if isinstance(value, dict) else type(value).__name__
         shape = launch
-    return hashlib.sha256(json.dumps(shape, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return _pin_digest(shape)
 
 
 def _servers(obj: dict, where: str | Path) -> dict:

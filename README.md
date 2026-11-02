@@ -322,6 +322,17 @@ never as a whole file:
   `://` is pinned the same way, and any other word (a local path, a git config key or
   option) as given. `PATH` is not pinned: it differs between shells and machines, so every
   lock would drift.
+- Before anything is hashed, frisk's redaction (the one its debug lines use) replaces each
+  secret in it with a fixed marker: a value after a `key`, `token`, `secret`, `password`,
+  `authorization` or `cookie` name and `=` or `:` (`--api-key=…`, `-Dpassword=…`,
+  `Authorization: …`), a `Bearer` or `Basic` credential, an `sk-…`, `ghp_…` or
+  `github_pat_…` token, and a URL's `user:password@`. So a secret in the command, an
+  argument or a code-loading value is never stored, not even as a hash, and rotating it is
+  not drift, while a changed option name, host or command still is. A server URL frisk
+  cannot split is pinned only as `<unparsable URL>` and its length class. The redaction goes
+  by those patterns: a secret in another form (a bare token as an argument of its own) is
+  pinned as written, and a value that merely follows such a name (`--keyfile=…`) is pinned
+  without its value.
 
 So the rest of the file can change (Claude Code rewrites `~/.claude.json` all the time) and
 a rotated secret is not drift, while a changed command, argument, URL or env name (`~
@@ -335,7 +346,9 @@ the package name (`uv run --directory …`, `uvx --python 3.12 …`, `pipx run �
 `npx --registry …`) reports DRIFT once with no changed file: run `frisk lock` again. A
 server that sets one of the code-loading variables above, locked before their values were
 pinned (or before an index URL was pinned without its credentials), reports DRIFT once with
-`~ NODE_OPTIONS changed` (or the variable it sets): lock it again.
+`~ NODE_OPTIONS changed` (or the variable it sets): lock it again. So does a server whose
+pinned values held a secret or a URL frisk cannot split, locked before they were redacted
+(`~ changed: how it starts`, or the variable).
 
 A git URL is pinned without its credentials, and `frisk verify` re-clones that clean URL:
 for a private repository, git's own credential helper (or an ssh key) supplies the

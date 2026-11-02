@@ -54,3 +54,18 @@
   case. frisk took `GitHub.com/Acme/Tool` for a git target but passed it to git as written,
   which git reads as a local path, so the clone failed; the host is now lowercased, owner
   and repository keep their case. `frisk verify` re-clones such a pinned target the same way.
+- Every value `frisk lock` hashes passes through frisk's redaction first: each code-loading
+  env value and every part of how a server starts (command, arguments, cwd, type, URL). The
+  redaction is the one the debug lines use, which now also covers a URL's `user:password@`
+  and a `Basic` credential beside `key=`/`token:`/`secret`/`password`/`authorization`/
+  `cookie` values, `Bearer` credentials and `sk-`/`gh*_`/`github_pat_` tokens. A secret in
+  an argument (`--api-key=…`), in git configuration (`http.extraHeader` set to
+  `Authorization: Basic …`, an inline credential helper that echoes `password=…`) or in
+  `JAVA_TOOL_OPTIONS` (`-Dpassword=…`, `-Dapi.key=…`) is pinned as a fixed marker, never
+  stored, not even as a hash: rotating it is not drift, a changed option name, host or
+  command still is. A server URL frisk cannot split is pinned as `<unparsable URL>` and its
+  length class instead of whole. Values with no secret hash exactly as before, so their lock
+  entries are unchanged; an entry whose values held a secret, or such a URL, reports DRIFT
+  once (`~ changed: how it starts`, or the variable's name): lock again. The redaction goes
+  by those patterns: a bare token passed as an argument of its own is still pinned as
+  written, and a value that merely follows such a name (`--keyfile=…`) is pinned without it.

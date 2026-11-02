@@ -10,12 +10,19 @@ import time
 
 log = logging.getLogger("frisk")
 
+# A URL's userinfo (up to the last '@' of the part after '://'; it comes first, so a user
+# named 'token' leaves the host), a value after a key/token/secret/password/authorization/
+# cookie name and '=' or ':', a Bearer or Basic credential (never an option after the word:
+# 'basic -javaagent:x' stays), and sk-, gh*_ and github_pat_ tokens.
 _SECRET = re.compile(
-    r"(?i)((?:key|token|secret|password|authorization|cookie)\w*[\"']?\s*[=:]\s*[\"']?)(?:bearer\s+)?\S+"
-    r"|\b(?:sk|gh[pousr]|github_pat)[-_][A-Za-z0-9_-]+|\bbearer\s+\S+")
+    r"(?i)(?<=://)[^/?#\s]*(?=@)"
+    r"|((?:key|token|secret|password|authorization|cookie)\w*[\"']?\s*[=:]\s*[\"']?)(?:(?:bearer|basic)\s+)?\S+"
+    r"|\b(?:sk|gh[pousr]|github_pat)[-_][A-Za-z0-9_-]+|\b(?:bearer|basic)\s+(?!-)\S+")
 
 
 def redact(text: str) -> str:
+    """Text with each secret _SECRET finds replaced by '[REDACTED]': debug lines, and every
+    value frisk lock hashes (sources._pin_digest)."""
     return _SECRET.sub(lambda m: (m.group(1) or "") + "[REDACTED]", text)
 
 

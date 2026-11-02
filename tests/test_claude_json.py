@@ -662,5 +662,97 @@ class CodeLoadingEnvTest(ClaudeJsonCase):
                 self.assertEqual(self.server_row()["env"], [name])
 
 
+class PinRedactionTest(ClaudeJsonCase):
+    """FR-FX1 10: credentials are never stored in any form. Every value frisk lock hashes (a
+    code-loading env value, how a server starts) passes through frisk's redaction first, so a
+    secret in it is pinned as a fixed marker: rotating it leaves the lockfile byte for byte the
+    same (nothing derived from it is stored), while a changed non-secret part (an option name,
+    a host, a command) is drift. A server URL frisk cannot split is pinned by its length class."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.lockfile = str(self.tmp / "lock.json")
+        server = str(self.home / "tools" / "shared" / "server.py")
+        # label: (the server entry for a secret, a change to a part that is no secret, what verify names)
+        self.cases: dict[str, tuple[Callable[[str], dict], tuple[str, str], str]] = {
+            "GIT_CONFIG_VALUE_0 http.extraHeader, Basic": (
+                lambda s: {"command": "node", "args": [server], "env": {
+                    "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader",
+                    "GIT_CONFIG_VALUE_0": "Authorization: Basic " + s}},
+                ("Authorization:", "Proxy-Authorization:"), "GIT_CONFIG_VALUE_0"),
+            "GIT_CONFIG_VALUE_0 inline credential helper": (
+                lambda s: {"command": "node", "args": [server], "env": {
+                    "GIT_CONFIG_VALUE_0": "!f() { echo username=bot; echo password=" + s + "; }; f"}},
+                ("username=bot", "username=other"), "GIT_CONFIG_VALUE_0"),
+            "JAVA_TOOL_OPTIONS -Dpassword -Dapi.key": (  # 'basic' must not swallow the option after it
+                lambda s: {"command": "java", "args": ["-jar", server], "env": {
+                    "JAVA_TOOL_OPTIONS": f"-Dpassword={s} -Dapi.key={s} -Dauth=basic -Xmx512m"}},
+                ("-Xmx512m", "-javaagent:/tmp/agent.jar"), "JAVA_TOOL_OPTIONS"),
+            "--api-key= in args": (
+                lambda s: {"command": "python3", "args": [server, "--api-key=" + s]},
+                ("--api-key=", "--admin-key="), "launch"),
+            "a ghp_ token in args": (
+                lambda s: {"command": "python3", "args": [server, "--token", "ghp_" + s]},
+                ("--token", "--auth"), "launch"),
+            "a Bearer token in args": (
+                lambda s: {"command": "python3", "args": [server, "--header", "Bearer " + s]},
+                ("--header", "--proxy-header"), "launch"),
+            "a URL's userinfo in args": (  # a user named 'token' still leaves the host pinned
+                lambda s: {"command": "python3", "args": [server, "https://token:" + s + "@h.example.invalid/x"]},
+                ("h.example.invalid", "evil.example.invalid"), "launch"),
+            "Authorization: Bearer in a pasted command line": (
+                lambda s: {"command": "npx acme-mcp --header Authorization: Bearer " + s},
+                ("npx acme-mcp", "npx evil-mcp"), "launch"),
+            "a server URL frisk cannot split": (
+                lambda s: {"url": "https://user:pa/ss-" + s + "@mcp.example.invalid/sse"},
+                (CANARY, CANARY * 8), "launch"),
+        }
+
+    def entry(self, spec: dict) -> None:
+        self.write({"mcpServers": {"srv": spec}})
+
+    def lock(self) -> bytes:
+        self.assertEqual(run(["lock", "--mcp-config", str(self.cfg), "--lockfile", self.lockfile])[0], 0)
+        return Path(self.lockfile).read_bytes()
+
+    def row(self) -> dict:
+        (row,) = [r for r in pin.verify_lock(pin.read_lock(self.lockfile)) if r["entry"] == f"{self.cfg}::srv"]
+        return row
+
+    def test_a_secret_is_pinned_as_a_marker(self) -> None:
+        for label, (spec, change, named) in self.cases.items():
+            with self.subTest(label):
+                self.entry(spec(CANARY + "1"))
+                pinned = self.lock()
+                self.assertNotIn(CANARY.encode(), pinned)
+                self.entry(spec(CANARY + "2"))  # the secret rotated
+                self.assertEqual(self.row()["status"], "ok")
+                self.assertEqual(self.lock(), pinned)
+                self.entry(json.loads(json.dumps(spec(CANARY + "2")).replace(*change)))
+                row = self.row()
+                self.assertEqual(row["status"], "DRIFT")
+                if named == "launch":
+                    self.assertIn("launch", row)
+                else:
+                    self.assertEqual(row.get("env"), [named])
+
+    def test_a_lock_that_hashed_a_secret_whole(self) -> None:
+        # A lock written before FR-FX1 10 (FR-E4 or FR-FX1 1 to 9) hashed these values whole:
+        # each such entry reports DRIFT once, naming what changed, never a traceback, and the
+        # next lock pins it without the secret.
+        for label, (spec, _change, named) in self.cases.items():
+            with self.subTest(label):
+                self.entry(spec(CANARY))
+                with mock.patch("frisk.sources.redact", lambda text: text), \
+                        mock.patch("frisk.sources._unparsable", lambda text: text):
+                    self.lock()
+                code, out, err = run(["verify", "--lockfile", self.lockfile])
+                self.assertEqual((code, err), (1, ""))
+                line = ("~ changed: how it starts" if named == "launch" else f"~ {named} changed")
+                self.assertIn(f"  [DRIFT] {self.cfg}::srv\n           {line}", out)
+                self.assertNotIn(CANARY.encode(), self.lock())
+                self.assertEqual(run(["verify", "--lockfile", self.lockfile])[0], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
