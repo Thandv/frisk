@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 
 from .debug import log as _root_log
@@ -222,7 +223,31 @@ def unverified(report: list[dict]) -> int:
 
 
 def write_lock(lock: dict, path: str = LOCK_DEFAULT) -> None:
-    Path(path).write_text(json.dumps(lock, indent=2), encoding="utf-8")
+    """Write the lockfile atomically: a temp file in the same directory, flushed and
+    fsynced, then renamed over `path`, so a crash never leaves it half written. On any
+    failure the temp file is removed and the error raised; the old lockfile is untouched."""
+    target = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        os.chmod(tmp, _lock_mode(target))  # mkstemp makes it 0600; keep the mode a plain write gave
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(lock, indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def _lock_mode(target: Path) -> int:
+    """The existing lockfile's permission bits, else what the umask gives a new file."""
+    try:
+        return target.stat().st_mode & 0o777
+    except FileNotFoundError:
+        umask = os.umask(0)
+        os.umask(umask)
+        return 0o666 & ~umask
 
 
 def read_lock(path: str = LOCK_DEFAULT) -> dict:
