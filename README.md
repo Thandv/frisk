@@ -195,7 +195,10 @@ every project's `mcpServers` are audited. A config that holds both `mcpServers` 
 Cursor, Claude Desktop) and `servers` (VS Code) is audited whole, since each client runs its
 own map; a name found in both is listed twice, the second as `name (servers)`. A project
 server is named `server (project)`, with your home directory shown as `~`, for example
-`db (~/work/app)`. A config whose top level, `mcpServers`, `servers`, `projects` or a
+`db (~/work/app)`. Every server gets a name of its own: a name an earlier server already
+has (a top-level server named like a project server, or two spellings of one project
+path) is followed by ` (2)`, ` (3)`, ..., since `frisk lock` and `frisk verify` tell
+servers apart by name. A config whose top level, `mcpServers`, `servers`, `projects` or a
 project entry is not a JSON object stops with exit code 2 rather than being audited in part,
 and so does a config frisk cannot read (no permission, or a directory): `frisk: <error>`,
 the same for a config named as a target and for `--mcp-config` (and for `frisk lock` and

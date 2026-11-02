@@ -492,6 +492,7 @@ def _at_or_above_home(path: Path) -> bool:
 def parse_mcp_config(path: str | Path) -> list[ServerRef]:
     """Every server in the config: the top-level mcpServers and servers, then each
     project's mcpServers in a .claude.json, named 'server (project)' with $HOME shown as ~.
+    Each server has a name of its own (_unique_names).
 
     A config whose top level, mcpServers, projects or project entry is not a JSON object
     raises ValueError: frisk cannot tell which servers it holds.
@@ -508,6 +509,25 @@ def parse_mcp_config(path: str | Path) -> list[ServerRef]:
         base = Path(os.path.normpath(directory)) if directory.is_absolute() else None
         refs.extend(_server(f"{name} ({label})", spec, base)
                     for name, spec in _servers(project, f"{path}: project {label}").items())
+    return _unique_names(refs)
+
+
+def _unique_names(refs: list[ServerRef]) -> list[ServerRef]:
+    """The servers, each under a name no earlier one has: a later server whose name is taken
+    gets ' (2)', ' (3)', ... A top-level server can be named like a project server
+    ('db (~/app)'), and two spellings of one project key share a label. frisk lock pins a
+    server by its name and frisk verify finds it by that name, so with a shared name a decoy
+    copy of a pinned server would answer for it while the real one changed unchecked."""
+    taken: set[str] = set()
+    following: dict[str, int] = {}  # the next number to try for a name, so renaming stays linear
+    for ref in refs:
+        if ref.name in taken:
+            base, n = ref.name, following.get(ref.name, 2)
+            while f"{base} ({n})" in taken:
+                n += 1
+            following[base] = n + 1
+            ref.name = f"{base} ({n})"
+        taken.add(ref.name)
     return refs
 
 
