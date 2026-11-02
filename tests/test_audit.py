@@ -350,9 +350,16 @@ class WrapperTest(AuditCase):
         command = self.uv_tool(self.UV_WRAPPER + INSTALLER + "\n")
         cfg = self.config({"tool": {"command": str(command)}})
         code, out = run(["--mcp-config", cfg])
-        self.assertIn("  [SKIP ] tool ", out)
+        # FR-E4 final review S2: the server shows the verdict of the wrapper's findings (was
+        # [SKIP ], and verdict null in --json), and still counts as not scanned: the package
+        # it runs is not read.
+        self.assertIn("  [BLOCK] tool                   wrapper  console-script wrapper or bin shim for the Python "
+                      "package 'acme_mcp', which frisk does not scan\n           → ~/.local/bin/acme-mcp\n", out)
+        self.assertIn("\n  1 of 1 server not scanned\n", out)
         self.assertIn("[BLOCK] rce            tool::acme-mcp:", out)
         self.assertEqual(code, 1)
+        (server,) = json.loads(run(["--json", "--mcp-config", cfg])[1])["servers"]
+        self.assertEqual((server["kind"], server["status"], server["verdict"]), ("wrapper", "skipped", "BLOCK"))
 
     def test_a_script_that_is_not_a_wrapper_is_scanned_as_before(self) -> None:
         own = "#!/usr/bin/env python3\nimport sys\nfrom typing import Any\ndef main() -> int:\n    return 0\n" \

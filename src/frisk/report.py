@@ -47,7 +47,9 @@ class AuditRecord(NamedTuple):
     """One server of an MCP config audit: built by cli._audit_config, formatted here.
 
     `result` is the server's scan (finding and skipped paths prefixed 'name::');
-    `verdict` is None when the server was not scanned.
+    `verdict` is None when the server was not scanned (server.scannable is False), unless
+    it is a wrapper whose own file has findings: then it is their verdict, and the server
+    still counts as not scanned.
     """
     server: ServerRef
     result: ScanResult
@@ -64,10 +66,10 @@ def audit_text(path: str, records: list[AuditRecord]) -> str:
         s = rec.server
         tag = _c("SKIP ", "dim") if rec.verdict is None else _c(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
         lines.append(f"  [{tag}] {printable(s.name):<22} {_c(s.kind, 'dim')}  {printable(_reason(s))}")
-        if rec.verdict is None:
+        if not s.scannable:
             lines.append(_c(f"           → {printable(display_ref(s))}", "dim"))
     if records:
-        total, skipped = len(records), sum(1 for rec in records if rec.verdict is None)
+        total, skipped = len(records), sum(1 for rec in records if not rec.server.scannable)
         noun = "server" if total == 1 else "servers"
         summary = f"{skipped} of {total} {noun} not scanned" if skipped else f"scanned {total} of {total} {noun}"
         lines += ["", "  " + _c(summary, "warn" if skipped else "dim")]
@@ -88,7 +90,7 @@ def _reason(s: ServerRef) -> str:
 def _audit_servers(records: list[AuditRecord]) -> list[dict]:
     """The servers[] entries of the JSON report: name, kind, status, reason and verdict."""
     return [{"name": rec.server.name, "kind": rec.server.kind,
-             "status": "skipped" if rec.verdict is None else "scanned",
+             "status": "scanned" if rec.server.scannable else "skipped",
              "reason": _reason(rec.server), "verdict": rec.verdict} for rec in records]
 
 

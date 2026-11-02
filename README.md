@@ -185,7 +185,8 @@ key that a client running the command would ignore never hides that command: bes
 `command`, a `url` that is not a string warns as `<unparsable URL>`, and a `cwd` that is
 not a string is ignored. `--json` adds `servers`, one entry per audited server: `name`,
 `kind`, `status` (`scanned` or `skipped`), `reason` (the detail shown above, with a cached
-package's unscanned dependencies) and `verdict` (`null` when skipped).
+package's unscanned dependencies) and `verdict` (`null` when skipped, unless the server is
+a wrapper whose own file has findings: then their verdict, as on its text line).
 
 A config in which frisk finds no servers is not clean either: it is WARN with
 `coverage.no_servers`, `no MCP servers found in <file> (frisk reads 'mcpServers' and
@@ -242,7 +243,8 @@ How each server's source is found, the way the client launches it:
   execs node; or a file inside a node package, where an npm bin link points), the server
   is `wrapper` and not scanned: the package that really runs is not read, so it warns
   instead of passing on the wrapper alone. The wrapper itself is still read, so a payload
-  in it blocks.
+  in it blocks: when the wrapper has findings, the server's line shows their verdict
+  (`[BLOCK]` for a payload) instead of `[SKIP ]`, and it still counts as not scanned.
 
 Relative paths resolve against the server's `cwd` in the config or, for a project server in
 a `.claude.json` without one, against its project directory (Claude Code starts it there);

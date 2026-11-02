@@ -27,3 +27,10 @@
   and machines, so every lock would drift. A lock entry for a server that sets none of these
   is unchanged and verifies as before; one written before this change for a server that
   sets one of them reports DRIFT once with that line: lock again.
+- A console-script wrapper whose own file has findings shows their verdict. The audit reads
+  the wrapper (a payload in it BLOCKs), but its line said `[SKIP ]` and its `--json` entry
+  `"verdict": null` while its BLOCK findings were listed, understating it for anyone reading
+  per server. The line now shows `[BLOCK]` (or `[WARN ]`) and `--json` the same verdict; it
+  keeps `"status": "skipped"`, its `→` location and its place in `N of M servers not
+  scanned`, since the package it runs is still not read. A wrapper with no findings is
+  `[SKIP ]` as before.
