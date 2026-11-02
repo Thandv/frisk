@@ -98,7 +98,7 @@ def _server_fingerprint(s: ServerRef) -> dict:
     the code frisk scans for it (none when it scans none)."""
     if s.kind == "package-cached":
         code = _cached_fingerprint(s)
-    elif s.scannable:
+    elif s.scannable or s.kind == "wrapper":  # the audit reads a wrapper, so its own bytes are pinned too
         code = fingerprint_path(Path(s.ref))
     else:
         code = {"digest": "", "files": {}}

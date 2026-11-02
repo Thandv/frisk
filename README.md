@@ -295,7 +295,8 @@ never as a whole file:
   their own, such as `<config>::db (~/work/app)`), pins how the server starts (command,
   args, cwd, the URL without credentials, query or fragment, and the *names* of its env
   vars and headers, never their values) together with the code frisk scans for it. A
-  package found in the local cache is pinned as its cached content plus its version.
+  package found in the local cache is pinned as its cached content plus its version, and
+  a console-script wrapper as its own file (not the package it runs, which is not read).
 - The values of env variables that make a runtime load code are pinned too, as hashes:
   `NODE_OPTIONS`, `NODE_PATH`, `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, `LD_PRELOAD`,
   `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` (and

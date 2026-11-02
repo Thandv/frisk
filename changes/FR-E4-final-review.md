@@ -26,3 +26,7 @@
   `module:Object.method` (`sys.exit(Object.method())`). Both were scanned as one file and
   PASSed while the package that runs was never read; they are now `wrapper` and WARN, and
   the wrapper file itself is still read.
+- `frisk lock` pins a console-script wrapper's own file again. Since wrappers became kind
+  `wrapper` (not scanned), their bytes were left out of the lock, so a wrapper changed after
+  `frisk lock` verified with no drift, where main (and the branch before) reported DRIFT. The
+  package the wrapper runs is still neither scanned nor pinned.

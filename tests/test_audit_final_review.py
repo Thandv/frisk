@@ -272,5 +272,25 @@ class InstallerWrapperFormsTest(FinalReviewCase):
                               run(["--mcp-config", cfg])[1])
 
 
+class WrapperPinTest(FinalReviewCase):
+    """frisk lock pinned a local executable's bytes. Once a wrapper became kind 'wrapper'
+    (not scannable), its bytes were left out of the lock, so a wrapper changed after the lock
+    verified clean: main and the branch before reported DRIFT."""
+
+    tool = InstallerWrapperFormsTest.tool
+
+    def test_a_changed_wrapper_is_drift_and_an_unchanged_one_is_not(self) -> None:
+        command = self.tool("#!{env}/bin/python\n" + UV_BODY.format(module="acme_mcp.server", name="main", call="main"))
+        cfg = self.write(self.tmp / "mcp.json", {"mcpServers": {"tool": {"command": command}}})
+        lockfile = str(self.tmp / "lock.json")
+        self.assertEqual(run(["lock", "--mcp-config", cfg, "--lockfile", lockfile])[0], 0)
+        self.assertEqual(run(["verify", "--lockfile", lockfile])[0], 0)
+        wrapper = Path(command).resolve()
+        wrapper.write_text(wrapper.read_text(encoding="utf-8").replace("import sys\n", "import sys, acme_mcp.extra\n"),
+                           encoding="utf-8")
+        code, out, _ = run(["verify", "--lockfile", lockfile])
+        self.assertEqual(code, 1)
+        self.assertIn(f"  [DRIFT] {cfg}::tool\n           ~ changed: acme-mcp\n", out)
+
 if __name__ == "__main__":
     unittest.main()
