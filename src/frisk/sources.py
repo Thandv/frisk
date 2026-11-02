@@ -156,6 +156,9 @@ _INDEX_ENV = frozenset({"npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX
                         "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX"})
 # The find-links variables, whose words are URLs or local paths.
 _FIND_LINKS_ENV = frozenset({"PIP_FIND_LINKS", "UV_FIND_LINKS"})
+# The URL schemes WHATWG URL parsers (node, so Claude Code and npm; uv) treat as special: in
+# them a backslash ends the host part as a '/' does, and pip's urllib3 ends it there too.
+_SPECIAL_SCHEMES = frozenset({"http", "https", "ws", "wss", "ftp", "file"})
 
 
 @dataclass
@@ -226,11 +229,12 @@ def _split_url(url: str, pin: bool = False) -> SplitResult | None:
     scheme or host, a port that is not a number, an '@' outside the host part (an unencoded
     '#', '?' or '/' in a password has cut the host part short), or a backslash in the host
     part, where WHATWG URL parsers (node, so Claude Code and npm), pip and uv end the host
-    ('https://evil\\@host/' is evil). For frisk lock (pin) an '@' after the host part is
-    allowed: only a hash is stored, and the host is the one a client connects to
-    ('https://server.example/@owner/server', an email in the query)."""
+    ('https://evil\\@host/' is evil). For frisk lock (pin) the host part ends where those
+    clients end it (_client_host), and an '@' after it is allowed: only a hash is stored,
+    and the host is the one a client connects to ('https://server.example/@owner/server',
+    an email in the query)."""
     try:
-        parts = urlsplit(url)
+        parts = urlsplit(_client_host(url) if pin else url)
         _ = parts.port  # raises ValueError for a port that is not a number, such as 'user:pass' cut short
     except ValueError:  # also an unclosed IPv6 bracket
         return None
@@ -239,6 +243,20 @@ def _split_url(url: str, pin: bool = False) -> SplitResult | None:
     if not pin and "@" in url and "@" not in parts.netloc:
         return None
     return parts
+
+
+def _client_host(url: str) -> str:
+    """The URL with its host part ended where clients end it, for frisk lock: in an http(s),
+    ws(s), ftp or file URL, WHATWG URL parsers (node, so Claude Code and npm; uv) and pip's
+    urllib3 end it at a backslash too, which urlsplit does not ('https://evil\\@pypi.org/simple'
+    is fetched from evil, 'https://pypi.org\\simple' from pypi.org). A '/' is put before that
+    backslash, which stays in the path: the host pinned is the one they connect to, and a
+    changed path is still a change."""
+    scheme, sep, rest = url.partition("://")
+    host = re.split(r"[/?#\\]", rest, maxsplit=1)[0]
+    if not sep or scheme.lower() not in _SPECIAL_SCHEMES or not rest.startswith("\\", len(host)):
+        return url
+    return f"{scheme}{sep}{host}/{rest[len(host):]}"
 
 
 def _classify(name: str, spec: object, project: Path | None = None) -> ServerRef:
@@ -635,18 +653,19 @@ def _url_pin(word: str) -> str:
     """A URL as frisk lock pins it: scheme, host, port and path, without userinfo, query or
     fragment, after uv's 'name=' (UV_INDEX) if it has one. A word that is no such URL, or whose
     host part cannot be told from a password (a port that is not a number, an '@' outside the
-    host part) or from the host a client uses (a backslash in it), is '<unparsable URL>' and
-    its length class (the bit length of its length), never the word itself."""
+    host part) or from the host a client uses (a backslash in it, other than one that ends an
+    http(s) host part, which is read as clients read it: _client_host), is '<unparsable URL>'
+    and its length class (the bit length of its length), never the word itself."""
     name, eq, url = word.partition("=")
     named = name + eq if eq and ":" not in name else ""
-    url = url if named else word
+    url = _client_host(url if named else word)
     try:
         parts = urlsplit(url)
         _ = parts.port  # raises ValueError for a port that is not a number
     except ValueError:
         parts = None
     if (parts is None or not parts.scheme or "://" not in url or url.count("@") != parts.netloc.count("@")
-            or "\\" in parts.netloc):  # where clients end the host (_split_url)
+            or "\\" in parts.netloc):  # in a scheme _client_host leaves as written
         return _unparsable(word)
     return f"{named}{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
 

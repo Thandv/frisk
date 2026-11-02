@@ -317,9 +317,10 @@ never as a whole file:
   value. An index URL (each one, when several are separated by whitespace, after uv's
   `name=` if it has one) is pinned by its scheme, host, port and path only, so a token in
   its `user:token@`, query or fragment is never stored, not even as a hash: rotating it is
-  not drift, while a changed host or path is. A word there that is not such a URL, or whose
-  host part cannot be told from a password or holds a backslash (where pip, uv and npm end
-  the host: `https://evil\@pypi.org/simple` is fetched from `evil`), is pinned only as
+  not drift, while a changed host or path is. A backslash ends the host part of an http(s)
+  URL, as pip, uv and npm read it (`https://pypi.org\simple` is fetched from `pypi.org`,
+  `https://evil\@pypi.org/simple` from `evil`), and stays in the path. A word there that is
+  not such a URL, or whose host part cannot be told from a password, is pinned only as
   `<unparsable URL>` and its length class, never as written. In a find-links value, each
   word holding `://` is pinned the same way, and any other word (a local path) as given. A
   `GIT_CONFIG_*` value is pinned as written, after the redaction below, which drops a URL's
@@ -338,9 +339,10 @@ never as a whole file:
   argument or a code-loading value is never stored, not even as a hash, and rotating it is
   not drift, while a changed option name, host, path or command still is. A server URL frisk
   cannot split (a port that is not a number, as when a password holds an unencoded `/`, `?`
-  or `#`, or a backslash in its host part) is pinned only as `<unparsable URL>` and its length
-  class; one with an `@` only after its host (`https://server.example/@owner/server`, an
-  email in the query) is pinned by its host and path like any other. The redaction goes
+  or `#`) is pinned only as `<unparsable URL>` and its length class; a backslash ends its
+  host part as in an index URL, and one with an `@` only after its host
+  (`https://server.example/@owner/server`, an email in the query) is pinned by its host and
+  path like any other. The redaction goes
   by those patterns: a secret in another form (a bare token as an argument of its own) is
   pinned as written, so is the part of a secret after such a character (after a `/` in a
   base64 value, `;ss` in `password=p;ss`), and a value that merely follows such a name
