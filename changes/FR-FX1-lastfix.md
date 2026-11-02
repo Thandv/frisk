@@ -10,3 +10,13 @@
   a changed host or path is drift again, and a token in its `user:token@` is still never
   stored. The audit still shows such a URL as `<unparsable URL>`. A server that sets one,
   locked before, reports DRIFT once: lock again.
+- A changed version pin is drift again when the package's name holds a key, token,
+  secret, password, authorization or cookie name. Since FR-FX1 10 a value after such a name
+  and `=` is redacted before it is hashed, and the name is found anywhere in a word, so
+  `mcp-keycloak==1.0.0`, `tiktoken==0.7.0` or `keyring==24.0` (in `uvx --from`, `uv run
+  --with`, `pipx run --spec`, a `pip install` in `sh -c`) was pinned without its version,
+  and changing the version, which decides what code runs, was not drift where the package
+  was not in the local cache (as in CI). A name followed by `==` is no longer read as the
+  start of a secret; `--api-key=…`, base64 padding after it and `PASSWORD:=…` are
+  redacted as before. A server holding such a pin, locked before, reports DRIFT once: lock
+  again.

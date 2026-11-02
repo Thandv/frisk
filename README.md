@@ -330,7 +330,8 @@ never as a whole file:
 - Before anything is hashed, frisk's redaction (the patterns its debug lines use) replaces
   each secret in it with a fixed marker: a value after a `key`, `token`, `secret`,
   `password`, `authorization` or `cookie` name and `=` or `:` (`--api-key=…`,
-  `-Dpassword=…`, `Authorization: …`), a `Bearer` or `Basic` credential, an `sk-…`, `ghp_…`
+  `-Dpassword=…`, `Authorization: …`; never after `==`, so a version pin such as
+  `keyring==24.0` stays pinned), a `Bearer` or `Basic` credential, an `sk-…`, `ghp_…`
   or `github_pat_…` token, and a URL's `user:password@`. Here a secret ends at the first
   character other than a letter, a digit or one of `_.+=%@!*-` (in a URL's
   `user:password@`, also `:` and `~`): a `;`, `|`, `&`, `$`, `(`, `/`, `:`, `,`, a quote, a

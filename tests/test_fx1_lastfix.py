@@ -132,5 +132,49 @@ class BackslashHostTest(LastFixCase):
         self.assertIn("<unparsable URL>", out)
 
 
+class VersionPinTest(LastFixCase):
+    """sev 3: since FR-FX1 10 a value after a key/token/secret/password/authorization/cookie
+    name and '=' is redacted before it is hashed, and the name is found anywhere in a word,
+    so 'mcp-keycloak==1.0.0', 'tiktoken==0.7.0' or 'keyring==24.0' was pinned as
+    'mcp-keycloak=[REDACTED]' and a changed version, which decides what code runs, was no
+    drift (main: DRIFT). The review's on-top kept '=', '.' and digits in a secret, so it
+    stayed. Where the package is not in the local cache (CI), the launch is all frisk lock
+    pins of such a server. A name followed by '==', a comparison or a version pin, is no
+    longer read as the start of a secret."""
+
+    def test_a_changed_version_pin_is_drift(self) -> None:
+        def uvx(spec: str) -> dict:
+            return {"command": "uvx", "args": ["--from", spec, "mcp-keycloak"]}
+
+        def sh(script: str) -> dict:
+            return {"command": "sh", "args": ["-c", script]}
+
+        cases = {
+            "uvx --from": (uvx("mcp-keycloak==1.0.0"), uvx("mcp-keycloak==1.0.1")),
+            "uv run --with": ({"command": "uv", "args": ["run", "--with", "tiktoken==0.7.0", str(self.server)]},
+                              {"command": "uv", "args": ["run", "--with", "tiktoken==0.8.0", str(self.server)]}),
+            "pipx run --spec": ({"command": "pipx", "args": ["run", "--spec", "keyring==24.0", "keyring"]},
+                                {"command": "pipx", "args": ["run", "--spec", "keyring==25.1", "keyring"]}),
+            "'===' arbitrary equality": (uvx("mcp-keycloak===1.0.0"), uvx("mcp-keycloak===6.6.6")),
+            "pip install in sh -c": (sh("pip install mcp-secrets==1.0 && exec mcp-secrets"),
+                                     sh("pip install mcp-secrets==6.6 && exec mcp-secrets")),
+        }
+        for label, (before, after) in cases.items():
+            with self.subTest(label):
+                self.assert_drift(before, after, "launch")
+
+    def test_a_secret_after_one_equals_sign_is_still_never_stored(self) -> None:
+        remote = ["-y", "mcp-remote", "https://h.example.invalid/sse", "--header"]
+        cases = {
+            "--api-key=": lambda s: self.node(args=[str(self.server), "--api-key=" + s]),
+            "base64 padding after it": lambda s: self.node(args=[str(self.server), "--api-key=" + s + "=="]),
+            "a cookie's name=value": lambda s: {"command": "npx", "args": [*remote, "Cookie: session=" + s]},
+            "':=' as make writes it": lambda s: {"command": "make", "args": ["serve", "PASSWORD:=" + s]},
+        }
+        for label, spec in cases.items():
+            with self.subTest(label):
+                self.assert_rotation_is_no_drift(spec)
+
+
 if __name__ == "__main__":
     unittest.main()
