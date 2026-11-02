@@ -135,9 +135,9 @@ SERVER_KEYS = "'mcpServers' and 'servers', at the top level and in each 'project
 # Env variables that decide what code runs: a runtime's options, module and library paths,
 # preloads and startup files; the program git runs for ssh and where git finds its own
 # programs; the package index npm, pip or uv installs from. frisk lock pins their values, as
-# hashes only (an index URL can carry a token); every other env value may be a secret and is
-# never read. Any DYLD_* variable counts too. PATH does not: it differs between shells and
-# machines, so every lock would drift.
+# hashes only, and an index URL without its credentials (_env_pin); every other env value may
+# be a secret and is never read. Any DYLD_* variable counts too. PATH does not: it differs
+# between shells and machines, so every lock would drift.
 CODE_LOADING_ENV = frozenset({
     "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH",
     "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "PERL5OPT", "PERL5LIB", "RUBYOPT",
@@ -146,6 +146,10 @@ CODE_LOADING_ENV = frozenset({
     "npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "UV_INDEX_URL",
     "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX",
 })
+# The code-loading variables whose value is a package index URL, or several separated by
+# whitespace (as pip and uv read a list). Such a URL can carry a token.
+_INDEX_ENV = frozenset({"npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL",
+                        "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX"})
 
 
 @dataclass
@@ -165,8 +169,9 @@ class ServerRef:
     # A remote URL the entry names beside its command: the command is what gets classified and
     # scanned; the URL is not scanned and is shown only through display_url.
     url: str = ""
-    # sha256 of the value of each code-loading env variable the entry sets (CODE_LOADING_ENV),
-    # for frisk lock; never the value itself, never printed.
+    # sha256 of the value of each code-loading env variable the entry sets (CODE_LOADING_ENV;
+    # an index URL without its credentials, _env_pin), for frisk lock; never the value itself,
+    # never printed.
     code_env: dict[str, str] = field(default_factory=dict)
 
 
@@ -570,8 +575,35 @@ def _code_env(spec: object) -> dict[str, str]:
     env = spec.get("env") if isinstance(spec, dict) else None
     if not isinstance(env, dict):
         return {}
-    return {name: hashlib.sha256(json.dumps(value, default=str).encode("utf-8")).hexdigest()
+    return {name: hashlib.sha256(json.dumps(_env_pin(name, value), default=str).encode("utf-8")).hexdigest()
             for name, value in env.items() if name in CODE_LOADING_ENV or name.startswith("DYLD_")}
+
+
+def _env_pin(name: str, value: object) -> object:
+    """What frisk lock hashes of a code-loading variable's value: the value itself, except in a
+    package index variable (_INDEX_ENV), where each whitespace-separated word is pinned by
+    _url_pin. A token in an index URL is then never stored, not even as a hash: rotating it is
+    not drift, while a changed host or path is."""
+    if name not in _INDEX_ENV:
+        return value
+    if not isinstance(value, str):
+        return _url_pin(json.dumps(value, default=str))
+    return re.sub(r"\S+", lambda word: _url_pin(word.group()), value)
+
+
+def _url_pin(word: str) -> str:
+    """A URL as frisk lock pins it: scheme, host, port and path, without userinfo, query or
+    fragment. A word that is no such URL, or whose host part cannot be told from a password (a
+    port that is not a number, an '@' outside the host part), is '<unparsable URL>' and its
+    length class (the bit length of its length), never the word itself."""
+    try:
+        parts = urlsplit(word)
+        _ = parts.port  # raises ValueError for a port that is not a number
+    except ValueError:
+        parts = None
+    if parts is None or not parts.scheme or "://" not in word or word.count("@") != parts.netloc.count("@"):
+        return f"<unparsable URL>{len(word).bit_length()}"
+    return f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
 
 
 def _launch_digest(spec: object) -> str:

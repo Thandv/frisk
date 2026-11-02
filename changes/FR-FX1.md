@@ -22,11 +22,17 @@
   decides what code runs (an audit library loaded like `LD_PRELOAD`, the program git runs
   for ssh, where git finds its own programs, the index npm, pip or uv installs a package
   from), but a changed value was not drift. A changed value is now DRIFT, named as
-  `~ PIP_INDEX_URL changed`, never shown. A token inside such a value is part of it, so
-  changing it is drift too. `PATH` is deliberately not pinned: it differs between shells
-  and machines, so every lock would drift. A lock entry for a server that sets none of these
-  is unchanged and verifies as before; one written before this change for a server that
-  sets one of them reports DRIFT once with that line: lock again.
+  `~ PIP_INDEX_URL changed`, never shown. `PATH` is deliberately not pinned: it differs
+  between shells and machines, so every lock would drift. A lock entry for a server that
+  sets none of these is unchanged and verifies as before; one written before this change for
+  a server that sets one of them reports DRIFT once with that line: lock again.
+- An index URL in those variables is pinned without its credentials: each URL (several may
+  be separated by whitespace) by its scheme, host, port and path only, so a token in its
+  `user:token@`, query or fragment is never stored, not even as a hash. Rotating the token
+  is not drift; a changed host or path is. A word that is not such a URL, or whose host part
+  cannot be told from a password, is pinned only as `<unparsable URL>` and its length class
+  (the bit length of its length), never as written. A lock that hashed an index URL whole
+  reports DRIFT once with `~ PIP_INDEX_URL changed` (or the variable it sets): lock again.
 - A console-script wrapper whose own file has findings shows their verdict. The audit reads
   the wrapper (a payload in it BLOCKs), but its line said `[SKIP ]` and its `--json` entry
   `"verdict": null` while its BLOCK findings were listed, understating it for anyone reading

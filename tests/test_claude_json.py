@@ -556,6 +556,73 @@ class CodeLoadingEnvTest(ClaudeJsonCase):
         row = self.server_row()
         self.assertEqual((row["status"], row["env"], "launch" in row), ("DRIFT", ["PIP_INDEX_URL"], False))
 
+    INDEX = ("npm_config_registry", "NPM_CONFIG_REGISTRY", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "UV_INDEX_URL",
+             "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX")
+
+    @staticmethod
+    def index_url(token: str, host: str = "pypi.example.invalid", path: str = "/simple") -> str:
+        return f"https://user:{token}@{host}:8443{path}?auth={token}#{token}"
+
+    def test_an_index_url_is_pinned_without_its_credentials(self) -> None:
+        # FR-FX1 7: credentials are never stored in any form. An index URL is pinned by scheme,
+        # host, port and path, so rotating the token in its userinfo, query and fragment leaves
+        # the lockfile byte for byte the same (nothing derived from the token is in it), while a
+        # changed host or path is drift. Each URL of a whitespace-separated list counts.
+        url = self.index_url
+        for name in self.INDEX:
+            with self.subTest(name):
+                self.env_config({name: url(CANARY + "1")})
+                self.lock()
+                pinned = Path(self.lockfile).read_bytes()
+                self.assertNotIn(CANARY.encode(), pinned)
+                self.env_config({name: url(CANARY + "2")})
+                self.assertEqual(self.server_row()["status"], "ok")
+                self.lock()
+                self.assertEqual(Path(self.lockfile).read_bytes(), pinned)
+                for changed in (url(CANARY + "2", host="evil.example.invalid"), url(CANARY + "2", path="/other")):
+                    self.env_config({name: changed})
+                    row = self.server_row()
+                    self.assertEqual((row["status"], row["env"]), ("DRIFT", [name]))
+        two = "https://a.example.invalid/simple  https://user:{}@b.example.invalid/simple"
+        self.env_config({"PIP_EXTRA_INDEX_URL": two.format(CANARY + "1")})
+        self.lock()
+        self.env_config({"PIP_EXTRA_INDEX_URL": two.format(CANARY + "2")})
+        self.assertEqual(self.server_row()["status"], "ok")
+        self.env_config({"PIP_EXTRA_INDEX_URL": two.format(CANARY + "2").replace("b.example", "evil.example")})
+        self.assertEqual(self.server_row()["env"], ["PIP_EXTRA_INDEX_URL"])
+
+    def test_a_word_that_is_no_url_is_pinned_by_its_length_class(self) -> None:
+        # A word that is no URL, or whose host part frisk cannot tell from a password, is
+        # pinned as '<unparsable URL>' and its length class, never as written: the token is not
+        # stored (rotating it changes nothing), and a change of length class is drift.
+        for label, value in (("'/' in the password", "https://user:pa/ss-{}@pypi.example.invalid/simple"),
+                             ("no host, the token as the port", "https://user:{}"),
+                             ("no '://'", "pypi.example.invalid:{}"),
+                             ("no scheme before '://'", "_https://pypi.example.invalid/{}"),
+                             ("two URLs glued by a comma", "https://a.example.invalid/simple,https://user:{}@b."
+                                                           "example.invalid/simple")):
+            with self.subTest(label):
+                self.env_config({"PIP_INDEX_URL": value.format(CANARY + "1")})
+                self.lock()
+                pinned = Path(self.lockfile).read_bytes()
+                self.env_config({"PIP_INDEX_URL": value.format(CANARY + "2")})
+                self.lock()
+                self.assertEqual(Path(self.lockfile).read_bytes(), pinned)
+                self.env_config({"PIP_INDEX_URL": value.format(CANARY * 8)})
+                self.assertEqual(self.server_row()["env"], ["PIP_INDEX_URL"])
+
+    def test_a_lock_that_hashed_an_index_url_whole(self) -> None:
+        # FR-FX1 5 hashed an index URL whole, token included: such an entry reports DRIFT once,
+        # naming the variable, never a traceback, and the next lock pins it without the token.
+        self.env_config({"PIP_INDEX_URL": self.index_url(CANARY)})
+        with mock.patch("frisk.sources._env_pin", lambda name, value: value):
+            self.lock()
+        code, out, err = run(["verify", "--lockfile", self.lockfile])
+        self.assertEqual((code, err), (1, ""))
+        self.assertIn(f"  [DRIFT] {self.cfg}::srv\n           ~ PIP_INDEX_URL changed\n", out)
+        self.lock()
+        self.assertEqual(run(["verify", "--lockfile", self.lockfile])[0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

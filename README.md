@@ -309,9 +309,13 @@ never as a whole file:
   and the package index npm, pip or uv installs from (`npm_config_registry`,
   `NPM_CONFIG_REGISTRY`, `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`, `UV_INDEX_URL`,
   `UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`). A changed value is DRIFT and `frisk verify`
-  names the variable (`~ NODE_OPTIONS changed`), never its value. A token inside such a
-  value (an index URL's `user:token@`) is part of the value, so changing it is drift too.
-  `PATH` is not pinned: it differs between shells and machines, so every lock would drift.
+  names the variable (`~ NODE_OPTIONS changed`), never its value. An index URL (each one,
+  when several are separated by whitespace) is pinned by its scheme, host, port and path
+  only, so a token in its `user:token@`, query or fragment is never stored, not even as a
+  hash: rotating it is not drift, while a changed host or path is. A word there that is not
+  such a URL, or whose host part cannot be told from a password, is pinned only as
+  `<unparsable URL>` and its length class, never as written. `PATH` is not pinned: it
+  differs between shells and machines, so every lock would drift.
 
 So the rest of the file can change (Claude Code rewrites `~/.claude.json` all the time) and
 a rotated secret is not drift, while a changed command, argument, URL or env name (`~
@@ -324,8 +328,8 @@ server`. A package server whose older pin had taken an option's value or a subco
 the package name (`uv run --directory …`, `uvx --python 3.12 …`, `pipx run …`,
 `npx --registry …`) reports DRIFT once with no changed file: run `frisk lock` again. A
 server that sets one of the code-loading variables above, locked before their values were
-pinned, reports DRIFT once with `~ NODE_OPTIONS changed` (or the variable it sets): lock it
-again.
+pinned (or before an index URL was pinned without its credentials), reports DRIFT once with
+`~ NODE_OPTIONS changed` (or the variable it sets): lock it again.
 
 A git URL is pinned without its credentials, and `frisk verify` re-clones that clean URL:
 for a private repository, git's own credential helper (or an ssh key) supplies the
