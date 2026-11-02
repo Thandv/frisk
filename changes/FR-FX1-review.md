@@ -22,3 +22,13 @@
   credential after a name never takes an option either. A secret made of other characters
   is redacted up to the first of them; the rest is pinned. Debug lines keep the wider
   redaction.
+- A URL is pinned by the host a client connects to. WHATWG URL parsers (node, so Claude Code
+  and npm), pip and uv end the host of an http(s) URL at a backslash, which Python's
+  `urlsplit` does not, so `https://evil\@pypi.org/simple` was pinned (and a server URL shown)
+  as `pypi.org`: swapping an index, find-links or server URL to another host this way was
+  not drift. Such a URL is now `<unparsable URL>`, pinned by its length class (the change
+  from a plain URL is drift), and never shown with the host frisk would have guessed. A
+  server URL with an `@` only after its host (`https://server.smithery.ai/@owner/server/mcp`,
+  an email in the query) was pinned only by its length class since FR-FX1 10, so another
+  host or owner of the same length class was no drift; it is pinned by host and path again,
+  which hashes exactly as main did when it has no query or fragment.

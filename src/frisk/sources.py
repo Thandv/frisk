@@ -223,16 +223,22 @@ def display_url(url: str) -> str:
     return f"{parts.scheme}://{host}" + ("/…" if elided else "")
 
 
-def _split_url(url: str) -> SplitResult | None:
+def _split_url(url: str, pin: bool = False) -> SplitResult | None:
     """The URL's parts, or None when its host part cannot be told from a password: no
-    scheme or host, a port that is not a number, or an '@' outside the host part (an
-    unencoded '#', '?' or '/' in a password has cut the host part short)."""
+    scheme or host, a port that is not a number, an '@' outside the host part (an unencoded
+    '#', '?' or '/' in a password has cut the host part short), or a backslash in the host
+    part, where WHATWG URL parsers (node, so Claude Code and npm), pip and uv end the host
+    ('https://evil\\@host/' is evil). For frisk lock (pin) an '@' after the host part is
+    allowed: only a hash is stored, and the host is the one a client connects to
+    ('https://server.example/@owner/server', an email in the query)."""
     try:
         parts = urlsplit(url)
         _ = parts.port  # raises ValueError for a port that is not a number, such as 'user:pass' cut short
     except ValueError:  # also an unclosed IPv6 bracket
         return None
-    if not parts.scheme or not parts.netloc.rpartition("@")[2] or ("@" in url and "@" not in parts.netloc):
+    if not parts.scheme or not parts.netloc.rpartition("@")[2] or "\\" in parts.netloc:
+        return None
+    if not pin and "@" in url and "@" not in parts.netloc:
         return None
     return parts
 
@@ -629,8 +635,8 @@ def _url_pin(word: str) -> str:
     """A URL as frisk lock pins it: scheme, host, port and path, without userinfo, query or
     fragment, after uv's 'name=' (UV_INDEX) if it has one. A word that is no such URL, or whose
     host part cannot be told from a password (a port that is not a number, an '@' outside the
-    host part), is '<unparsable URL>' and its length class (the bit length of its length),
-    never the word itself."""
+    host part) or from the host a client uses (a backslash in it), is '<unparsable URL>' and
+    its length class (the bit length of its length), never the word itself."""
     name, eq, url = word.partition("=")
     named = name + eq if eq and ":" not in name else ""
     url = url if named else word
@@ -639,7 +645,8 @@ def _url_pin(word: str) -> str:
         _ = parts.port  # raises ValueError for a port that is not a number
     except ValueError:
         parts = None
-    if parts is None or not parts.scheme or "://" not in url or url.count("@") != parts.netloc.count("@"):
+    if (parts is None or not parts.scheme or "://" not in url or url.count("@") != parts.netloc.count("@")
+            or "\\" in parts.netloc):  # where clients end the host (_split_url)
         return _unparsable(word)
     return f"{named}{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
 
@@ -649,11 +656,12 @@ def _launch_digest(spec: object) -> str:
     credentials, query or fragment (the path counts: a changed endpoint is a change), and the
     NAMES of its env vars and headers. Their values are left out, so rotating a secret is not
     a change; a secret in an arg or the command is redacted (_pin_digest), and a URL frisk
-    cannot split is pinned by its length class (_unparsable), never whole."""
+    cannot split is pinned by its length class (_unparsable), never whole. A URL with an '@'
+    only after its host is pinned like any other (_split_url)."""
     shape: object = spec
     if isinstance(spec, dict):
         url = spec.get("url") or spec.get("serverUrl")
-        parts = _split_url(url) if isinstance(url, str) else None
+        parts = _split_url(url, pin=True) if isinstance(url, str) else None
         launch = {key: spec.get(key) for key in ("command", "args", "cwd", "type")}
         launch["url"] = (f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}" if parts
                          else _unparsable(url) if isinstance(url, str) else url)

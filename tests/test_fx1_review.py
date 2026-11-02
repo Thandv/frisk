@@ -10,6 +10,7 @@ Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import tempfile
@@ -22,6 +23,7 @@ from _home import fake_home
 from frisk import pin
 from frisk.cli import main
 from frisk.debug import redact
+from frisk.sources import _launch_digest
 
 CANARY = "c4n" + "ary-" + "f1x1" + "a7e5"
 
@@ -249,6 +251,59 @@ class PinnedRedactionTest(ReviewCase):
         for label, spec in cases.items():
             with self.subTest(label):
                 self.assert_rotation_is_no_drift(spec)
+
+
+
+class UrlHostTest(ReviewCase):
+    """sev 4: a URL is pinned by the host a client connects to. (1) WHATWG URL parsers (node,
+    so Claude Code and npm), pip's requests/urllib3 and uv end the host of an http(s) URL at a
+    backslash, while urlsplit does not: 'https://evil\\@pypi.example/simple' was pinned as
+    'https://pypi.example/simple', so swapping an index, find-links or server URL to another
+    host was no drift (FR-FX1 7 and 8; for a server url since FR-E4). (2) FR-FX1 10 pinned a
+    server URL with an '@' after its host (https://server.smithery.ai/@owner/server/mcp, an
+    email in the query) only by its length class, so another host or owner of the same length
+    class was no drift; main hashed it whole (DRIFT)."""
+
+    EVIL = "https://evil.example.invalid\\@"
+
+    def test_a_backslash_in_the_host_part_is_drift(self) -> None:
+        evil = self.EVIL
+        cases = {
+            "PIP_INDEX_URL": ("https://pypi.example.invalid/simple", evil + "pypi.example.invalid/simple"),
+            "UV_INDEX": ("internal=https://pypi.example.invalid/simple",
+                         "internal=" + evil + "pypi.example.invalid/simple"),
+            "npm_config_registry": ("https://registry.example.invalid/", evil + "registry.example.invalid/"),
+            "PIP_FIND_LINKS": ("https://wheels.example.invalid/x", evil + "wheels.example.invalid/x"),
+        }
+        for name, (before, after) in cases.items():
+            with self.subTest(name):
+                self.assert_drift(self.node(env={name: before}), self.node(env={name: after}), name)
+        with self.subTest("a server url"):
+            self.assert_drift({"url": "https://mcp.example.invalid/sse"}, {"url": evil + "mcp.example.invalid/sse"},
+                              "launch")
+
+    def test_the_audit_never_shows_a_host_the_client_does_not_use(self) -> None:
+        self.entry({"url": self.EVIL + "mcp.example.invalid/sse"})
+        code, out, err = run(["--mcp-config", str(self.cfg)])
+        self.assertNotIn("mcp.example.invalid", out + err)
+        self.assertIn("<unparsable URL>", out)
+
+    def test_an_at_sign_after_the_host_does_not_hide_it(self) -> None:
+        base = "https://server.example.invalid/@acme/github/mcp"
+        for label, after in (("another host", "https://evil.example.invalid/@acme/github/mcp/x"),
+                             ("another owner", "https://server.example.invalid/@evil/github/mcp"),
+                             ("an email in the query", "https://evil.example.invalid/sse?user=dev@example.invalid")):
+            with self.subTest(label):
+                before = "https://mcp.example.invalid/sse?user=dev@example.invalid" if "email" in label else base
+                self.assertEqual(len(before).bit_length(), len(after).bit_length())  # one length class
+                self.assert_drift({"url": before}, {"url": after}, "launch")
+        with self.subTest("a token in its query is still never stored"):
+            self.assert_rotation_is_no_drift(lambda s: {"url": base + "?api_key=" + s})
+        with self.subTest("hashed as main hashed it: the whole URL, which has nothing to drop"):
+            shape = {"command": None, "args": None, "cwd": None, "type": None, "url": base,
+                     "env": "NoneType", "headers": "NoneType"}
+            expected = hashlib.sha256(json.dumps(shape, sort_keys=True).encode("utf-8")).hexdigest()
+            self.assertEqual(_launch_digest({"url": base}), expected)
 
 
 if __name__ == "__main__":

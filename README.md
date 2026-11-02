@@ -262,8 +262,8 @@ some providers put the access key in the path. A whole command line
 pasted into `command` shows only its program (`npx …`), and env values and headers are
 never read. A URL whose host part cannot be told apart from its password
 (an unencoded `#`, `?` or `/` in the password, a port that is not a number, an `@` after
-the host, or anything but a host name or address before the path) is shown as
-`<unparsable URL>`. In the text report (and `frisk verify`'s), control
+the host, a backslash in the host part, where clients end the host, or anything but a host
+name or address before the path) is shown as `<unparsable URL>`. In the text report (and `frisk verify`'s), control
 characters and the hidden Unicode frisk reports, in a server name, a cached package's
 version or dependencies, a location, a finding path, a finding's excerpt (the scanned line
 itself), the target names and error messages, are shown as escapes (`\x1b`, `\u202e`), so
@@ -317,8 +317,9 @@ never as a whole file:
   `name=` if it has one) is pinned by its scheme, host, port and path only, so a token in
   its `user:token@`, query or fragment is never stored, not even as a hash: rotating it is
   not drift, while a changed host or path is. A word there that is not such a URL, or whose
-  host part cannot be told from a password, is pinned only as `<unparsable URL>` and its
-  length class, never as written. In a find-links or `GIT_CONFIG_*` value, each word holding
+  host part cannot be told from a password or holds a backslash (where pip, uv and npm end
+  the host: `https://evil\@pypi.org/simple` is fetched from `evil`), is pinned only as
+  `<unparsable URL>` and its length class, never as written. In a find-links or `GIT_CONFIG_*` value, each word holding
   `://` is pinned the same way, and any other word (a local path, a git config key or
   option) as given. `PATH` is not pinned: it differs between shells and machines, so every
   lock would drift.
@@ -333,7 +334,10 @@ never as a whole file:
   of a path list, the next option, a host) is still pinned. So a secret in the command, an
   argument or a code-loading value is never stored, not even as a hash, and rotating it is
   not drift, while a changed option name, host, path or command still is. A server URL frisk
-  cannot split is pinned only as `<unparsable URL>` and its length class. The redaction goes
+  cannot split (a port that is not a number, as when a password holds an unencoded `/`, `?`
+  or `#`, or a backslash in its host part) is pinned only as `<unparsable URL>` and its length
+  class; one with an `@` only after its host (`https://server.example/@owner/server`, an
+  email in the query) is pinned by its host and path like any other. The redaction goes
   by those patterns: a secret in another form (a bare token as an argument of its own) is
   pinned as written, so is the part of a secret after such a character (after a `/` in a
   base64 value, `;ss` in `password=p;ss`), and a value that merely follows such a name
