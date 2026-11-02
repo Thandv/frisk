@@ -464,6 +464,21 @@ the wrong type, `-32601` for an unknown method, `-32602` for an unknown tool, an
 if handling a request fails inside frisk. A tool that cannot do its job (a path that does
 not exist, a clone that fails, a missing argument) answers with an `isError` result.
 
+`scan_artifact` and `vet_mcp_server` are bounded so one call cannot hold the server: a scan
+stops after 20,000 files, 200 MiB read or 30 seconds, and files over 2 MiB are not read. A
+result that is incomplete for any reason (a limit, a skipped file, text over the limit) has
+`"degraded": true` and a `coverage` object (`files_scanned`, and `skipped` counts by
+reason). Results never include excerpts of the scanned content. Two environment variables
+narrow what an agent may ask for:
+
+- `FRISK_MCP_ROOTS`: a list of directories (separated by `:`, `;` on Windows); a local path
+  outside them is refused. Paths are compared with symlinks and `..` resolved, so neither
+  can escape a root.
+- `FRISK_MCP_NO_NETWORK=1`: git URLs are refused, before git is run.
+
+`/`, your home directory itself and `/System` are refused unless named in
+`FRISK_MCP_ROOTS`. A refusal is an `isError` result with a one-line reason.
+
 ## GitHub Action
 
 ```yaml

@@ -19,14 +19,17 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import time
+from collections import Counter
+from pathlib import Path
 
 from . import __version__
-from .engine import scan_path, scan_text, verdict, worst_severity
+from .engine import ScanLimits, ScanResult, scan_path, scan_text, verdict, worst_severity
 from .rules import owasp_for
 from .debug import log as _root_log, ms_since, setup_debug
-from .sources import display_target, materialize
+from .sources import display_target, is_git_url, materialize
 
 log = _root_log.getChild("mcp")
 
@@ -37,9 +40,16 @@ PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR =
 # What a tool raises when it cannot do its job (as for the CLI, where these exit 2): the
 # agent gets an isError result. Anything else is a fault in frisk: an INTERNAL_ERROR.
 TOOL_ERRORS = (OSError, RuntimeError, ValueError, TypeError)
+# An agent's path scan is bounded, so one call cannot hold the server for hours: it stops at
+# 20,000 files, 200 MiB read or 30 s, and returns what it found with degraded: true.
+MCP_LIMITS = ScanLimits(max_files=20_000, max_bytes=200 * 1024 * 1024, deadline_s=30.0)
 
 
-def _summary(findings, source: str) -> str:
+def _summary(result: ScanResult, source: str) -> str:
+    """The JSON a tool returns: verdict, counts, the first findings (no excerpts: an agent
+    never gets the scanned text back) and advice; plus degraded: true and what was not
+    scanned when coverage is incomplete."""
+    findings = result.findings
     blocks = sum(1 for f in findings if f.severity == "block")
     warns = sum(1 for f in findings if f.severity == "warn")
     top = sorted(findings, key=lambda f: 0 if f.severity == "block" else 1)[:12]
@@ -56,6 +66,10 @@ def _summary(findings, source: str) -> str:
         ],
         "advice": _advice(verdict(findings)),
     }
+    if any(f.category == "coverage" for f in findings):
+        payload["degraded"] = True
+        payload["coverage"] = {"files_scanned": result.coverage.files_scanned,
+                               "skipped": dict(Counter(s.reason for s in result.coverage.skipped))}
     return json.dumps(payload, indent=2)
 
 
@@ -72,14 +86,34 @@ def _advice(v: str) -> str:
 
 
 def _scan_source(source: str) -> str:
+    _check_scope(source)
     with materialize(source) as (root, _):
-        findings = scan_path(root, root if root.is_dir() else None).findings
-    return _summary(findings, display_target(source))
+        result = scan_path(root, root if root.is_dir() else None, MCP_LIMITS)
+    return _summary(result, display_target(source))
+
+
+def _check_scope(source: str) -> None:
+    """Refuse (ValueError: an isError result) a source this server may not scan: a git URL
+    under FRISK_MCP_NO_NETWORK=1, before git runs; a path outside FRISK_MCP_ROOTS (an
+    os.pathsep list), compared with symlinks and '..' resolved; and '/', $HOME itself and
+    /System, unless named in FRISK_MCP_ROOTS."""
+    if is_git_url(source):
+        if os.environ.get("FRISK_MCP_NO_NETWORK") == "1":
+            raise ValueError("refused: git URLs are not scanned here (FRISK_MCP_NO_NETWORK=1)")
+        return
+    real = Path(os.path.realpath(source))
+    roots = [Path(os.path.realpath(r)) for r in os.environ.get("FRISK_MCP_ROOTS", "").split(os.pathsep) if r]
+    if real in roots:
+        return
+    if roots and not any(root in real.parents for root in roots):
+        raise ValueError(f"refused: {source} is outside FRISK_MCP_ROOTS")
+    if real in (Path("/"), Path(os.path.realpath(Path.home())), Path("/System")):
+        raise ValueError(f"refused: {source} is too broad to scan; name it in FRISK_MCP_ROOTS to allow it")
 
 
 TOOLS = {
     "scan_text": (
-        lambda text: _summary(scan_text(text, "<text>").findings, "<text>"),
+        lambda text: _summary(scan_text(text, "<text>"), "<text>"),
         "Vet a raw string (e.g. an MCP tool description, skill body, or prompt) for "
         "prompt-injection, tool-poisoning, and hidden/invisible-unicode instructions.",
         {"text": {"type": "string"}}, ["text"],
