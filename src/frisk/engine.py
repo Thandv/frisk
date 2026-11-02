@@ -34,9 +34,10 @@ _INTERNAL_FIELDS = ("origin", "source_line")
 @dataclass(frozen=True)
 class ScanLimits:
     """Bounds on one scan_path call. A file over max_file_bytes is not read (reason
-    too_large). The walk stops before the next file once max_files files were looked at,
-    max_bytes bytes were read, or deadline_s seconds have passed (file_cap, byte_cap,
-    deadline). Each of these is a coverage.unscanned warning, so the verdict is never PASS."""
+    too_large, a coverage.too_large block finding). The walk stops before the next file once
+    max_files files were looked at, max_bytes bytes were read, or deadline_s seconds have
+    passed (file_cap, byte_cap, deadline: a coverage.unscanned warning). So the verdict is
+    never PASS."""
     max_files: int = MAX_FILES
     max_file_bytes: int = MAX_FILE_BYTES
     max_bytes: int | None = None
@@ -201,7 +202,7 @@ def coverage_warning(rel: str, rule: str, message: str) -> ScanResult:
 
 def _not_scanned(rel: str, reason: str, detail: str, rule: str | None = None,
                  message: str = "") -> ScanResult:
-    """A file that was not pattern-matched: a skipped entry, plus a warn finding if `rule`."""
+    """A file that was not pattern-matched: a skipped entry, plus a `rule` finding if given."""
     result = coverage_warning(rel, rule, message) if rule is not None else ScanResult()
     result.coverage.skipped.append(Skipped(rel, reason, detail))
     return result
@@ -229,8 +230,9 @@ def _read_text(path: Path, rel: str, max_bytes: int | None) -> tuple[str | None,
     try:
         size = path.stat().st_size
         if max_bytes is not None and size > max_bytes:
-            return None, _not_scanned(rel, "too_large", f"{size} bytes", "coverage.unscanned",
-                                      f"file not scanned: {size} bytes is over the {max_bytes}-byte limit")
+            return None, _not_scanned(rel, "too_large", f"{size} bytes", "coverage.too_large",
+                                      f"file not scanned: {size} bytes is over the {max_bytes}-byte limit; "
+                                      f"raise --max-file-bytes to scan it, or leave it out of the target")
         data = path.read_bytes()
     except OSError as e:
         name = type(e).__name__

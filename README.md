@@ -132,7 +132,9 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   it raises a `coverage.surface_error` warning, and the rest of that file and every
   other file are still scanned.
 - `too_large`: a file larger than `--max-file-bytes` (default 2 MiB) is not read at all;
-  it raises a `coverage.unscanned` warning.
+  it raises a `coverage.too_large` finding at **block** severity, so the scan fails under
+  the default `--fail-on block` (anything could be in a file frisk did not read). Raise
+  `--max-file-bytes` to scan it, or leave it out of the target.
 - `file_cap`: a target directory is walked one directory at a time, in name order, and the
   walk stops after 20,000 files with a `coverage.unscanned` warning at the target, so a huge
   tree is never listed or read whole. (frisk-mcp also stops at a byte total, `byte_cap`,

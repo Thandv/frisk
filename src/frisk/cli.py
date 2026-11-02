@@ -122,8 +122,8 @@ def _cmd_scan(argv: list[str]) -> int:
     p.add_argument("--json", action="store_true", help="emit findings as JSON")
     p.add_argument("--sarif", action="store_true", help="emit SARIF 2.1.0 (GitHub code scanning)")
     p.add_argument("--max-file-bytes", type=_positive, default=MAX_FILE_BYTES, metavar="N",
-                   help=f"skip files larger than N bytes, and match only the first and last N/2 characters of a "
-                        f"longer --text (default: {MAX_FILE_BYTES}); either is a coverage warning")
+                   help=f"skip files larger than N bytes (a block finding), and match only the first and last N/2 "
+                        f"characters of a longer --text (a warning) (default: {MAX_FILE_BYTES})")
     p.add_argument("--fail-on", choices=["block", "warn", "never"], default="block",
                    help="exit non-zero when the worst finding reaches this level (default: block)")
     p.add_argument("-q", "--quiet", action="store_true", help="print only the verdict line")
