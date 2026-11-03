@@ -184,6 +184,10 @@ inserting lines above a finding does not turn it into a new alert
 `--mcp-config` results carry a logical location (`<text>`, `server::path`) instead of a
 file location.
 
+`--sarif-out FILE` writes the same SARIF to FILE from the same scan, while the report is
+printed as usual (text, or `--json`) and the exit code still follows `--fail-on`; a FILE
+frisk cannot write exits 2. So one run both gates and feeds code scanning.
+
 ### Audit everything you've *already* installed
 Point `frisk` at your MCP config and it resolves and scans every server you have wired up:
 
@@ -510,12 +514,25 @@ narrow what an agent may ask for:
 ## GitHub Action
 
 ```yaml
-- uses: Thandv/frisk@v0
-  with:
-    targets: "."          # paths / git URLs to scan
-    fail-on: "block"      # block | warn | never
-    sarif: "true"         # upload findings to the Security tab
+permissions:
+  contents: read
+  security-events: write  # required for sarif: "true" (the upload to the Security tab)
+steps:
+  - uses: actions/checkout@v4
+  - uses: Thandv/frisk@v0
+    with:
+      targets: "."          # paths / git URLs to scan
+      fail-on: "block"      # block | warn | never
+      sarif: "true"         # upload findings to the Security tab
 ```
+
+The Action installs frisk into its own venv (`$RUNNER_TEMP/frisk-venv`, never the runner's
+Python) and scans once: the text report goes to the job log, the SARIF to
+`$RUNNER_TEMP/frisk.sarif` (`--sarif-out`), and the job fails as `fail-on` says. `sarif`
+decides only whether that file is uploaded, which needs `permissions: security-events:
+write`; set `sarif: "false"` in a job without it. Inputs reach the scan only through
+environment variables, never as text in its script, so a `targets` value cannot run shell
+code: it is split on whitespace into paths and URLs, each taken literally.
 
 Finding paths are relative to what you name: `targets: "skills plugins"` reports
 `skills/foo/SKILL.md`, so code-scanning annotations land on the right repository file

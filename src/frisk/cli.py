@@ -124,6 +124,8 @@ def _cmd_scan(argv: list[str]) -> int:
     p.add_argument("--text", metavar="STR", help="scan a raw string instead of a path")
     p.add_argument("--json", action="store_true", help="emit findings as JSON")
     p.add_argument("--sarif", action="store_true", help="emit SARIF 2.1.0 (GitHub code scanning)")
+    p.add_argument("--sarif-out", metavar="FILE",
+                   help="also write SARIF 2.1.0 to FILE; the report is printed as usual and the exit code is unchanged")
     p.add_argument("--max-file-bytes", type=_positive, default=MAX_FILE_BYTES, metavar="N",
                    help=f"skip files larger than N bytes (a block finding), and match only the first and last N/2 "
                         f"characters of a longer --text (a warning) (default: {MAX_FILE_BYTES})")
@@ -164,6 +166,12 @@ def _cmd_scan(argv: list[str]) -> int:
         print(f"frisk: {printable(str(e))}", file=sys.stderr)
         return 2
     findings = result.sort().findings
+    if args.sarif_out:
+        try:
+            Path(args.sarif_out).write_text(to_sarif(result, __version__) + "\n", encoding="utf-8")
+        except OSError as e:
+            print(f"frisk: cannot write the SARIF file: {printable(str(e))}", file=sys.stderr)
+            return 2
 
     if args.json:
         print(to_json(result, label, servers if configs else None))
