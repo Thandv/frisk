@@ -48,17 +48,20 @@ def fake_secrets() -> dict[str, tuple[str, str]]:
     pw, key, tok = rand(ALNUM, 14), rand(ALNUM, 20), rand(ALNUM, 18)
     akia, asia = "AK" + "IA" + rand(string.ascii_uppercase + string.digits, 16), \
         "AS" + "IA" + rand(string.ascii_uppercase + string.digits, 16)
-    ghp, pat, sk = "gh" + "p_" + rand(ALNUM, 36), "github" + "_pat_" + rand(ALNUM + "_", 60), "s" + "k-" + rand(ALNUM, 40)
+    ghp, pat = "gh" + "p_" + rand(ALNUM, 36), "github" + "_pat_" + rand(ALNUM + "_", 60)
+    sk = "s" + "k-" + rand(ALNUM, 40)
     b64, hexrun = rand(B64, 40), rand("0123456789abcdef", 40)
     pem_body = rand(B64, 64)
     pem = "-----BEGIN " + "RSA PRIVATE KEY-----\n" + pem_body + "\n-----END " + "RSA PRIVATE KEY-----"
     userinfo, bearer, passwd, auth = rand(ALNUM, 16), rand(ALNUM, 24), rand(ALNUM, 12), rand(ALNUM, 12)
     return {
-        "password=": (f"password={pw}", pw), "api_key:": (f'api_key: "{key}"', key), "token =>": (f"token => {tok}", tok),
+        "password=": (f"password={pw}", pw), "api_key:": (f'api_key: "{key}"', key),
+        "token =>": (f"token => {tok}", tok),
         "passwd": (f"passwd={passwd}", passwd), "auth": (f"auth={auth}", auth),
         "access key id": (akia, akia), "session key id": (asia, asia), "ghp_": (ghp, ghp), "github_pat_": (pat, pat),
         "sk-": (sk, sk), "base64 run": (b64, b64), "hex run": (hexrun, hexrun), "PEM": (pem, pem_body),
-        "URL userinfo": (f"https://u:{userinfo}@git.example.invalid/r", userinfo), "Bearer": (f"Bearer {bearer}", bearer),
+        "URL userinfo": (f"https://u:{userinfo}@git.example.invalid/r", userinfo),
+        "Bearer": (f"Bearer {bearer}", bearer),
     }
 
 

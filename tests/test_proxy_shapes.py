@@ -141,8 +141,8 @@ class TestResultShapes(ShapeCase):
         self.assertTrue(out["result"]["instructions"].startswith(WARNING))
 
     def test_poisoned_prompt_and_resource_listings_are_dropped(self) -> None:
-        out = self.proxy.inspect(result(8, prompts=[{"name": "ok", "description": CLEAN_TEXT},
-                                                    {"name": "bad", "arguments": [{"name": "a", "description": POISON}]}],
+        bad = {"name": "bad", "arguments": [{"name": "a", "description": POISON}]}
+        out = self.proxy.inspect(result(8, prompts=[{"name": "ok", "description": CLEAN_TEXT}, bad],
                                         resources=[{"uri": "x:/1", "name": "n", "description": POISON}]))
         self.assertEqual([p["name"] for p in out["result"]["prompts"]], ["ok"])
         self.assertEqual(out["result"]["resources"], [])
@@ -153,7 +153,8 @@ class TestResultShapes(ShapeCase):
                     result(3, structuredContent={"t": 21}, content=[{"type": "text", "text": "21"}]),
                     result(4, content=[{"type": "resource", "resource": {"uri": "x:/a", "text": CLEAN_TEXT}},
                                        {"type": "image", "data": "AAAA", "mimeType": "image/png"}]),
-                    result(5, instructions=CLEAN_TEXT, prompts=[{"name": "p"}], resources=[{"uri": "x:/a", "name": "a"}])):
+                    result(5, instructions=CLEAN_TEXT, prompts=[{"name": "p"}],
+                           resources=[{"uri": "x:/a", "name": "a"}])):
             with self.subTest(msg=msg):
                 self.assertEqual(self.proxy.inspect(copy.deepcopy(msg)), msg)
         self.assertEqual(self.proxy.stats, {"dropped": 0, "flagged": 0})
@@ -168,7 +169,8 @@ class TestTools(ShapeCase):
 
     def test_poisoned_annotations_and_output_schema_drop_the_tool(self) -> None:
         for extra in ({"annotations": {"title": POISON}},
-                      {"outputSchema": {"type": "object", "properties": {"r": {"type": "string", "description": POISON}}}}):
+                      {"outputSchema": {"type": "object",
+                                        "properties": {"r": {"type": "string", "description": POISON}}}}):
             with self.subTest(extra=extra):
                 out = self.proxy.inspect(result(1, tools=[{"name": "t", "description": "Fine.", **extra}]))
                 self.assertEqual(out["result"]["tools"], [])

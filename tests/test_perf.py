@@ -94,7 +94,8 @@ SEEDS: dict[str, tuple[str, ...]] = {
                 "a" + chr(0xAD)),
     # FR-E6 F3.06: the excerpt redactor, over a whole text (engine runs it once per file with a finding).
     "redact": ("password", "password ", 'key"', "passwd:", "token =>", "://a", "://" + "u" * 40, "-----BEGIN ",
-               "-----BEGIN " + "RSA PRIVATE KEY-----", "-----BEGIN " + " " * 40, "AK" + "IA", "AK" + "IA" + "Z" * 15 + " ",
+               "-----BEGIN " + "RSA PRIVATE KEY-----", "-----BEGIN " + " " * 40, "AK" + "IA",
+               "AK" + "IA" + "Z" * 15 + " ",
                "Ab3" * 10 + "x ", "a1", "0123456789abcdef", "bearer ", "s" + "k-", "gh" + "p_", "key" + "y" * 64),
 }
 # Runs of one character class, given to every budgeted key as well.
