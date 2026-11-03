@@ -76,6 +76,13 @@ class TestServerRequests(ShapeCase):
                 self.assertIsNone(self.proxy.inspect(msg))
                 self.assertEqual([r["id"] for r in self.to_server()], ["e1"])
 
+    def test_a_request_without_an_id_is_dropped(self) -> None:
+        msg = self.sampling(CLEAN_TEXT)
+        del msg["id"]
+        self.assertIsNone(self.proxy.inspect(msg))
+        self.assertEqual(self.server.getvalue(), "")
+        self.assertIn("dropped a sampling/createMessage message with no id", self.log.getvalue())
+
     def test_a_clean_request_is_forwarded_unchanged(self) -> None:
         msg = self.sampling(CLEAN_TEXT)
         self.assertEqual(self.proxy.inspect(copy.deepcopy(msg)), msg)

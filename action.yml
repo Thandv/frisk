@@ -36,7 +36,8 @@ runs:
         FRISK_TARGETS: ${{ inputs.targets }}
         FRISK_FAIL_ON: ${{ inputs.fail-on }}
       run: |
-        read -r -a targets <<< "$FRISK_TARGETS"
+        # every line of the input, split on whitespace (read stops at its -d '' end with status 1)
+        read -r -d '' -a targets <<< "$FRISK_TARGETS" || true
         "$RUNNER_TEMP/frisk-venv/bin/python" -m frisk.cli --fail-on "$FRISK_FAIL_ON" \
           --sarif-out "$RUNNER_TEMP/frisk.sarif" -- "${targets[@]}"
     - name: Upload SARIF

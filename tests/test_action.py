@@ -78,7 +78,7 @@ class TestActionFile(unittest.TestCase):
     def test_inputs_reach_the_scan_through_env(self) -> None:
         for line in ("FRISK_TARGETS: ${{ inputs.targets }}", "FRISK_FAIL_ON: ${{ inputs.fail-on }}"):
             self.assertIn(line, self.text)
-        self.assertIn('read -r -a targets <<< "$FRISK_TARGETS"', self.blocks["Scan"])
+        self.assertIn('read -r -d \'\' -a targets <<< "$FRISK_TARGETS" || true', self.blocks["Scan"])
 
     def test_frisk_is_installed_into_a_venv_and_runs_once(self) -> None:
         self.assertIn('python3 -m venv "$RUNNER_TEMP/frisk-venv"', self.blocks["Install frisk"])
@@ -150,6 +150,10 @@ class TestScanStepInBash(unittest.TestCase):
 
     def test_a_target_that_looks_like_an_option_is_a_path(self) -> None:
         self.assertEqual(self.step("--fail-on never examples/malicious-skill"), 2)  # '--fail-on' is no path
+
+    def test_every_line_of_a_multi_line_targets_value_is_scanned(self) -> None:
+        self.assertEqual(self.step("examples/clean-skill\nexamples/malicious-skill\n"), 1)
+        self.assertEqual(self.step("examples/clean-skill\n\n  examples/clean-skill\n"), 0)
 
     def test_the_step_scans_and_writes_sarif(self) -> None:
         sarif = self.runner_temp / "frisk.sarif"

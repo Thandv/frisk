@@ -257,7 +257,10 @@ class Proxy:
         if not isinstance(msg, dict):
             self._log("dropped a server message that is not a JSON object")
             return None
-        if msg.get("method") in INSPECTED_REQUESTS and "id" in msg:
+        if msg.get("method") in INSPECTED_REQUESTS:
+            if "id" not in msg:  # a request with no id cannot be refused: never forwarded uninspected
+                self._log(f"dropped a {msg['method']} message with no id")
+                return None
             return self._inspect_request(msg)
         try:
             self._inspect_result(msg.get("result"))

@@ -499,7 +499,8 @@ whose content is not such an item, and a `resources/read` item whose `text` is n
 string, are dropped. If inspecting a message fails (its `tools`, `content`, `messages`,
 `contents`, `prompts` or `resources` is not a list, or `instructions` not a string), the
 client gets a JSON-RPC error for that id, code `-32603`, `frisk: inspection failed`,
-instead of the message; a server request frisk cannot read is refused as above. A
+instead of the message; a server request frisk cannot read is refused as above, and a
+`sampling/createMessage` or `elicitation/create` message with no `id` is dropped. A
 JSON-RPC batch (an array) is inspected message by message, and a server line that is not
 JSON is dropped. Each of these is logged. Other messages (notifications, other requests
 such as `roots/list`, binary content) are relayed as sent.
@@ -587,7 +588,7 @@ Python) and scans once: the text report goes to the job log, the SARIF to
 decides only whether that file is uploaded, which needs `permissions: security-events:
 write`; set `sarif: "false"` in a job without it. Inputs reach the scan only through
 environment variables, never as text in its script, so a `targets` value cannot run shell
-code: it is split on whitespace into paths and URLs, each taken literally.
+code: it is split on whitespace (spaces or newlines) into paths and URLs, each taken literally.
 
 Finding paths are relative to what you name: `targets: "skills plugins"` reports
 `skills/foo/SKILL.md`, so code-scanning annotations land on the right repository file
