@@ -431,7 +431,9 @@ runner. `frisk lock` prints `unpinned: upstream changes cannot be detected; pin
 <pkg>@x.y.z` (to stderr; the lock is still written) for each npx, uvx or pipx server whose
 package is not pinned to an exact version (`acme-tool`, `acme-tool@latest`,
 `acme-tool@^1.2`): what such a server runs can change upstream with no change frisk could
-pin. The lockfile format is version 1; `frisk verify` refuses a lockfile with any other
+pin. A package server that is not in the local cache gets `code not pinned, only how it
+starts (…)`: until it is cached only its launch is pinned, and its appearing in the cache
+later is DRIFT. The lockfile format is version 1; `frisk verify` refuses a lockfile with any other
 `version`, or none, with exit code 2 and one line.
 
 A git URL is pinned without its credentials, and `frisk verify` re-clones that clean URL:

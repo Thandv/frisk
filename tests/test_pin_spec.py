@@ -97,7 +97,7 @@ class TestUnpinnedWarning(SpecCase):
                      "url": {"command": "npx", "args": ["https://x.example.invalid/zq7tok/p.tgz"]}})
         code, err = self.lock()
         self.assertEqual(code, 0)
-        lines = err.splitlines()
+        lines = [line for line in err.splitlines() if "unpinned:" in line]
         for name, pkg in (("n", "acme-notes"), ("t", "@acme/tool"), ("r", "acme-range"), ("u", "acme-py")):
             self.assertIn(f"frisk lock: {self.cfg}::{name}: " + UNPINNED.format(pkg), lines)
         self.assertEqual(len(lines), 4)  # no line for exact pins or for a URL spec

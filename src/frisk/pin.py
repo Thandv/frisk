@@ -31,6 +31,7 @@ log = _root_log.getChild("pin")
 LOCK_DEFAULT = ".frisk-lock.json"
 LOCK_VERSION = 1  # unchanged by FR-E6: a server's digest changed, so such entries need a re-lock
 UNPINNED = "unpinned: upstream changes cannot be detected; pin {pkg}@x.y.z"
+NOT_PINNED = "code not pinned, only how it starts ({detail})"
 # The one message for an MCP config that an older frisk pinned as a whole file.
 RELOCK_WHOLE_CONFIG = "MCP config pinned as a whole file by an older frisk: run frisk lock again to pin each server"
 
@@ -118,8 +119,9 @@ def _where(rc: dict, key: str, base: Path | None) -> str:
 def build_lock(targets: list[str], configs: list[str], base: Path | None = None,
                notes: list[str] | None = None) -> dict:
     """The lockfile for `targets` and `configs`; each local path inside `base` (the
-    lockfile's directory) is also stored relative to it, as the entry's 'relative'. Each server whose package is not pinned to an
-    exact version adds a line to `notes`."""
+    lockfile's directory) is also stored relative to it, as the entry's 'relative'. Each
+    package server whose code is not pinned (not in the local cache) and each whose package
+    is not pinned to an exact version adds a line to `notes`."""
     entries: dict[str, dict] = {}
     targets, configs = split_configs(targets, configs)
     for t in targets:
@@ -137,6 +139,8 @@ def build_lock(targets: list[str], configs: list[str], base: Path | None = None,
             if s.kind == "package-cached":
                 entry["version"] = s.version
             entries[f"{cfg}::{s.name}"] = entry
+            if notes is not None and s.kind == "package":  # an uncached package: no code to pin
+                notes.append(f"{cfg}::{s.name}: {NOT_PINNED.format(detail=s.detail)}")
             if s.unpinned and notes is not None:
                 notes.append(f"{cfg}::{s.name}: " + UNPINNED.format(pkg=s.unpinned))
     return {"version": LOCK_VERSION, "entries": entries}
