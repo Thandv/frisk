@@ -51,7 +51,7 @@ class DebugLogTests(unittest.TestCase):
 
     def test_on_logs_clone_without_url(self):
         err = self._stderr("1", lambda: _clone(_ok))
-        self.assertIn("[frisk debug] frisk.sources git clone start args=6", err)
+        self.assertIn("[frisk debug] frisk.sources git clone start args=20", err)
         self.assertIn("git clone end status=exit rc=0", err)
         self.assertNotIn("ghp_secrettoken123", err)
         self.assertNotIn("github.com", err)

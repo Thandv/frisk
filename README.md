@@ -104,6 +104,16 @@ of such a URL fails, git's own message is not shown, since it could echo the tok
 clone that has not finished after two minutes stops with `git clone timed out after 120 s`
 (exit code 2), never with the git command it ran.
 
+The repository you clone is untrusted, so git runs with its escape hatches closed: only the
+`https` and `ssh` protocols (`-c protocol.allow=never`, so `http://`, `git://`, `ext::` and
+`file://` fail), no hooks (`core.hooksPath=/dev/null`), no symlinks written
+(`core.symlinks=false`), no fsmonitor, no submodules (`--no-recurse-submodules`), no Git LFS
+download (`GIT_LFS_SKIP_SMUDGE=1`), no system git config (`GIT_CONFIG_NOSYSTEM=1`) and no
+prompt of any kind (`GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/bin/false`, and ssh with
+`BatchMode=yes` through `GIT_SSH_COMMAND`, which replaces one you set); the URL follows
+`--`. A target holding whitespace or a control character (inside it; whitespace around it
+is dropped), or whose host starts with `-`, is refused before git runs (exit code 2).
+
 ### What was not scanned (coverage)
 
 Every scan reports what it could *not* pattern-match, so a clean verdict never hides

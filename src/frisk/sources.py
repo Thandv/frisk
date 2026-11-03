@@ -39,8 +39,51 @@ _GIT_URL = re.compile(r"^(https?://[^\s]+?(\.git)?|git@[^\s][^\s:]*:[^\s]+|githu
 def is_git_url(s: str) -> bool:
     if Path(s).exists():
         return False
+    if s.startswith("file://"):  # never cloned, except through the test seam
+        return _file_urls_allowed()
     return bool(_GIT_URL.match(s.strip())) or s.startswith(("https://github.com/",
                                                             "https://gitlab.com/"))
+
+
+# The test seam for cloning a local bare repository: a file:// target is a git URL only when
+# a test sets this flag AND FRISK_TEST_ALLOW_FILE_URL=1, and only then may git use the file
+# protocol. Never set outside tests.
+_ALLOW_FILE_URL_FOR_TESTS = False
+
+
+def _file_urls_allowed() -> bool:
+    return _ALLOW_FILE_URL_FOR_TESTS and os.environ.get("FRISK_TEST_ALLOW_FILE_URL") == "1"
+
+
+# git configuration for cloning an untrusted URL: only https and ssh, and none of git's
+# ways to run code from the clone or the environment (hooks, fsmonitor), write symlinks,
+# fetch submodules or prompt for anything.
+_GIT_HARDENING = ("-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.ssh.allow=always",
+                  "-c", "core.hooksPath=/dev/null", "-c", "core.symlinks=false", "-c", "core.fsmonitor=false")
+_GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", "GIT_ASKPASS": "/bin/false",
+            "GIT_CONFIG_NOSYSTEM": "1", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
+
+
+def git_clone_argv(url: str, dest: str) -> list[str]:
+    """The git command that clones `url` into `dest`: hardened, shallow, the URL after '--'."""
+    seam = ("-c", "protocol.file.allow=always") if _file_urls_allowed() else ()
+    return ["git", *_GIT_HARDENING, *seam, "clone", "--depth", "1", "--no-recurse-submodules", "--quiet",
+            "--", url, dest]
+
+
+def _check_git_target(target: str) -> None:
+    """Refuse (ValueError), before git runs, a target holding whitespace or a control
+    character (inside it: whitespace around it is dropped, as is_git_url reads it), and an
+    ssh-style or URL host that starts with '-' (read as an option)."""
+    target = target.strip()
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in target):
+        raise ValueError("refused: a git URL must not contain whitespace or control characters")
+    if "://" in target:
+        host = target.split("://", 1)[1].split("/", 1)[0].rpartition("@")[2]
+    else:  # scp-like 'user@host:path'
+        host = target.partition("@")[2].split(":", 1)[0]
+    if host.startswith("-"):
+        raise ValueError("refused: a git URL's host must not start with '-'")
 
 
 def display_target(target: str) -> str:
@@ -78,18 +121,17 @@ def _normalize_git(url: str) -> str:
 def materialize(target: str):
     """Yield (root_path: Path, label: str) for scanning; clean up clones afterward."""
     if is_git_url(target):
+        _check_git_target(target)
         tmp = tempfile.mkdtemp(prefix="frisk-")
         try:
             t0 = time.monotonic()
+            argv = git_clone_argv(_normalize_git(target), tmp)
             # The URL is not logged: it can carry credentials.
-            log.debug("git clone start args=6")
+            log.debug("git clone start args=%d", len(argv) - 1)
             try:
-                # git must never wait for a password: no terminal prompt and no stdin to read.
-                r = subprocess.run(
-                    ["git", "clone", "--depth", "1", "--quiet", _normalize_git(target), tmp],
-                    capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
-                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-                )
+                # git must never wait for a password: no prompt, no askpass, no stdin to read.
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
+                                   env={**os.environ, **_GIT_ENV})
             except Exception as e:
                 log.debug("git clone end status=error error=%s ms=%d", type(e).__name__, ms_since(t0))
                 if isinstance(e, subprocess.TimeoutExpired):  # its message is the whole command, URL and token
