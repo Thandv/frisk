@@ -455,24 +455,38 @@ Wrap the server command in your client config:
     } } }
 ```
 
-The proxy launches the real server, relays the protocol, and enforces:
-- a tool with a **block**-level finding, or too long to scan whole (over 2 MiB characters), is **dropped** (the model never sees it);
+The proxy launches the real server, relays the protocol, and inspects every
+server-to-client message by its shape:
+- a tool with a **block**-level finding in its name, `title`, description, input or output
+  schema or `annotations`, or too long to scan whole (over 2 MiB characters), is
+  **dropped** (the model never sees it); so is a prompt or resource in a `prompts/list`,
+  `resources/list` or `resources/templates/list` result with a block-level finding in any
+  of its strings;
 - a tool whose description **changed** since first seen is **flagged** (possible rug pull);
-- prompt-injection detected in a **tool result** gets a visible warning prepended before it reaches the model.
+- prompt-injection in text the model reads gets a visible warning prepended before it
+  reaches the model: a tool result's text items and embedded-resource text, its
+  `structuredContent` (every string in it is scanned; since it must match the tool's output
+  schema it is left as is, and a warning item goes first in `content`), `prompts/get`
+  messages, `resources/read` contents and the server's `initialize` `instructions`;
+- a `sampling/createMessage` request (its messages and system prompt) or an
+  `elicitation/create` request (its message and requested schema) with a block-level
+  finding, or too long to scan whole, **never reaches the client**: the server gets a
+  JSON-RPC error for its id, code `-32001`, `frisk: request refused (possible prompt
+  injection)`.
 
-It fails closed on what it inspects (each tool's name, description and input schema in a
-tool list, and the text items of a tool result's `content`). A tool entry that is
-not an object with a string `name` and a string `description` (a missing or null
-description counts as empty), or whose inspection raises, is dropped and the other tools
-are still judged; a tool-result content item that is not an object, or a text item whose
-`text` is not a string, is dropped. If inspecting a message's `tools` or `content` fails
-(either one is not a list, say), the client gets a JSON-RPC error for that id, code
-`-32603`, `frisk: inspection failed`, instead of the message. A JSON-RPC batch (an array)
-is inspected message by message, and a server line that is not JSON is dropped. Each of
-these is logged. Everything else is relayed as sent, uninspected: other tool fields
-(`title`, `annotations`, `outputSchema`), `structuredContent`, content items that are not
-text, resources, prompts, the server's `instructions`, and requests the server sends the
-client (such as `sampling/createMessage`).
+It fails closed. A tool entry that is not an object with a string `name` and a string
+`description` (a missing or null description counts as empty) and, if it has one, a
+string `title`, or whose inspection raises, is dropped and the other tools are still
+judged; a listing entry that is not an object is dropped; a content item that is not an
+object, a text item or embedded resource whose `text` is not a string, a prompt message
+whose content is not such an item, and a `resources/read` item whose `text` is not a
+string, are dropped. If inspecting a message fails (its `tools`, `content`, `messages`,
+`contents`, `prompts` or `resources` is not a list, or `instructions` not a string), the
+client gets a JSON-RPC error for that id, code `-32603`, `frisk: inspection failed`,
+instead of the message; a server request frisk cannot read is refused as above. A
+JSON-RPC batch (an array) is inspected message by message, and a server line that is not
+JSON is dropped. Each of these is logged. Other messages (notifications, other requests
+such as `roots/list`, binary content) are relayed as sent.
 
 A tool result longer than frisk's text limit (2 MiB characters) is still delivered,
 prefixed `[frisk: partially scanned — ...]`: its start and end are pattern-matched and all of
