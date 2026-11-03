@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import surfaces, walk
 from .debug import log as _root_log
+from .redact import Redactor
 from .rules import (
     ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
     INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
@@ -112,9 +113,10 @@ def _line_starts(text: str) -> list[int]:
     return [0] + [m.end() for m in _NEWLINE.finditer(text)]
 
 
-def _excerpt(text: str, idx: int, span: int = 80) -> str:
-    start = max(0, idx - 10)
-    snippet = text[start:idx + span].replace("\n", "\\n")
+def _excerpt(secrets: Redactor, span: Span, idx: int, after: int = 80) -> str:
+    """The text around offset `idx` (10 characters before, `after` from it), inside the span,
+    with its secrets masked."""
+    snippet = secrets.window(max(span.start, idx - 10), min(span.end, idx + after)).replace("\n", "\\n")
     return snippet.strip()[:120]
 
 
@@ -127,7 +129,7 @@ _WARN_CAPPED_KINDS = {"md_inline_code"}  # a block finding from these spans repo
 
 
 def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Finding],
-               seen: set[tuple[int, str]]) -> None:
+               seen: set[tuple[int, str]], secrets: Redactor) -> None:
     """Run the span's rules on text[span.start:span.end]; lines are file lines.
 
     The span is matched as its own string (so ^, lookbehinds and word boundaries see the
@@ -151,7 +153,7 @@ def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Fin
         if capped and sev == "block":
             sev = "warn"
         for m in rx.finditer(seg):
-            add(m.start(), rid, cat, sev, desc, _excerpt(seg, m.start()))
+            add(m.start(), rid, cat, sev, desc, _excerpt(secrets, span, span.start + m.start()))
     if span.kind not in _RULES_FOR_KIND or span.kind == "unicode":  # every text kind
         for idx, rid, desc in hidden_unicode(seg, span.start == 0):
             cat, sev, _ = RULE_META[rid]
@@ -162,9 +164,10 @@ def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
     starts = _line_starts(text)
     out: list[Finding] = []
     seen: set[tuple[int, str]] = set()
+    secrets = Redactor(text)
     # Capped spans go last, so a match also found by an uncapped span keeps its severity.
     for span in sorted(spans, key=lambda s: s.kind in _WARN_CAPPED_KINDS):
-        _scan_span(text, span, starts, rel, out, seen)
+        _scan_span(text, span, starts, rel, out, seen, secrets)
     return sort_findings(out)
 
 

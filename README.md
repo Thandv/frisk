@@ -309,6 +309,16 @@ itself), the target names and error messages, are shown as escapes (`\x1b`, `\u2
 neither a config nor a scanned package can rewrite what your terminal shows; a lone
 surrogate (`\ud800`) is shown the same way. `--json` and `--sarif` escape them as JSON does.
 
+A finding's excerpt never carries a secret-like value, in any output (text, `--json`,
+`--sarif`, `--sarif-out`, `--text`): it is masked as `****(len=N)`, its length only. That
+is a value after a secret's name (`key`, `token`, `secret`, `password`, `passwd`, `auth`,
+`cookie`, as in `api_key`, `access_token`, `private_key`) and `=`, `:` or `=>`, keeping the
+name (`password=****(len=11)`); a `Bearer` or `Basic` credential; a URL's `user:password@`;
+an `sk-…`, `ghp_…` (`gho_`, `ghs_`, `ghu_`, `ghr_`) or `github_pat_…` token; an `AKIA…` or
+`ASIA…` access-key id; a PEM private-key block; and a run of 32 or more base64 or hex
+characters that mixes letters and digits with high entropy (so a long word or identifier
+stays). A secret the excerpt only partly covers is masked whole.
+
 ### Detect rug pulls (pin what you approved, catch silent changes)
 
 The sneakiest supply-chain attack: a server shows clean content when you approve it,
