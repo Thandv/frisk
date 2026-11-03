@@ -1,9 +1,12 @@
 """Runtime enforcement proxy.
 
 Static `verify` catches drift only when you run it. The proxy closes that window:
-it sits between an MCP client and a server and re-checks tool descriptions on
+it sits between an MCP client and a server and re-checks tool definitions on
 *every* load, in real time, so a clean-at-approval / malicious-later swap (a "rug
-pull") can't slip through between scheduled checks.
+pull") can't slip through between scheduled checks. Each tool is pinned by a hash of
+its name, title, description, input schema and annotations (tool_pin), kept in a pins
+file across runs (frisk proxy defaults to default_pins_file; the file holds hashes only),
+so a change between client restarts, or to the schema alone, is caught too.
 
 How it works: your client launches `frisk proxy -- <the real server command>`
 instead of the server directly. The proxy spawns the real server, relays the
@@ -13,7 +16,8 @@ shape (no request-id map):
   - `tools/list` results   -> each tool's name, title, description, input and output
         schemas and annotations are scanned.
         block-severity finding      => the tool is DROPPED (client never sees it)
-        description changed vs pin   => kept, but flagged (possible rug pull)
+        definition changed vs pin    => flagged (kept, annotated, re-pinned), or dropped
+                                        with --on-change drop (its pin kept)
         warn-severity finding        => kept, but its description is annotated
   - `prompts/list`, `resources/list` (and templates) -> an entry with a block-level
         finding in any of its strings is dropped.
@@ -36,14 +40,18 @@ Stdlib only.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import json
+import os
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Callable, TextIO
 
 from .debug import log as _root_log, ms_since
@@ -135,11 +143,42 @@ def _blocks(findings: list) -> bool:
     return worst_severity(findings) == "block" or any(f.rule == "coverage.truncated" for f in findings)
 
 
+# The fields of a tool definition a pin covers.
+PINNED_FIELDS = ("name", "title", "description", "inputSchema", "annotations")
+ON_CHANGE = ("flag", "drop")
+
+
+def tool_pin(tool: dict) -> str:
+    """sha256 of the canonical JSON (sorted keys, compact) of the tool's PINNED_FIELDS."""
+    canonical = json.dumps({key: tool.get(key) for key in PINNED_FIELDS}, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def default_pins_file(server_cmd: list[str]) -> Path:
+    """${XDG_STATE_HOME:-~/.local/state}/frisk/pins/<sha256 of the server argv>.json."""
+    state = os.environ.get("XDG_STATE_HOME", "")
+    if not os.path.isabs(state):  # the XDG spec: a relative value is ignored
+        state = os.path.join(os.path.expanduser("~"), ".local", "state")
+    argv = json.dumps(server_cmd, ensure_ascii=False).encode("utf-8", "surrogatepass")
+    return Path(state) / "frisk" / "pins" / f"{hashlib.sha256(argv).hexdigest()}.json"
+
+
 class Proxy:
-    def __init__(self, server_cmd: list[str], log: TextIO = sys.stderr):
+    def __init__(self, server_cmd: list[str], log: TextIO = sys.stderr, pins_file: Path | None = None,
+                 on_change: str = "flag"):
+        """`pins_file` (None: pins live in memory only) holds the tool pins across runs;
+        `on_change` says what a tool whose definition changed since it was pinned gets:
+        'flag' (kept, annotated, re-pinned) or 'drop' (dropped, its pin kept)."""
+        if on_change not in ON_CHANGE:
+            raise ValueError(f"on_change must be one of {ON_CHANGE}")
         self.server_cmd = server_cmd
         self.log = log
-        self.pins: dict[str, str] = {}          # tool name -> description hash
+        self.pins_file = pins_file
+        self.on_change = on_change
+        self.pins: dict[str, str] = self._load_pins()  # tool name -> tool_pin
+        self._saved = dict(self.pins)
+        self._persist_failed = False
         self.stats = {"dropped": 0, "flagged": 0}
         # Where a refusal of a server request is written: the server's stdin while run()
         # relays (shared with the client->server thread, so writes take the lock).
@@ -148,6 +187,50 @@ class Proxy:
 
     def _log(self, msg: str) -> None:
         print(f"[frisk-proxy] {msg}", file=self.log, flush=True)
+
+    # -- pins ------------------------------------------------------------------
+    def _load_pins(self) -> dict[str, str]:
+        """The pins in pins_file; none (as on a first run, logged) when it is missing,
+        unreadable or not a JSON object of tool name to hash."""
+        if self.pins_file is None:
+            return {}
+        try:
+            data = json.loads(self.pins_file.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as e:
+            self._log(f"pins file unreadable ({type(e).__name__}); starting with no pins")
+            return {}
+        if not (isinstance(data, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in data.items())):
+            self._log("pins file is not a map of tool names to hashes; starting with no pins")
+            return {}
+        return data
+
+    def _save_pins(self) -> None:
+        """Write the pins atomically (a 0600 temp file in the same 0700 directory, then
+        os.replace), so a crash never leaves the file half written. A failure is logged
+        once and the pins stay in memory: the relay goes on."""
+        if self.pins_file is None or self.pins == self._saved:
+            return
+        tmp = None
+        try:
+            self.pins_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=self.pins_file.parent, prefix=".pins.", suffix=".tmp")  # mode 0600
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(self.pins, sort_keys=True, indent=1))
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self.pins_file)
+            tmp = None
+            self._saved = dict(self.pins)
+        except OSError as e:
+            if not self._persist_failed:
+                self._log(f"pins not persisted ({type(e).__name__}); keeping them in memory")
+            self._persist_failed = True
+        finally:
+            if tmp is not None:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
 
     def _to_server(self, line: str) -> None:
         with self._server_lock:
@@ -222,6 +305,7 @@ class Proxy:
             return
         if "tools" in result:
             result["tools"] = self._filter_tools(_listed(result, "tools"))
+            self._save_pins()
         for key, what in _LISTINGS.items():
             if key in result:
                 result[key] = self._filter_entries(_listed(result, key), what)
@@ -261,8 +345,12 @@ class Proxy:
         """Judge one well-formed tool: False drops it; a kept tool may be annotated."""
         name = tool["name"]
         desc = tool.get("description") or ""
-        h = hashlib.sha256(desc.encode("utf-8", "surrogatepass")).hexdigest()
+        h = tool_pin(tool)
         changed = name in self.pins and self.pins[name] != h
+        if changed and self.on_change == "drop":
+            self.stats["dropped"] += 1
+            self._log(f"dropped tool '{name}': definition changed since it was pinned (possible rug pull)")
+            return False  # its pin stays: the approved definition is the one let through
         self.pins[name] = h
 
         findings = scan_text(_tool_text(tool), name).findings
@@ -279,7 +367,7 @@ class Proxy:
         if sev == "warn":
             notes.append(findings[0].description)
         if changed:
-            notes.append("description changed since first seen (possible rug pull)")
+            notes.append("definition changed since it was pinned (possible rug pull)")
         if notes:
             self.stats["flagged"] += 1
             self._log(f"flagged tool '{name}': {'; '.join(notes)}")

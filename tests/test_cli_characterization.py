@@ -179,7 +179,8 @@ class TestProxyArgsCharacterization(unittest.TestCase):
     def test_missing_separator_exits_2(self) -> None:
         code, out, err = run(["proxy", "uvx", "some-server"])
         self.assertEqual((code, out), (2, ""))
-        self.assertEqual(err, "frisk proxy: usage: frisk proxy [--log FILE] -- <server command>\n"
+        self.assertEqual(err, "frisk proxy: usage: frisk proxy [--log FILE] [--pins FILE | --no-pins] "
+                              "[--on-change flag|drop] -- <server command>\n"
                               "  e.g.  frisk proxy -- uvx some-mcp-server\n")
 
     def test_empty_server_command_exits_2(self) -> None:

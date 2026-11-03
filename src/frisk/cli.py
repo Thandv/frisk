@@ -264,7 +264,8 @@ def _cmd_verify(argv: list[str]) -> int:
 
 def _cmd_proxy(argv: list[str]) -> int:
     if "--" not in argv:
-        print("frisk proxy: usage: frisk proxy [--log FILE] -- <server command>\n"
+        print("frisk proxy: usage: frisk proxy [--log FILE] [--pins FILE | --no-pins] [--on-change flag|drop] "
+              "-- <server command>\n"
               "  e.g.  frisk proxy -- uvx some-mcp-server", file=sys.stderr)
         return 2
     sep = argv.index("--")
@@ -275,7 +276,16 @@ def _cmd_proxy(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="frisk proxy",
                                 description="Enforce frisk checks at runtime between an MCP client and server.")
     p.add_argument("--log", metavar="FILE", help="append proxy events to a file (default: stderr)")
+    where = p.add_mutually_exclusive_group()
+    where.add_argument("--pins", metavar="FILE", type=Path,
+                       help="keep tool pins in FILE across runs (default: $XDG_STATE_HOME/frisk/pins/<sha256 of the "
+                            "server command>.json, with ~/.local/state when XDG_STATE_HOME is unset)")
+    where.add_argument("--no-pins", action="store_true", help="keep tool pins in memory only; write no pins file")
+    p.add_argument("--on-change", choices=proxy.ON_CHANGE, default="flag",
+                   help="a tool whose definition changed since it was pinned: flag it (kept, annotated) or drop it "
+                        "(default: flag)")
     args = p.parse_args(opts)
+    pins = None if args.no_pins else args.pins or proxy.default_pins_file(server_cmd)
     with contextlib.ExitStack() as stack:  # the --log file is closed on every path
         try:
             logf = stack.enter_context(open(args.log, "a", encoding="utf-8")) if args.log else sys.stderr
@@ -283,7 +293,7 @@ def _cmd_proxy(argv: list[str]) -> int:
             print(f"frisk proxy: cannot open the log file: {printable(str(e))}", file=sys.stderr)
             return 2
         try:
-            return proxy.Proxy(server_cmd, log=logf).run()
+            return proxy.Proxy(server_cmd, log=logf, pins_file=pins, on_change=args.on_change).run()
         except proxy.LaunchError as e:  # not found, not executable, ...
             print(f"frisk proxy: cannot launch server: {printable(str(e))}", file=sys.stderr)
             return 2

@@ -462,7 +462,9 @@ server-to-client message by its shape:
   **dropped** (the model never sees it); so is a prompt or resource in a `prompts/list`,
   `resources/list` or `resources/templates/list` result with a block-level finding in any
   of its strings;
-- a tool whose description **changed** since first seen is **flagged** (possible rug pull);
+- a tool whose definition **changed** since it was pinned (its name, `title`, description,
+  input schema or `annotations`; [pins](#proxy-pins) persist across restarts) is **flagged**
+  (possible rug pull), or **dropped** with `--on-change drop`;
 - prompt-injection in text the model reads gets a visible warning prepended before it
   reaches the model: a tool result's text items and embedded-resource text, its
   `structuredContent` (every string in it is scanned; since it must match the tool's output
@@ -499,6 +501,21 @@ status (128 + the signal number if a signal ended it). A server command that can
 started, or a `--log` file that cannot be opened, is one line on stderr and exit code 2.
 
 Events are logged to stderr (add `--log frisk-proxy.log` to keep a file).
+
+<a id="proxy-pins"></a>
+**Pins.** Each tool is pinned by sha256 of the canonical JSON (sorted keys, compact) of its
+`name`, `title`, `description`, `inputSchema` and `annotations`, so a schema-only swap is a
+change too. The pins persist across runs, so a rug pull between client restarts is caught:
+by default in `${XDG_STATE_HOME:-~/.local/state}/frisk/pins/<sha256 of the server
+command>.json`, or in the file `--pins FILE` names; `--no-pins` keeps them in memory only
+and writes nothing. The file maps tool names to hashes, never descriptions; it is written
+only while the proxy runs, atomically (a temp file in the same directory, then a rename),
+with mode 0600 in a 0700 directory. `--on-change flag` (the default) keeps a changed tool,
+annotates it and pins the new definition; `--on-change drop` drops it and keeps the old
+pin, so only the approved definition gets through (delete the pins file to approve the
+new one). A pins file that cannot be read or is not a map of names to hashes is logged and
+the proxy starts as on a first run; a pins file that cannot be written is logged once
+(`pins not persisted`) and the proxy keeps relaying with its pins in memory.
 
 ## Use it as an MCP server (let your agent vet *before* it installs)
 

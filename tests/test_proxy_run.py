@@ -55,8 +55,9 @@ class TestProxyRun(unittest.TestCase):
     def _start(self, proxy_args: list[str], **extra_env: str) -> subprocess.Popen[str]:
         # pytest's `pythonpath` setting only affects this process, so the child gets
         # PYTHONPATH explicitly.
+        # FR-E6: frisk proxy keeps tool pins under XDG_STATE_HOME; never the real one.
         env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
-               "FRISK_DEBUG": "0", **extra_env}
+               "FRISK_DEBUG": "0", "XDG_STATE_HOME": str(self.pidfile.parent), **extra_env}
         proc = subprocess.Popen(
             [sys.executable, "-m", "frisk.cli", "proxy", *proxy_args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
