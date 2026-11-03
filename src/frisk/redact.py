@@ -26,8 +26,9 @@ _RUN = re.compile(r"(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{32,}={0,2}")
 _MIN_ENTROPY = 3.0  # bits per character: random hex is ~4, random base64 ~6, a long word far less
 
 
-def mask(value: str) -> str:
-    return f"****(len={len(value)})"
+def mask(length: int) -> str:
+    """What a secret of `length` characters shows as."""
+    return f"****(len={length})"
 
 
 def secret_spans(text: str) -> list[tuple[int, int]]:
@@ -66,7 +67,8 @@ class Redactor:
         self._spans: list[tuple[int, int]] | None = None
 
     def window(self, start: int, end: int) -> str:
-        """text[start:end] with each secret that overlaps it masked by its full length."""
+        """text[start:end] with each secret that overlaps it masked by its full length (taken
+        from its span, never by copying it: one span can cover most of a long text)."""
         if self._spans is None:
             self._spans = secret_spans(self.text)
         spans = self._spans
@@ -77,7 +79,7 @@ class Redactor:
             s, e = spans[i]
             if e > at:
                 out.append(self.text[at:max(s, at)])
-                out.append(mask(self.text[s:e]))
+                out.append(mask(e - s))
                 at = min(e, end)
             i += 1
         out.append(self.text[at:end])
