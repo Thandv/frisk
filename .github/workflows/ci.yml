@@ -38,3 +38,42 @@ jobs:
       - name: mypy src (advisory)
         run: mypy src
         continue-on-error: true
+
+  # The composite Action itself, as a user runs it (uses: ./). sarif is 'false' on both
+  # steps: this job has no security-events permission, and the malicious example's planted
+  # findings must never reach the Security tab. Its SARIF is checked here instead.
+  action-selftest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Action passes the clean example
+        uses: ./
+        with:
+          targets: examples/clean-skill
+          fail-on: block
+          sarif: "false"
+      - name: Action on the malicious example
+        id: malicious
+        continue-on-error: true
+        uses: ./
+        with:
+          targets: examples/malicious-skill
+          fail-on: block
+          sarif: "false"
+      - name: The malicious example failed the Action
+        env:
+          OUTCOME: ${{ steps.malicious.outcome }}
+        run: test "$OUTCOME" = failure
+      - name: The malicious example's SARIF is well formed
+        run: |
+          python3 - "$RUNNER_TEMP/frisk.sarif" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as fh:
+              doc = json.load(fh)
+          run = doc["runs"][0]
+          assert doc["version"] == "2.1.0", doc["version"]
+          assert run["tool"]["driver"]["name"] == "frisk", run["tool"]["driver"]
+          assert isinstance(run["results"], list) and run["results"], "no results"
+          PY

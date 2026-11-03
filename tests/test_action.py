@@ -28,8 +28,8 @@ ACTION = REPO / "action.yml"
 
 
 def run_blocks(text: str) -> dict[str, str]:
-    """Each step's run: script, by step name: the indented lines of a 'run: |' block, or a
-    one-line 'run: ...' value."""
+    """Each step's run: script, by step name (an unnamed step by its line number): the
+    indented lines of a 'run: |' block, or a one-line 'run: ...' value."""
     blocks: dict[str, str] = {}
     lines = text.splitlines()
     name = ""
@@ -37,6 +37,10 @@ def run_blocks(text: str) -> dict[str, str]:
         stripped = line.strip()
         if stripped.startswith("- name:"):
             name = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("- "):  # a step that is not named
+            name = f"line {i + 1}"
+        if stripped.startswith("- run:"):
+            stripped = stripped[2:]
         if not stripped.startswith("run:"):
             continue
         value = stripped[len("run:"):].strip()
