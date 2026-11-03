@@ -486,7 +486,10 @@ server-to-client message by its shape:
   reaches the model: a tool result's text items and embedded-resource text, its
   `structuredContent` (every string in it is scanned; since it must match the tool's output
   schema it is left as is, and a warning item goes first in `content`), `prompts/get`
-  messages, `resources/read` contents and the server's `initialize` `instructions`;
+  messages, `resources/read` contents, the server's `initialize` `instructions` and an
+  error answer's `message` or `data` (the warning goes first in the message; the data is
+  removed); any other content item (a `resource_link`, an item of no known type) with a
+  block-level finding in a string, binary data aside, is dropped;
 - a `sampling/createMessage` request (its messages and system prompt) or an
   `elicitation/create` request (its message and requested schema) with a block-level
   finding, or too long to scan whole, **never reaches the client**: the server gets a
@@ -506,7 +509,8 @@ instead of the message; a server request frisk cannot read is refused as above, 
 `sampling/createMessage` or `elicitation/create` message with no `id` is dropped. A
 JSON-RPC batch (an array) is inspected message by message, and a server line that is not
 JSON is dropped. Each of these is logged. Other messages (notifications, other requests
-such as `roots/list`, binary content) are relayed as sent.
+such as `roots/list`, binary content, a `prompts/get` description, `serverInfo`,
+`completion` values) are relayed as sent.
 
 A tool result longer than frisk's text limit (2 MiB characters) is still delivered,
 prefixed `[frisk: partially scanned — ...]`: its start and end are pattern-matched and all of

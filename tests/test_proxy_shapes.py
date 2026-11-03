@@ -147,6 +147,29 @@ class TestResultShapes(ShapeCase):
         self.assertEqual([p["name"] for p in out["result"]["prompts"]], ["ok"])
         self.assertEqual(out["result"]["resources"], [])
 
+    def test_an_error_answer_carrying_injection_is_annotated(self) -> None:
+        """Clients show an error's message (and data) to the model as the tool's answer, so a
+        server could move its payload out of result into error."""
+        for error in ({"code": -32000, "message": POISON}, {"code": -32000, "message": "Failed.", "data": POISON},
+                      {"code": -32000, "message": "Failed.", "data": {"detail": [POISON]}}):
+            with self.subTest(error=error):
+                out = self.proxy.inspect({"jsonrpc": "2.0", "id": 9, "error": copy.deepcopy(error)})
+                self.assertEqual((out["id"], out["error"]["code"]), (9, -32000))
+                self.assertTrue(out["error"]["message"].startswith(WARNING), out)
+                self.assertNotIn(POISON, json.dumps(out.get("error", {}).get("data")))
+        clean = {"jsonrpc": "2.0", "id": 10, "error": {"code": -32602, "message": "Unknown tool", "data": {"n": 1}}}
+        self.assertEqual(self.proxy.inspect(copy.deepcopy(clean)), clean)
+
+    def test_a_content_item_of_another_type_carrying_injection_is_dropped(self) -> None:
+        """A resource_link's name and description, or an item without a known type, reach the
+        client too: one with a block-level finding is dropped, the others are kept."""
+        for item in ({"type": "resource_link", "uri": "x:/a", "name": "a", "description": POISON},
+                     {"text": POISON}, {"type": "Text", "text": POISON}):
+            with self.subTest(item=item):
+                keep = {"type": "image", "data": "AAAA", "mimeType": "image/png"}
+                out = self.proxy.inspect(result(1, content=[item, keep]))
+                self.assertEqual(out["result"]["content"], [keep])
+
     def test_clean_results_are_unchanged(self) -> None:
         for msg in (result(1, messages=[{"role": "user", "content": {"type": "text", "text": CLEAN_TEXT}}]),
                     result(2, contents=[{"uri": "x:/a", "mimeType": "text/plain", "text": CLEAN_TEXT}]),
