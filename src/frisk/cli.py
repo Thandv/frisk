@@ -203,15 +203,23 @@ def _cmd_lock(argv: list[str]) -> int:
     if not args.targets and not args.mcp_config:
         print("frisk lock: nothing to pin (give targets or --mcp-config)", file=sys.stderr)
         return 2
+    notes: list[str] = []
     try:
-        lock = pin.build_lock(args.targets, args.mcp_config)
+        lock = pin.build_lock(args.targets, args.mcp_config, _lock_dir(args.lockfile), notes)
         pin.write_lock(lock, args.lockfile)
     except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
         print(f"frisk lock: {printable(str(e))}", file=sys.stderr)
         return 2
+    for note in notes:
+        print(f"frisk lock: {printable(note)}", file=sys.stderr)
     n = len(lock["entries"])
     print(_c(f"frisk: pinned {n} entr{'y' if n == 1 else 'ies'} → {args.lockfile}", "pass"))
     return 0
+
+
+def _lock_dir(lockfile: str) -> Path:
+    """The lockfile's directory: local paths in the lock are relative to it."""
+    return Path(os.path.abspath(lockfile)).parent
 
 
 def _cmd_verify(argv: list[str]) -> int:
@@ -221,7 +229,7 @@ def _cmd_verify(argv: list[str]) -> int:
     p.add_argument("--json", action="store_true", help="emit the drift report as JSON")
     args = p.parse_args(argv)
     try:
-        report = pin.verify_lock(pin.read_lock(args.lockfile))
+        report = pin.verify_lock(pin.read_lock(args.lockfile), _lock_dir(args.lockfile))
     except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
         print(f"frisk verify: {printable(str(e))}", file=sys.stderr)
         return 2

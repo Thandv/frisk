@@ -226,6 +226,10 @@ class ServerRef:
     # an index URL without its credentials, _env_pin), for frisk lock; never the value itself,
     # never printed.
     code_env: dict[str, str] = field(default_factory=dict)
+    # An npx, uvx or pipx package the config names with no exact version (pkg, pkg@latest,
+    # pkg@^1): its name, for frisk lock's note. Not part of how the server is classified,
+    # so not compared.
+    unpinned: str = field(default="", compare=False)
 
 
 def display_ref(s: ServerRef) -> str:
@@ -332,7 +336,8 @@ def _classify_command(name: str, spec: dict, cmd: str, project: Path | None) -> 
     if base == "uv":
         return _classify_uv(name, args, cwd)
     if base in ("npx", "uvx", "pipx"):
-        return _cached_package(name, base, _package_spec(base, args) or cmd)
+        spec = _package_spec(base, args)
+        return _unpinned(_cached_package(name, base, spec or cmd), base, spec)
     if base in _PKG_RUNNERS:
         pkg = next((a for a in args if not a.startswith("-")), "")
         return _package(name, _PKG_RUNNERS[base], pkg or cmd)
@@ -378,7 +383,8 @@ def _classify_uv(name: str, args: list[str], cwd: Path | None) -> ServerRef:
     else 'cwd'. `uv tool run` runs a PyPI package, like uvx."""
     opts, rest = _leading_options(args, _UV_VALUE_FLAGS)
     if rest[:2] == ["tool", "run"]:
-        return _cached_package(name, "uvx", _package_spec("uvx", rest[2:]) or "uv")
+        spec = _package_spec("uvx", rest[2:])
+        return _unpinned(_cached_package(name, "uvx", spec or "uv"), "uvx", spec)
     if rest[:1] != ["run"]:
         return ServerRef(name, "unknown", "uv", scannable=False, detail=_UNRESOLVED)
     run_opts, command = _leading_options(rest[1:], _UV_VALUE_FLAGS)
@@ -422,6 +428,33 @@ def _cached_package(name: str, runner: str, spec: str) -> ServerRef:
                      detail=f"{_PKG_RUNNERS[runner]} package {pkg} {c.version} from local cache "
                             f"{home_label(str(c.path))}",
                      package=spec, version=c.version, unscanned_deps=c.deps)
+
+
+def _unpinned(ref: ServerRef, runner: str, spec: str) -> ServerRef:
+    """`ref`, with `unpinned` set when the config names a registry package (`spec`, '' for
+    none) without an exact version."""
+    pkg, version = _split_spec(runner, spec)
+    if _registry_name(pkg) and not _exact_version(runner, version):
+        ref.unpinned = pkg
+    return ref
+
+
+def _registry_name(pkg: str) -> bool:
+    """A package name a registry serves (name or @scope/name): never a URL, path or git
+    spec, which may carry a credential and is not looked up."""
+    bare = pkg[1:].split("/", 1)[-1] if pkg.startswith("@") and pkg.count("/") == 1 else pkg
+    return bool(bare) and all(ch.isalnum() or ch in "._-" for ch in bare)
+
+
+def _exact_version(runner: str, version: str) -> bool:
+    """An exact version, as the runner pins one (1.2.3, 1.2.3-rc.1, 2.0.0a1, 1!2.0), not a
+    tag or range (latest, ^1.2, ~1, >=1, 1.x, 1.2.*). npm reads 1 or 1.2 as a range, so for
+    npx it takes major.minor.patch. A character check, no regex."""
+    if not (version[:1].isdigit() and all(ch.isalnum() or ch in ".-+_!" for ch in version)):
+        return False
+    if {"x", "X"} & set(version.split(".")):
+        return False
+    return runner != "npx" or version.split("-", 1)[0].split("+", 1)[0].count(".") == 2
 
 
 def _package_spec(runner: str, args: list[str]) -> str:

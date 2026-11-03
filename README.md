@@ -422,6 +422,18 @@ pinned (or before an index URL was pinned without its credentials), reports DRIF
 pinned values held a secret or a URL frisk cannot split, locked before they were redacted
 (`~ changed: how it starts`, or the variable).
 
+A local target or config inside the lockfile's directory is also stored relative to that
+directory, and `frisk verify` reads it from there, so a lock verifies from any working
+directory and in any checkout of the tree (CI included). A local path outside the
+lockfile's directory (an absolute `~/.claude.json`, a server's script elsewhere on the
+machine) is stored as given and cannot be verified on another machine, such as a CI
+runner. `frisk lock` prints `unpinned: upstream changes cannot be detected; pin
+<pkg>@x.y.z` (to stderr; the lock is still written) for each npx, uvx or pipx server whose
+package is not pinned to an exact version (`acme-tool`, `acme-tool@latest`,
+`acme-tool@^1.2`): what such a server runs can change upstream with no change frisk could
+pin. The lockfile format is version 1; `frisk verify` refuses a lockfile with any other
+`version`, or none, with exit code 2 and one line.
+
 A git URL is pinned without its credentials, and `frisk verify` re-clones that clean URL:
 for a private repository, git's own credential helper (or an ssh key) supplies the
 access. A lockfile that an older frisk wrote with a token in a git URL still verifies (it
