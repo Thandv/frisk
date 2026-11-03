@@ -326,6 +326,9 @@ COVERAGE_RULES = [
      "text over the size limit: only its first and last parts were pattern-matched"),
     ("coverage.no_servers", "coverage", "warn",
      "an MCP config in which frisk found no servers, so nothing in it was audited"),
+    ("fs.symlink_escape", "exfil", "warn",
+     "a symlink whose target lies outside the scanned tree, not read (block when it points at a credential "
+     "location)"),
 ]
 
 

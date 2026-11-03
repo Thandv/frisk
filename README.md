@@ -135,6 +135,15 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   it raises a `coverage.too_large` finding at **block** severity, so the scan fails under
   the default `--fail-on block` (anything could be in a file frisk did not read). Raise
   `--max-file-bytes` to scan it, or leave it out of the target.
+- `symlink_escape`: frisk never reads outside the scan root. A symlink (or a single-file
+  target that is one) whose target lies outside it is not opened; it raises an
+  `fs.symlink_escape` warning naming the link and its target, with no excerpt, and a
+  **block** when it points at a credential location under `$HOME` (`.ssh`, `.aws`,
+  `.gnupg`, `.config/gcloud`, `.azure`, `.kube`, `.docker/config.json`, `.netrc`) or a
+  directory holding one. A symlink to a file inside the root is scanned once, at the
+  target's path; a symlinked directory is listed, never entered.
+- `loop` and `special`: a symlink that loops, and a FIFO, socket or device (`detail`
+  names which), are skipped without being opened.
 - `file_cap`: a target directory is walked one directory at a time, in name order, and the
   walk stops after 20,000 files with a `coverage.unscanned` warning at the target, so a huge
   tree is never listed or read whole. (frisk-mcp also stops at a byte total, `byte_cap`,

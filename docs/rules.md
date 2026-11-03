@@ -340,3 +340,11 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 - Matches: An MCP config (`--mcp-config`, or a config file named as a target) in which frisk found no servers. frisk reads `mcpServers` and `servers`, at the top level and in each `projects` entry; other formats, such as VS Code's `settings.json` (`mcp.servers`) or Zed's `context_servers`, are not read, and neither is a misspelt key such as `mcpservers`. The warning names the file and those keys, so a config frisk did not understand is never reported clean.
 - Likely false positive: A config that really configures no servers, for example an empty `"mcpServers": {}`.
 - On a hit: Check the file is the config your client reads and that its servers sit under one of those keys; audit a supported config instead.
+
+<a id="fs.symlink_escape"></a>
+### fs.symlink_escape
+
+- Severity: `warn` · Category: `exfil` · OWASP LLM Top 10 (2025): LLM02:2025 Sensitive Information Disclosure
+- Matches: A symlink in the scanned tree (or a single-file target that is a symlink) whose target, with every link resolved, lies outside the scan root. frisk never follows it: the target is not opened, so its content cannot reach the excerpts of any report (text, `--json`, `--sarif`, frisk-mcp). The finding names the link and its target as the link spells it, with no excerpt, and the link is listed in coverage.skipped with reason `symlink_escape`. It is a **block** when the target is a credential location under `$HOME` (`.ssh`, `.aws`, `.gnupg`, `.config/gcloud`, `.azure`, `.kube`, `.docker/config.json`, `.netrc`), inside one, or a directory holding one (such as `$HOME` itself). A symlink to a file inside the root is scanned once, at the target's path.
+- Likely false positive: A repository that links to a shared file elsewhere on the machine, such as a dotfiles checkout.
+- On a hit: Check where the link points and why the content would want it; a planted link to a key or token file is an exfiltration attempt. Scan the target separately if it should be covered.

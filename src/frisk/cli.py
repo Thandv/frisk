@@ -83,12 +83,15 @@ def _audit_config(path: str, limits: ScanLimits | None = None) -> list[AuditReco
     records: list[AuditRecord] = []
     for s in parse_mcp_config(path):
         own = ScanResult()  # a wrapper's own file
+        # The config (the user's own) names the code that runs: it is read where a link in
+        # that path leads, as it runs, not judged as a link out of its directory.
+        code = os.path.realpath(s.ref)
         if s.scannable:
-            result = scan_path(s.ref, limits=limits)
+            result = scan_path(code, limits=limits)
         else:
             result = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
             if s.kind == "wrapper":  # the wrapper itself is read: a payload in it still blocks
-                own = scan_path(s.ref, limits=limits)
+                own = scan_path(code, limits=limits)
                 result.extend(own)
         if s.url:
             result.extend(coverage_warning(display_url(s.url), "coverage.unscanned",
