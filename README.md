@@ -348,7 +348,9 @@ password: it runs with no stdin and `GIT_TERMINAL_PROMPT=0`.
 
 This pins local source and git targets as content. A symlink in them is pinned by where
 it points (as the link spells it), never by its target's content, so retargeting it is
-DRIFT and nothing outside the pinned tree is read. An MCP config, given with
+DRIFT and nothing outside the pinned tree is read. A target that is itself a symlink is
+pinned as `frisk` scans it: a linked directory by the tree it leads to, a linked file by
+its target's content when that lies in the link's own directory. An MCP config, given with
 `--mcp-config` or named as a target (`frisk lock ~/.claude.json`), is pinned per server,
 never as a whole file:
 

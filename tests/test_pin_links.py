@@ -75,6 +75,25 @@ class TestLinkedFiles(LinkCase):
         self.retarget(link, self.b)
         self.assertEqual(self.verify(lock)["status"], "DRIFT")
 
+    def test_a_target_that_is_a_directory_link_is_pinned_by_its_content(self) -> None:
+        """frisk scans a symlinked directory named as the target (a linked skills directory,
+        say), so frisk lock pins its content: a payload added behind the link is drift."""
+        link = self.tree.parent / "skills"
+        link.symlink_to(self.tree, target_is_directory=True)
+        lock = pin.build_lock([str(link)], [])
+        self.assertEqual(self.verify(lock)["status"], "ok")
+        (self.tree / "SKILL.md").write_text("changed behind the link\n", encoding="utf-8")
+        record = self.verify(lock)
+        self.assertEqual((record["status"], record["changed"]), ("DRIFT", ["SKILL.md"]))
+
+    def test_a_single_file_link_inside_its_directory_is_pinned_by_its_content(self) -> None:
+        """As frisk scans it: a file link whose target lies in the link's own directory is read."""
+        link = self.tree / "alias.md"
+        link.symlink_to(self.tree / "SKILL.md")
+        lock = pin.build_lock([str(link)], [])
+        (self.tree / "SKILL.md").write_text("changed behind the link\n", encoding="utf-8")
+        self.assertEqual(self.verify(lock)["status"], "DRIFT")
+
     def test_a_tree_without_links_pins_as_before(self) -> None:
         (self.tree / "sub").mkdir()
         (self.tree / "sub" / "x.py").write_text("print(1)\n", encoding="utf-8")

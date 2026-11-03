@@ -46,9 +46,12 @@ def fingerprint_path(root: Path) -> dict:
     Walked with walk.entries, so no symlink is followed: a link (to a file or a directory,
     inside the tree or out of it) is pinned by what it points to as os.readlink spells it,
     never by its target's bytes, so retargeting it is drift and content outside the tree is
-    never read. FIFOs, sockets, devices and .git are not pinned."""
-    if os.path.islink(root):
-        h = _link_hash(root)
+    never read. FIFOs, sockets, devices and .git are not pinned. A `root` that is itself a
+    link is pinned as frisk scans it (engine.scan_path): a directory link by the tree it
+    leads to, a file link by its target's bytes when that lies in the link's own directory."""
+    if os.path.islink(root) and not root.is_dir():
+        link = walk.read_link(root, Path(os.path.realpath(root.parent)))
+        h = _sha(root.read_bytes()) if link.inside and link.real.is_file() else _link_hash(root)
         return {"digest": h, "files": {root.name: h}}
     if root.is_file():
         h = _sha(root.read_bytes())
