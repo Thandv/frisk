@@ -99,8 +99,29 @@ def is_loop(path: Path) -> bool:
 
 
 def _credential(real: Path) -> bool:
+    """Whether `real` is a credential location, lies in one, or holds one. Compared as paths
+    and by file identity: realpath keeps a path's case and a macOS firmlink
+    (/System/Volumes/Data/...), so another spelling of an existing location matches too."""
+    real_id, real_line = _identity(real), _identities(real)
     for location in CREDENTIAL_LOCATIONS:
         base = Path(os.path.realpath(os.path.expanduser("~/" + location)))
         if real == base or base in real.parents or real in base.parents:
             return True
+        base_id = _identity(base)
+        if (base_id is not None and base_id in real_line) or (real_id is not None and real_id in _identities(base)):
+            return True
     return False
+
+
+def _identity(path: Path) -> tuple[int, int] | None:
+    """(st_dev, st_ino) of `path`; None when it does not exist (or cannot be reached)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_dev, st.st_ino
+
+
+def _identities(path: Path) -> set[tuple[int, int]]:
+    """The identities of `path` and of each of its parents that exist."""
+    return {i for i in map(_identity, (path, *path.parents)) if i is not None}

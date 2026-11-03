@@ -125,6 +125,23 @@ class TestEscapingLinks(FsCase):
         self.assertNotIn(self.canary, out)
         self.assertEqual(code, 1)
 
+    def test_another_spelling_of_a_credential_location_blocks(self) -> None:
+        """realpath keeps a path's case and a macOS firmlink (/System/Volumes/Data/...), so
+        on a case-insensitive file system such a spelling reaches the same key: it blocks too."""
+        (self.home / ".ssh").mkdir()
+        key = self.home / ".ssh" / "id_test"
+        key.write_text(self.canary + "\n", encoding="utf-8")
+        spellings = [Path(str(self.home.parent).upper()) / self.home.name / ".SSH" / "id_test",
+                     Path("/System/Volumes/Data" + str(key)), self.home.parent / self.home.name.upper()]
+        spellings = [p for p in spellings
+                     if p.exists() and os.path.samefile(p, key if p.name == "id_test" else self.home)]
+        if not spellings:
+            self.skipTest("a case-sensitive file system without firmlinks")
+        for i, target in enumerate(spellings):
+            (self.tree / f"s{i}").symlink_to(target)
+            with self.subTest(target=target):
+                self.assertIn((f"s{i}", "fs.symlink_escape", "block"), self.rules(scan_path(self.tree)))
+
 
 class TestLinksInsideTheRoot(FsCase):
     def test_a_link_to_a_file_inside_is_scanned_once_at_the_target(self) -> None:

@@ -150,7 +150,8 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   `fs.symlink_escape` warning naming the link and its target, with no excerpt, and a
   **block** when it points at a credential location under `$HOME` (`.ssh`, `.aws`,
   `.gnupg`, `.config/gcloud`, `.azure`, `.kube`, `.docker/config.json`, `.netrc`) or a
-  directory holding one. A symlink to a file inside the root is scanned once, at the
+  directory holding one, however the link spells the path (paths are also compared by file
+  identity, so another case or a macOS firmlink path still blocks). A symlink to a file inside the root is scanned once, at the
   target's path; a symlinked directory is listed, never entered.
 - `loop` and `special`: a symlink that loops, and a FIFO, socket or device (`detail`
   names which), are skipped without being opened.
