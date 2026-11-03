@@ -21,6 +21,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from . import walk
 from .debug import log as _root_log
 from .sources import (ServerRef, display_target, looks_like_mcp_config, materialize, parse_mcp_config,
                       split_configs)
@@ -37,23 +38,44 @@ def _sha(b: bytes) -> str:
 
 
 def fingerprint_path(root: Path) -> dict:
-    """Content fingerprint of a file or directory: an overall digest + per-file hashes."""
+    """Content fingerprint of a file or directory: an overall digest + per-file hashes.
+
+    Walked with walk.entries, so no symlink is followed: a link (to a file or a directory,
+    inside the tree or out of it) is pinned by what it points to as os.readlink spells it,
+    never by its target's bytes, so retargeting it is drift and content outside the tree is
+    never read. FIFOs, sockets, devices and .git are not pinned."""
+    if os.path.islink(root):
+        h = _link_hash(root)
+        return {"digest": h, "files": {root.name: h}}
     if root.is_file():
         h = _sha(root.read_bytes())
         return {"digest": h, "files": {root.name: h}}
-    files: dict[str, str] = {}
-    overall = hashlib.sha256()
-    for p in sorted(p for p in root.rglob("*") if p.is_file() and ".git" not in p.parts):
-        rel = str(p.relative_to(root))
+    hashed: list[tuple[tuple[str, ...], str]] = []
+    for entry in walk.entries(root):
         try:
-            fh = _sha(p.read_bytes())
+            if entry.kind in ("link", "dir_link"):
+                fh = _link_hash(entry.path)
+            elif entry.kind == "file" and entry.path.name != ".git":
+                fh = _sha(entry.path.read_bytes())
+            else:
+                continue
         except OSError as e:
             log.debug("fingerprint skipped a file error=%s", type(e).__name__)
             continue
+        hashed.append((entry.path.relative_to(root).parts, fh))
+    files: dict[str, str] = {}
+    overall = hashlib.sha256()
+    for parts, fh in sorted(hashed):  # path order, as the digest has always been taken
+        rel = str(Path(*parts))
         files[rel] = fh
         overall.update(rel.encode())
         overall.update(fh.encode())
     return {"digest": overall.hexdigest(), "files": files}
+
+
+def _link_hash(link: Path) -> str:
+    """A symlink as pinned: a marker plus its target as written, never the target's content."""
+    return _sha(b"symlink\0" + os.fsencode(os.readlink(link)))
 
 
 def _entry_for_target(target: str) -> dict:
@@ -100,7 +122,7 @@ def _server_fingerprint(s: ServerRef) -> dict:
     if s.kind == "package-cached":
         code = _cached_fingerprint(s)
     elif s.scannable or s.kind == "wrapper":  # the audit reads a wrapper, so its own bytes are pinned too
-        code = fingerprint_path(Path(s.ref))
+        code = fingerprint_path(Path(os.path.realpath(s.ref)))  # the code that runs, as the audit reads it
     else:
         code = {"digest": "", "files": {}}
     parts = [s.launch, code["digest"]]

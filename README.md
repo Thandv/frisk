@@ -322,7 +322,9 @@ the exit code is 1, as for drift. A lockfile that is not a JSON object with an `
 object stops `frisk verify` with exit code 2 and one line. git never waits for a
 password: it runs with no stdin and `GIT_TERMINAL_PROMPT=0`.
 
-This pins local source and git targets as content. An MCP config, given with
+This pins local source and git targets as content. A symlink in them is pinned by where
+it points (as the link spells it), never by its target's content, so retargeting it is
+DRIFT and nothing outside the pinned tree is read. An MCP config, given with
 `--mcp-config` or named as a target (`frisk lock ~/.claude.json`), is pinned per server,
 never as a whole file:
 
