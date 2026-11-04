@@ -118,8 +118,9 @@ _RM_TARGET = (r"[\"']?(?:(?:~|\$HOME|\$\{HOME\})[\"']?(?:/[\"']?\.(?:ssh|aws|gnu
 # --- scan_text contexts ------------------------------------------------------
 
 # "default": every code and text rule (--text, frisk-mcp). The frisk proxy's: "tool_description"
-# (the text rules, the commands that harm when an agent runs them, and instructions to read
-# or send a credential file; a credential path named in prose only warns) and "tool_result"
+# (the text rules, the commands that harm when an agent runs them, instructions to read or
+# send a credential file, and a private key or credential file named at all; a credential
+# directory or config file named in prose only warns) and "tool_result"
 # (the injection and tool-poisoning rules). The hidden-Unicode check runs in all three.
 CONTEXTS = ("default", "tool_description", "tool_result")
 _EVERY = frozenset(CONTEXTS)
@@ -191,7 +192,7 @@ CODE_RULES: list[Rule] = [
      "mention of a secret-bearing identifier", _DEFAULT),
     ("exfil.keychain_read", "exfil", "block",
      _r(r"\bsecurity\s+find-(generic|internet)-password\b"),
-     "macOS keychain password read (security find-*-password)", _DEFAULT),
+     "macOS keychain password read (security find-*-password)", _NOT_RESULT),
     ("exfil.keychain_mention", "exfil", "warn",
      _r(r"\bkeychain\b|\bsecurity\s+list-keychains\b"),
      "keychain reference (non-secret-reading)", _DEFAULT),
@@ -299,6 +300,12 @@ PROSE_RULES: list[Rule] = [
     # path; an instruction to read or send a key is inject.sensitive_path_instruction (block).
     ("exfil.secret_paths_prose", "exfil", "warn", _SECRET_PATHS,
      "names a credential/key directory (.ssh/.aws/.gnupg/id_rsa) in a tool description", _DESCRIPTION),
+    # A private key or credential file: a description has no harmless reason to name one, and
+    # how it asks for it (any verb, a negation word) must not matter. Public keys do not match.
+    ("exfil.secret_files_prose", "exfil", "block",
+     _r(r"\bid_(?:rsa|dsa|ecdsa|ed25519)\b(?!\.pub)|\.aws/credentials\b|\.gnupg\b"),
+     "names a private key or credential file (id_rsa/id_ed25519, .aws/credentials, .gnupg) in a tool description",
+     _DESCRIPTION),
 ]
 
 # Suspicious invisible / control characters used to hide instructions:

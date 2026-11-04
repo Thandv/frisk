@@ -255,7 +255,7 @@ Run on agent-instruction files only, where the text addresses the agent: `SKILL.
 
 ## Prose rules
 
-Run only where text is scanned as a string in a context (`engine.scan_text`). `frisk proxy` scans tool definitions, prompt and resource listing entries and the server's `instructions` as `tool_description`, and everything else the model reads (tool results and their structured content, `prompts/get` messages, `resources/read` contents, error answers, sampling and elicitation requests) as `tool_result`. `tool_description` runs the text rules, `rce.pipe_installer`, `destroy.rm_rf`, `destroy.disk`, `destroy.forkbomb`, [inject.sensitive_path_instruction](#inject.sensitive_path_instruction), the hidden-Unicode check and the rule below; `tool_result` runs the text rules, inject.sensitive_path_instruction and the hidden-Unicode check; `default` (`--text` and frisk-mcp's `scan_text`) runs every code and text rule and the hidden-Unicode check. Files are not scanned with these.
+Run only where text is scanned as a string in a context (`engine.scan_text`). `frisk proxy` scans tool definitions, prompt and resource listing entries and the server's `instructions` as `tool_description`, and everything else the model reads (tool results and their structured content, `prompts/get` messages, `resources/read` contents, error answers, sampling and elicitation requests) as `tool_result`. `tool_description` runs the text rules, `rce.pipe_installer`, `exfil.keychain_read`, `destroy.rm_rf`, `destroy.disk`, `destroy.forkbomb`, [inject.sensitive_path_instruction](#inject.sensitive_path_instruction), the hidden-Unicode check and the two rules below; `tool_result` runs the text rules, inject.sensitive_path_instruction and the hidden-Unicode check; `default` (`--text` and frisk-mcp's `scan_text`) runs every code and text rule and the hidden-Unicode check. Files are not scanned with these.
 
 <a id="exfil.secret_paths_prose"></a>
 ### exfil.secret_paths_prose
@@ -263,7 +263,15 @@ Run only where text is scanned as a string in a context (`engine.scan_text`). `f
 - Severity: `warn` · Category: `exfil` · OWASP LLM Top 10 (2025): LLM02:2025 Sensitive Information Disclosure
 - Matches: The pattern of [exfil.secret_paths](#exfil.secret_paths) (the `.ssh`, `.aws` or `.gnupg` directory, the AWS credentials file, `id_rsa`) in a tool description, where it names a path rather than reading one.
 - Likely false positive: A tool that reports on SSH hosts from `~/.ssh/config` or manages AWS profiles.
-- On a hit: Check that the tool's job needs the path. An instruction to read or send a key from it blocks as inject.sensitive_path_instruction, and the tool is dropped.
+- On a hit: Check that the tool's job needs the path. An instruction to read or send a key from it blocks as inject.sensitive_path_instruction, and a private key or credential file named in the description blocks as [exfil.secret_files_prose](#exfil.secret_files_prose); either way the tool is dropped.
+
+<a id="exfil.secret_files_prose"></a>
+### exfil.secret_files_prose
+
+- Severity: `block` · Category: `exfil` · OWASP LLM Top 10 (2025): LLM02:2025 Sensitive Information Disclosure
+- Matches: A private key or credential file in a tool description: `id_rsa`, `id_dsa`, `id_ecdsa` or `id_ed25519` (not the `.pub` public key), the AWS credentials file, or the `.gnupg` directory, however the description asks for it (an instruction that uses another verb than inject.sensitive_path_instruction's, or a negation word such as "don't forget to", is still caught).
+- Likely false positive: A key-management tool that names the key file it generates or rotates.
+- On a hit: The tool is dropped. Keep it only if handling that exact file is the tool's stated purpose, and the server is one you trust.
 
 ## Hidden characters
 

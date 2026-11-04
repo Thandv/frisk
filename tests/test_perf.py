@@ -50,6 +50,7 @@ SEEDS: dict[str, tuple[str, ...]] = {
     "rce.dynamic_import": ("__import__ ", "importlib.", "importlib.import_module "),
     "exfil.secret_paths": ("~/.", "$HOME/.", "/.", ".ss", "id_rs"),
     "exfil.secret_paths_prose": ("~/.", "$HOME/.", "/.", ".ss", "id_rs"),
+    "exfil.secret_files_prose": ("id_", "id_rsa.", "id_rsa.pu", ".aws/", ".gnup", "."),
     "exfil.dotenv": (".env", ".en", "."),
     "exfil.secret_env_read": ("$", "${", "os.environ", "getenv ", "$" + "x" * 29, "$t", "$tokex", "ENV[t",
                               "getenv" + "t" * 24, "process.env "),
