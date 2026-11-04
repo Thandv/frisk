@@ -48,3 +48,5 @@ here is listed as folded and that every folded stem appears in CHANGELOG.md.
 - F1.05
 - F2.08
 - FR-E7-t1
+- FR-E7-t3
+- FR-E7-t4

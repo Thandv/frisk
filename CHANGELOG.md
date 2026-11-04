@@ -35,6 +35,10 @@ Highlights, each detailed in the entries below:
   server running (FR-E5 t2), inspects every server-to-client shape (F3.01), keeps pins of the
   whole tool definition across runs (F3.02) and judges descriptions and results by context
   (F2.08).
+- **CLI.** `--stdin` reads at most `--max-file-bytes` bytes of standard input (longer input
+  warns `coverage.truncated`), and each `--json` finding gains `message`, a copy of
+  `description` (FR-E7 t3). `frisk --help` lists every subcommand and the exit codes
+  (FR-E7 t4).
 
 ### Entries
 
@@ -1022,10 +1026,47 @@ to `frisk lock` each exit 2 with one line.
 ### Changed: `frisk --help` names the proxy subcommand (FR-E7 t1)
 <!-- changes/FR-E7-t1.md, added in 5adbf4a -->
 
-The scan help's description now ends "Subcommands: lock, verify, proxy." (it listed only
-lock and verify). Colour is now decided each time text is coloured, from whether stdout is a
+The scan help named only lock and verify as subcommands; it names proxy too (since FR-E7 t4,
+in the subcommands section at the end of `frisk --help`). Colour is now decided each time text is coloured, from whether stdout is a
 terminal and whether `NO_COLOR` is set at that moment, not once when frisk is imported; the
 output of a run is unchanged.
+
+### Added: `--stdin`, and a `message` field in `--json` findings (FR-E7 t3)
+<!-- changes/FR-E7-t3.md, added in bdc2bed -->
+
+- `frisk --stdin` scans text read from standard input, labelled `<stdin>`, as `--text`
+  scans a string. It reads at most `--max-file-bytes` bytes (default 2 MiB, 2097152);
+  longer input is read only that far and raises the warning `coverage.truncated`
+  ("standard input is over the N-byte limit: only its first N bytes were read and
+  pattern-matched"), so it is never PASS. A multi-byte character cut at the limit is left
+  out. Input that is not valid UTF-8 is scanned with the bad bytes replaced and raises
+  `coverage.unreadable`; it never ends in a traceback. Empty input is PASS.
+  The `coverage.truncated` rule's description (SARIF `shortDescription`, docs/rules.md)
+  now reads "text over the size limit: only part of it was pattern-matched (the first and
+  last parts of a string, the first part of standard input)".
+- Each finding in `--json` output gains `message`, equal to its `description` (additive:
+  every other key is unchanged). Foreman's admission scan reads `message`.
+- `scripts/foreman-frisk-scan.sh` is a template, installed nowhere, for a `frisk-scan`
+  wrapper: it runs the frisk command given as its first argument with `--fail-on never`
+  and the remaining arguments. frisk still ships only the `frisk` and `frisk-mcp` commands.
+- The README and LAUNCH.md install lines now read `uvx --from frisk-scan frisk` and
+  `pipx run --spec frisk-scan frisk` (`uvx frisk-scan` and `pipx run frisk-scan` named a
+  command that does not exist).
+
+### Changed: `frisk --help` lists every subcommand and the exit codes (FR-E7 t4)
+<!-- changes/FR-E7-t4.md, added in a09cd8f -->
+
+`frisk --help` now ends with the subcommands (scan, `lock`, `verify`, `proxy`) and the exit
+status of a scan: 0 when no finding reached the `--fail-on` level (always 0 with
+`--fail-on never`), 1 when the worst finding reached it, 2 for a usage error, no target, or
+a target, MCP config, `--stdin` or `--sarif-out` file that cannot be read or written; and
+how `lock` (0 or 2), `verify` (0; 1 on drift or an entry it could not verify; 2 on a
+lockfile it cannot read) and `proxy` (the server's status, or 2) exit. The description is no
+longer re-wrapped to the terminal width.
+
+A target, MCP config, lockfile, `--sarif-out` file or `--log` file that is a directory or
+cannot be read (PermissionError, IsADirectoryError) already exits 2 with one stderr line
+and no traceback; tests/test_cli.py now checks it for each subcommand.
 
 <!-- /entries -->
 
