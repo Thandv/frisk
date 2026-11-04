@@ -716,13 +716,16 @@ The suite is stdlib `unittest`, so it runs on the 3.9 floor with nothing install
 ```bash
 PYTHONPATH=src python3 -B -m unittest discover -s tests
 python3 -m pytest -q          # same suite; pytest reads its config from pyproject.toml
-bash scripts/verify.sh        # unittest under every local interpreter found (CLT 3.9, Homebrew 3.12-3.14)
+bash scripts/verify.sh        # the local CI: every interpreter found (CLT 3.9, Homebrew 3.12-3.14), then the linters
 ```
 
-`scripts/verify.sh` prints one PASS/FAIL line per interpreter and fails if any run
-fails or if fewer than `FRISK_MIN_PYTHONS` (default 2) interpreters were found.
-`FRISK_VERIFY_PYTHONS` (space-separated paths) replaces the list of interpreters it tries;
-it installs nothing and uses no network.
+`scripts/verify.sh` runs the unittest suite under each interpreter, and pytest too where it
+imports, with one PASS/FAIL line per run; then `ruff check` and `mypy src` when they are on
+PATH (else a `skipped: <tool> not on PATH` line). It fails if any run fails or if fewer than
+`FRISK_MIN_PYTHONS` (default 2) interpreters were found. `FRISK_VERIFY_PYTHONS`
+(space-separated paths) replaces the list of interpreters it tries; it installs nothing and
+uses no network. How to add a rule, the test-payload policy and the rest:
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 The sample outputs above marked `<!-- frisk-demo: NAME -->` are real runs: `python3
 scripts/gen_readme_demo.py` rebuilds them (in a temp directory and HOME, with a copy of
