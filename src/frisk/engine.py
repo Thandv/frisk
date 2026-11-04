@@ -10,8 +10,9 @@ from bisect import bisect_right
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
-from . import surfaces
+from . import surfaces, walk
 from .debug import log as _root_log
+from .redact import Redactor
 from .rules import (
     ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
     INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
@@ -112,9 +113,10 @@ def _line_starts(text: str) -> list[int]:
     return [0] + [m.end() for m in _NEWLINE.finditer(text)]
 
 
-def _excerpt(text: str, idx: int, span: int = 80) -> str:
-    start = max(0, idx - 10)
-    snippet = text[start:idx + span].replace("\n", "\\n")
+def _excerpt(secrets: Redactor, span: Span, idx: int, after: int = 80) -> str:
+    """The text around offset `idx` (10 characters before, `after` from it), inside the span,
+    with its secrets masked."""
+    snippet = secrets.window(max(span.start, idx - 10), min(span.end, idx + after)).replace("\n", "\\n")
     return snippet.strip()[:120]
 
 
@@ -127,7 +129,7 @@ _WARN_CAPPED_KINDS = {"md_inline_code"}  # a block finding from these spans repo
 
 
 def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Finding],
-               seen: set[tuple[int, str]]) -> None:
+               seen: set[tuple[int, str]], secrets: Redactor) -> None:
     """Run the span's rules on text[span.start:span.end]; lines are file lines.
 
     The span is matched as its own string (so ^, lookbehinds and word boundaries see the
@@ -151,7 +153,7 @@ def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Fin
         if capped and sev == "block":
             sev = "warn"
         for m in rx.finditer(seg):
-            add(m.start(), rid, cat, sev, desc, _excerpt(seg, m.start()))
+            add(m.start(), rid, cat, sev, desc, _excerpt(secrets, span, span.start + m.start()))
     if span.kind not in _RULES_FOR_KIND or span.kind == "unicode":  # every text kind
         for idx, rid, desc in hidden_unicode(seg, span.start == 0):
             cat, sev, _ = RULE_META[rid]
@@ -162,9 +164,10 @@ def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
     starts = _line_starts(text)
     out: list[Finding] = []
     seen: set[tuple[int, str]] = set()
+    secrets = Redactor(text)
     # Capped spans go last, so a match also found by an uncapped span keeps its severity.
     for span in sorted(spans, key=lambda s: s.kind in _WARN_CAPPED_KINDS):
-        _scan_span(text, span, starts, rel, out, seen)
+        _scan_span(text, span, starts, rel, out, seen, secrets)
     return sort_findings(out)
 
 
@@ -228,7 +231,12 @@ def _read_text(path: Path, rel: str, max_bytes: int | None) -> tuple[str | None,
         return None, _not_scanned(rel, "binary", ext, "coverage.binary",
                                   f"archive not scanned: contents unscanned ({ext})")
     try:
-        size = path.stat().st_size
+        st = os.lstat(path)  # never read through a symlink, never open a FIFO, socket or device
+        if stat.S_ISLNK(st.st_mode):
+            return None, _not_scanned(rel, "special", "symlink")
+        if not stat.S_ISREG(st.st_mode):
+            return None, _not_scanned(rel, "special", walk.special_kind(st.st_mode))
+        size = st.st_size
         if max_bytes is not None and size > max_bytes:
             return None, _not_scanned(rel, "too_large", f"{size} bytes", "coverage.too_large",
                                       f"file not scanned: {size} bytes is over the {max_bytes}-byte limit; "
@@ -313,10 +321,16 @@ def _scan_reading(path: Path, text: str, rel: str, failed: dict[str, None]) -> l
 
 
 def scan_path(path: str | Path, root: Path | None = None, limits: ScanLimits | None = None) -> ScanResult:
-    """Scan a file or a directory tree within `limits` (default: ScanLimits())."""
+    """Scan a file or a directory tree within `limits` (default: ScanLimits()).
+
+    Nothing outside the scan root is read: a symlink (also a single-file target that is
+    one) whose target lies outside it is an fs.symlink_escape finding, never opened."""
     limits = limits or ScanLimits()
     p = Path(path)
-    if p.is_file():
+    if os.path.islink(p) and not p.is_dir():  # a symlinked directory named as the target is walked
+        base = root or p.parent
+        return _link(p, base, Path(os.path.realpath(base)), limits.max_file_bytes, set())[0].sort()
+    if p.is_file() or (p.exists() and not p.is_dir()):  # a FIFO, socket or device: skipped as special
         return scan_file(p, root or p.parent, limits.max_file_bytes)
     result = ScanResult()
     base = root or p
@@ -331,11 +345,14 @@ def scan_path(path: str | Path, root: Path | None = None, limits: ScanLimits | N
 
 
 def _walk(top: Path, base: Path, limits: ScanLimits, result: ScanResult) -> tuple[str, str, str] | None:
-    """Scan the files below `top` into `result`, each directory's entries in name order,
-    never entering .git directories or symlinked directories. Returns (reason, detail,
-    message) for the limit that stopped the walk, or None when it went through the tree."""
+    """Scan the files below `top` into `result` (walk.entries: name order, no symlink
+    followed, no .git directory entered). A symlink to a file inside the root is scanned
+    once, at the target's path. Returns (reason, detail, message) for the limit that
+    stopped the walk, or None when it went through the tree."""
     started = time.monotonic()
     looked_at = read = 0
+    base_real = Path(os.path.realpath(base))
+    scanned: set[str] = set()  # in-target paths already read, so a linked file is read once
 
     def unlistable(err: OSError) -> None:
         name = type(err).__name__
@@ -343,37 +360,81 @@ def _walk(top: Path, base: Path, limits: ScanLimits, result: ScanResult) -> tupl
         result.extend(_not_scanned(_in_target(where, base), "unreadable", name, "coverage.unreadable",
                                    f"directory could not be listed: {name}"))
 
-    for dirpath, dirnames, filenames in os.walk(top, onerror=unlistable):
-        if limits.deadline_s is not None and time.monotonic() - started >= limits.deadline_s:
-            return _limit_hit(limits, looked_at, read, started)  # also between directories with no files
-        here = Path(dirpath)
-        dirnames.sort()
-        if ".git" in dirnames:  # the VCS directory itself, once; below the top it warns
-            dirnames.remove(".git")
-            _vcs_dir(here / ".git", base, nested=here != top, result=result)
-        for name in dirnames:
-            if os.path.islink(here / name):  # listed as entries, never entered
-                _check_listable(here / name, base, result)
-        for name in sorted(filenames):
-            hit = _limit_hit(limits, looked_at, read, started)
-            if hit is not None:
-                return hit
-            f = here / name
-            try:
-                st = os.stat(f)
-            except OSError as e:  # a dangling symlink, say: nothing to read, as before
-                log.debug("entry skipped (cannot stat) error=%s", type(e).__name__)
-                continue
-            if not stat.S_ISREG(st.st_mode):
-                if name == ".git":
-                    _vcs_dir(f, base, nested=False, result=result)
-                continue
-            looked_at += 1
-            scanned = scan_file(f, base, limits.max_file_bytes)
-            if scanned.coverage.files_scanned:
-                read += st.st_size
-            result.extend(scanned)
+    for entry in walk.entries(top, onerror=unlistable):
+        if entry.kind == "dir":
+            if limits.deadline_s is not None and time.monotonic() - started >= limits.deadline_s:
+                return _limit_hit(limits, looked_at, read, started)  # also between directories with no files
+            continue
+        if entry.kind == "vcs":
+            _vcs_dir(entry.path, base, nested=entry.nested, result=result)
+            continue
+        if entry.kind == "dir_link":  # listed as an entry, never entered
+            link = walk.read_link(entry.path, base_real)
+            if link.inside:
+                _check_listable(entry.path, base, result)
+            else:
+                result.extend(_escape(_in_target(entry.path, base), link))
+            continue
+        if entry.kind == "special":
+            result.coverage.skipped.append(Skipped(_in_target(entry.path, base), "special", entry.detail))
+            continue
+        hit = _limit_hit(limits, looked_at, read, started)
+        if hit is not None:
+            return hit
+        if entry.kind == "link":
+            found, target = _link(entry.path, base, base_real, limits.max_file_bytes, scanned)
+        elif _in_target(entry.path, base) in scanned:  # already read through a link to it
+            continue
+        else:
+            target = entry.path
+            scanned.add(_in_target(target, base))
+            found = scan_file(target, base, limits.max_file_bytes)
+        looked_at += 1
+        if found.coverage.files_scanned and target is not None:
+            read += _size(target)
+        result.extend(found)
     return None
+
+
+def _size(path: Path) -> int:
+    try:
+        return os.lstat(path).st_size
+    except OSError:  # gone since it was read: counts as nothing
+        return 0
+
+
+def _link(link_path: Path, base: Path, base_real: Path, max_bytes: int | None,
+          scanned: set[str]) -> tuple[ScanResult, Path | None]:
+    """A symlink that is not to a directory, and the file read for it (None: none).
+    Outside the root: an fs.symlink_escape finding, never read. Inside: the target is
+    scanned at its own path, once (`scanned`); a link that loops is skipped as 'loop', a
+    dangling one as before (nothing to read)."""
+    link = walk.read_link(link_path, base_real)
+    rel = _in_target(link_path, base)
+    if not link.inside:
+        return _escape(rel, link), None
+    if walk.is_loop(link_path):
+        return _not_scanned(rel, "loop", link.text), None
+    if not link.real.exists():
+        log.debug("entry skipped (dangling symlink)")
+        return ScanResult(), None
+    target = base / link.real.relative_to(base_real)
+    where = _in_target(target, base)
+    if where in scanned:
+        return ScanResult(), None
+    scanned.add(where)
+    return scan_file(target, base, max_bytes), target
+
+
+def _escape(rel: str, link: walk.Link) -> ScanResult:
+    """The fs.symlink_escape finding for a link out of the root: paths only, no excerpt."""
+    category, _, _ = RULE_META["fs.symlink_escape"]
+    severity = "block" if link.credential else "warn"
+    where = "a credential location" if link.credential else "outside the scanned tree"
+    result = ScanResult([Finding(rel, 1, "fs.symlink_escape", category, severity,
+                                 f"symlink {rel} points {where} ({link.text}); not read", "")])
+    result.coverage.skipped.append(Skipped(rel, "symlink_escape", link.text))
+    return result
 
 
 def _limit_hit(limits: ScanLimits, looked_at: int, read: int, started: float) -> tuple[str, str, str] | None:

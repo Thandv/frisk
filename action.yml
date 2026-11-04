@@ -14,25 +14,34 @@ inputs:
     required: false
     default: "block"
   sarif:
-    description: "Generate frisk.sarif and upload it to GitHub code scanning."
+    description: "Upload the SARIF frisk writes to $RUNNER_TEMP/frisk.sarif to GitHub code scanning (needs permissions: security-events: write). The file is written either way."
     required: false
     default: "true"
 
 runs:
   using: "composite"
   steps:
+    # Inputs reach the scripts only through env, never as ${{ }} inside run:, so a value
+    # cannot become shell code. frisk is installed into its own venv, not the runner's python.
     - name: Install frisk
       shell: bash
-      run: pip install --quiet "${{ github.action_path }}"
+      env:
+        FRISK_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        python3 -m venv "$RUNNER_TEMP/frisk-venv"
+        "$RUNNER_TEMP/frisk-venv/bin/python" -m pip install --quiet "$FRISK_ACTION_PATH"
     - name: Scan
       shell: bash
-      run: frisk ${{ inputs.targets }} --fail-on "${{ inputs.fail-on }}"
-    - name: Generate SARIF
-      if: ${{ inputs.sarif == 'true' && always() }}
-      shell: bash
-      run: frisk ${{ inputs.targets }} --sarif --fail-on never > frisk.sarif
+      env:
+        FRISK_TARGETS: ${{ inputs.targets }}
+        FRISK_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        # every line of the input, split on whitespace (read stops at its -d '' end with status 1)
+        read -r -d '' -a targets <<< "$FRISK_TARGETS" || true
+        "$RUNNER_TEMP/frisk-venv/bin/python" -m frisk.cli --fail-on "$FRISK_FAIL_ON" \
+          --sarif-out "$RUNNER_TEMP/frisk.sarif" -- "${targets[@]}"
     - name: Upload SARIF
       if: ${{ inputs.sarif == 'true' && always() }}
       uses: github/codeql-action/upload-sarif@v3
       with:
-        sarif_file: frisk.sarif
+        sarif_file: ${{ runner.temp }}/frisk.sarif

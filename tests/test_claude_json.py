@@ -360,7 +360,8 @@ class ConfigLockTest(ClaudeJsonCase):
         self.assertEqual(list(lock["entries"]), [str(self.cfg)] + [f"{self.cfg}::{n}" for n in (
             "shared", "remote", "db (~/work/a)", "shared (~/work/a)", "db (~/work/b)", f"tool ({self.outside})")])
         self.assertNotIn("target", {e["recompute"]["type"] for e in lock["entries"].values()})
-        self.assertEqual(lock, pin.build_lock([], [str(self.cfg)]))
+        # FR-E6 F3.07: the CLI also stores each path relative to the lockfile's directory
+        self.assertEqual(lock, pin.build_lock([], [str(self.cfg)], Path(self.lockfile).parent))
         self.assertNotIn(CANARY, Path(self.lockfile).read_text(encoding="utf-8"))
         self.assertEqual(run(["verify", "--lockfile", self.lockfile])[0], 0)
 

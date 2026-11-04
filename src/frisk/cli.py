@@ -83,12 +83,15 @@ def _audit_config(path: str, limits: ScanLimits | None = None) -> list[AuditReco
     records: list[AuditRecord] = []
     for s in parse_mcp_config(path):
         own = ScanResult()  # a wrapper's own file
+        # The config (the user's own) names the code that runs: it is read where a link in
+        # that path leads, as it runs, not judged as a link out of its directory.
+        code = os.path.realpath(s.ref)
         if s.scannable:
-            result = scan_path(s.ref, limits=limits)
+            result = scan_path(code, limits=limits)
         else:
             result = coverage_warning(display_ref(s), "coverage.unscanned", f"MCP server not scanned ({s.kind})")
             if s.kind == "wrapper":  # the wrapper itself is read: a payload in it still blocks
-                own = scan_path(s.ref, limits=limits)
+                own = scan_path(code, limits=limits)
                 result.extend(own)
         if s.url:
             result.extend(coverage_warning(display_url(s.url), "coverage.unscanned",
@@ -121,6 +124,8 @@ def _cmd_scan(argv: list[str]) -> int:
     p.add_argument("--text", metavar="STR", help="scan a raw string instead of a path")
     p.add_argument("--json", action="store_true", help="emit findings as JSON")
     p.add_argument("--sarif", action="store_true", help="emit SARIF 2.1.0 (GitHub code scanning)")
+    p.add_argument("--sarif-out", metavar="FILE",
+                   help="also write SARIF 2.1.0 to FILE; the report is printed as usual and the exit code is unchanged")
     p.add_argument("--max-file-bytes", type=_positive, default=MAX_FILE_BYTES, metavar="N",
                    help=f"skip files larger than N bytes (a block finding), and match only the first and last N/2 "
                         f"characters of a longer --text (a warning) (default: {MAX_FILE_BYTES})")
@@ -161,6 +166,12 @@ def _cmd_scan(argv: list[str]) -> int:
         print(f"frisk: {printable(str(e))}", file=sys.stderr)
         return 2
     findings = result.sort().findings
+    if args.sarif_out:
+        try:
+            Path(args.sarif_out).write_text(to_sarif(result, __version__) + "\n", encoding="utf-8")
+        except OSError as e:
+            print(f"frisk: cannot write the SARIF file: {printable(str(e))}", file=sys.stderr)
+            return 2
 
     if args.json:
         print(to_json(result, label, servers if configs else None))
@@ -192,15 +203,23 @@ def _cmd_lock(argv: list[str]) -> int:
     if not args.targets and not args.mcp_config:
         print("frisk lock: nothing to pin (give targets or --mcp-config)", file=sys.stderr)
         return 2
+    notes: list[str] = []
     try:
-        lock = pin.build_lock(args.targets, args.mcp_config)
+        lock = pin.build_lock(args.targets, args.mcp_config, _lock_dir(args.lockfile), notes)
         pin.write_lock(lock, args.lockfile)
     except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
         print(f"frisk lock: {printable(str(e))}", file=sys.stderr)
         return 2
+    for note in notes:
+        print(f"frisk lock: {printable(note)}", file=sys.stderr)
     n = len(lock["entries"])
     print(_c(f"frisk: pinned {n} entr{'y' if n == 1 else 'ies'} → {args.lockfile}", "pass"))
     return 0
+
+
+def _lock_dir(lockfile: str) -> Path:
+    """The lockfile's directory: local paths in the lock are relative to it."""
+    return Path(os.path.abspath(lockfile)).parent
 
 
 def _cmd_verify(argv: list[str]) -> int:
@@ -210,7 +229,7 @@ def _cmd_verify(argv: list[str]) -> int:
     p.add_argument("--json", action="store_true", help="emit the drift report as JSON")
     args = p.parse_args(argv)
     try:
-        report = pin.verify_lock(pin.read_lock(args.lockfile))
+        report = pin.verify_lock(pin.read_lock(args.lockfile), _lock_dir(args.lockfile))
     except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
         print(f"frisk verify: {printable(str(e))}", file=sys.stderr)
         return 2
@@ -253,7 +272,8 @@ def _cmd_verify(argv: list[str]) -> int:
 
 def _cmd_proxy(argv: list[str]) -> int:
     if "--" not in argv:
-        print("frisk proxy: usage: frisk proxy [--log FILE] -- <server command>\n"
+        print("frisk proxy: usage: frisk proxy [--log FILE] [--pins FILE | --no-pins] [--on-change flag|drop] "
+              "-- <server command>\n"
               "  e.g.  frisk proxy -- uvx some-mcp-server", file=sys.stderr)
         return 2
     sep = argv.index("--")
@@ -264,7 +284,16 @@ def _cmd_proxy(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="frisk proxy",
                                 description="Enforce frisk checks at runtime between an MCP client and server.")
     p.add_argument("--log", metavar="FILE", help="append proxy events to a file (default: stderr)")
+    where = p.add_mutually_exclusive_group()
+    where.add_argument("--pins", metavar="FILE", type=Path,
+                       help="keep tool pins in FILE across runs (default: $XDG_STATE_HOME/frisk/pins/<sha256 of the "
+                            "server command>.json, with ~/.local/state when XDG_STATE_HOME is unset)")
+    where.add_argument("--no-pins", action="store_true", help="keep tool pins in memory only; write no pins file")
+    p.add_argument("--on-change", choices=proxy.ON_CHANGE, default="flag",
+                   help="a tool whose definition changed since it was pinned: flag it (kept, annotated) or drop it "
+                        "(default: flag)")
     args = p.parse_args(opts)
+    pins = None if args.no_pins else args.pins or proxy.default_pins_file(server_cmd)
     with contextlib.ExitStack() as stack:  # the --log file is closed on every path
         try:
             logf = stack.enter_context(open(args.log, "a", encoding="utf-8")) if args.log else sys.stderr
@@ -272,7 +301,7 @@ def _cmd_proxy(argv: list[str]) -> int:
             print(f"frisk proxy: cannot open the log file: {printable(str(e))}", file=sys.stderr)
             return 2
         try:
-            return proxy.Proxy(server_cmd, log=logf).run()
+            return proxy.Proxy(server_cmd, log=logf, pins_file=pins, on_change=args.on_change).run()
         except proxy.LaunchError as e:  # not found, not executable, ...
             print(f"frisk proxy: cannot launch server: {printable(str(e))}", file=sys.stderr)
             return 2

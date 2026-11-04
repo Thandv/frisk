@@ -104,6 +104,16 @@ of such a URL fails, git's own message is not shown, since it could echo the tok
 clone that has not finished after two minutes stops with `git clone timed out after 120 s`
 (exit code 2), never with the git command it ran.
 
+The repository you clone is untrusted, so git runs with its escape hatches closed: only the
+`https` and `ssh` protocols (`-c protocol.allow=never`, so `http://`, `git://`, `ext::` and
+`file://` fail), no hooks (`core.hooksPath=/dev/null`), no symlinks written
+(`core.symlinks=false`), no fsmonitor, no submodules (`--no-recurse-submodules`), no Git LFS
+download (`GIT_LFS_SKIP_SMUDGE=1`), no system git config (`GIT_CONFIG_NOSYSTEM=1`) and no
+prompt of any kind (`GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/bin/false`, and ssh with
+`BatchMode=yes` through `GIT_SSH_COMMAND`, which replaces one you set); the URL follows
+`--`. A target holding whitespace or a control character (inside it; whitespace around it
+is dropped), or whose host starts with `-`, is refused before git runs (exit code 2).
+
 ### What was not scanned (coverage)
 
 Every scan reports what it could *not* pattern-match, so a clean verdict never hides
@@ -135,6 +145,16 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   it raises a `coverage.too_large` finding at **block** severity, so the scan fails under
   the default `--fail-on block` (anything could be in a file frisk did not read). Raise
   `--max-file-bytes` to scan it, or leave it out of the target.
+- `symlink_escape`: frisk never reads outside the scan root. A symlink (or a single-file
+  target that is one) whose target lies outside it is not opened; it raises an
+  `fs.symlink_escape` warning naming the link and its target, with no excerpt, and a
+  **block** when it points at a credential location under `$HOME` (`.ssh`, `.aws`,
+  `.gnupg`, `.config/gcloud`, `.azure`, `.kube`, `.docker/config.json`, `.netrc`) or a
+  directory holding one, however the link spells the path (paths are also compared by file
+  identity, so another case or a macOS firmlink path still blocks). A symlink to a file inside the root is scanned once, at the
+  target's path; a symlinked directory is listed, never entered.
+- `loop` and `special`: a symlink that loops, and a FIFO, socket or device (`detail`
+  names which), are skipped without being opened.
 - `file_cap`: a target directory is walked one directory at a time, in name order, and the
   walk stops after 20,000 files with a `coverage.unscanned` warning at the target, so a huge
   tree is never listed or read whole. (frisk-mcp also stops at a byte total, `byte_cap`,
@@ -164,6 +184,10 @@ inserting lines above a finding does not turn it into a new alert
 ([ADR 0002](docs/adr/0002-sarif-fingerprints.md)). `--text` and
 `--mcp-config` results carry a logical location (`<text>`, `server::path`) instead of a
 file location.
+
+`--sarif-out FILE` writes the same SARIF to FILE from the same scan, while the report is
+printed as usual (text, or `--json`) and the exit code still follows `--fail-on`; a FILE
+frisk cannot write exits 2. So one run both gates and feeds code scanning.
 
 ### Audit everything you've *already* installed
 Point `frisk` at your MCP config and it resolves and scans every server you have wired up:
@@ -286,6 +310,16 @@ itself), the target names and error messages, are shown as escapes (`\x1b`, `\u2
 neither a config nor a scanned package can rewrite what your terminal shows; a lone
 surrogate (`\ud800`) is shown the same way. `--json` and `--sarif` escape them as JSON does.
 
+A finding's excerpt never carries a secret-like value, in any output (text, `--json`,
+`--sarif`, `--sarif-out`, `--text`): it is masked as `****(len=N)`, its length only. That
+is a value after a secret's name (`key`, `token`, `secret`, `password`, `passwd`, `auth`,
+`cookie`, as in `api_key`, `access_token`, `private_key`) and `=`, `:` or `=>`, keeping the
+name (`password=****(len=11)`); a `Bearer` or `Basic` credential; a URL's `user:password@`;
+an `sk-…`, `ghp_…` (`gho_`, `ghs_`, `ghu_`, `ghr_`) or `github_pat_…` token; an `AKIA…` or
+`ASIA…` access-key id; a PEM private-key block; and a run of 32 or more base64 or hex
+characters that mixes letters and digits with high entropy (so a long word or identifier
+stays). A secret the excerpt only partly covers is masked whole.
+
 ### Detect rug pulls (pin what you approved, catch silent changes)
 
 The sneakiest supply-chain attack: a server shows clean content when you approve it,
@@ -313,7 +347,11 @@ the exit code is 1, as for drift. A lockfile that is not a JSON object with an `
 object stops `frisk verify` with exit code 2 and one line. git never waits for a
 password: it runs with no stdin and `GIT_TERMINAL_PROMPT=0`.
 
-This pins local source and git targets as content. An MCP config, given with
+This pins local source and git targets as content. A symlink in them is pinned by where
+it points (as the link spells it), never by its target's content, so retargeting it is
+DRIFT and nothing outside the pinned tree is read. A target that is itself a symlink is
+pinned as `frisk` scans it: a linked directory by the tree it leads to, a linked file by
+its target's content when that lies in the link's own directory. An MCP config, given with
 `--mcp-config` or named as a target (`frisk lock ~/.claude.json`), is pinned per server,
 never as a whole file:
 
@@ -387,6 +425,20 @@ pinned (or before an index URL was pinned without its credentials), reports DRIF
 pinned values held a secret or a URL frisk cannot split, locked before they were redacted
 (`~ changed: how it starts`, or the variable).
 
+A local target or config inside the lockfile's directory is also stored relative to that
+directory, and `frisk verify` reads it from there, so a lock verifies from any working
+directory and in any checkout of the tree (CI included). A local path outside the
+lockfile's directory (an absolute `~/.claude.json`, a server's script elsewhere on the
+machine) is stored as given and cannot be verified on another machine, such as a CI
+runner. `frisk lock` prints `unpinned: upstream changes cannot be detected; pin
+<pkg>@x.y.z` (to stderr; the lock is still written) for each npx, uvx or pipx server whose
+package is not pinned to an exact version (`acme-tool`, `acme-tool@latest`,
+`acme-tool@^1.2`): what such a server runs can change upstream with no change frisk could
+pin. A package server that is not in the local cache gets `code not pinned, only how it
+starts (…)`: until it is cached only its launch is pinned, and its appearing in the cache
+later is DRIFT. The lockfile format is version 1; `frisk verify` refuses a lockfile with any other
+`version`, or none, with exit code 2 and one line.
+
 A git URL is pinned without its credentials, and `frisk verify` re-clones that clean URL:
 for a private repository, git's own credential helper (or an ssh key) supplies the
 access. A lockfile that an older frisk wrote with a token in a git URL still verifies (it
@@ -420,24 +472,45 @@ Wrap the server command in your client config:
     } } }
 ```
 
-The proxy launches the real server, relays the protocol, and enforces:
-- a tool with a **block**-level finding, or too long to scan whole (over 2 MiB characters), is **dropped** (the model never sees it);
-- a tool whose description **changed** since first seen is **flagged** (possible rug pull);
-- prompt-injection detected in a **tool result** gets a visible warning prepended before it reaches the model.
+The proxy launches the real server, relays the protocol, and inspects every
+server-to-client message by its shape:
+- a tool with a **block**-level finding in its name, `title`, description, input or output
+  schema or `annotations`, or too long to scan whole (over 2 MiB characters), is
+  **dropped** (the model never sees it); so is a prompt or resource in a `prompts/list`,
+  `resources/list` or `resources/templates/list` result with a block-level finding in any
+  of its strings;
+- a tool whose definition **changed** since it was pinned (its name, `title`, description,
+  input schema or `annotations`; [pins](#proxy-pins) persist across restarts) is **flagged**
+  (possible rug pull), or **dropped** with `--on-change drop`;
+- prompt-injection in text the model reads gets a visible warning prepended before it
+  reaches the model: a tool result's text items and embedded-resource text, its
+  `structuredContent` (every string in it is scanned; since it must match the tool's output
+  schema it is left as is, and a warning item goes first in `content`), `prompts/get`
+  messages, `resources/read` contents, the server's `initialize` `instructions` and an
+  error answer's `message` or `data` (the warning goes first in the message; the data is
+  removed); any other content item (a `resource_link`, an item of no known type) with a
+  block-level finding in a string, binary data aside, is dropped;
+- a `sampling/createMessage` request (its messages and system prompt) or an
+  `elicitation/create` request (its message and requested schema) with a block-level
+  finding, or too long to scan whole, **never reaches the client**: the server gets a
+  JSON-RPC error for its id, code `-32001`, `frisk: request refused (possible prompt
+  injection)`.
 
-It fails closed on what it inspects (each tool's name, description and input schema in a
-tool list, and the text items of a tool result's `content`). A tool entry that is
-not an object with a string `name` and a string `description` (a missing or null
-description counts as empty), or whose inspection raises, is dropped and the other tools
-are still judged; a tool-result content item that is not an object, or a text item whose
-`text` is not a string, is dropped. If inspecting a message's `tools` or `content` fails
-(either one is not a list, say), the client gets a JSON-RPC error for that id, code
-`-32603`, `frisk: inspection failed`, instead of the message. A JSON-RPC batch (an array)
-is inspected message by message, and a server line that is not JSON is dropped. Each of
-these is logged. Everything else is relayed as sent, uninspected: other tool fields
-(`title`, `annotations`, `outputSchema`), `structuredContent`, content items that are not
-text, resources, prompts, the server's `instructions`, and requests the server sends the
-client (such as `sampling/createMessage`).
+It fails closed. A tool entry that is not an object with a string `name` and a string
+`description` (a missing or null description counts as empty) and, if it has one, a
+string `title`, or whose inspection raises, is dropped and the other tools are still
+judged; a listing entry that is not an object is dropped; a content item that is not an
+object, a text item or embedded resource whose `text` is not a string, a prompt message
+whose content is not such an item, and a `resources/read` item whose `text` is not a
+string, are dropped. If inspecting a message fails (its `tools`, `content`, `messages`,
+`contents`, `prompts` or `resources` is not a list, or `instructions` not a string), the
+client gets a JSON-RPC error for that id, code `-32603`, `frisk: inspection failed`,
+instead of the message; a server request frisk cannot read is refused as above, and a
+`sampling/createMessage` or `elicitation/create` message with no `id` is dropped. A
+JSON-RPC batch (an array) is inspected message by message, and a server line that is not
+JSON is dropped. Each of these is logged. Other messages (notifications, other requests
+such as `roots/list`, binary content, a `prompts/get` description, `serverInfo`,
+`completion` values) are relayed as sent.
 
 A tool result longer than frisk's text limit (2 MiB characters) is still delivered,
 prefixed `[frisk: partially scanned — ...]`: its start and end are pattern-matched and all of
@@ -450,6 +523,21 @@ status (128 + the signal number if a signal ended it). A server command that can
 started, or a `--log` file that cannot be opened, is one line on stderr and exit code 2.
 
 Events are logged to stderr (add `--log frisk-proxy.log` to keep a file).
+
+<a id="proxy-pins"></a>
+**Pins.** Each tool is pinned by sha256 of the canonical JSON (sorted keys, compact) of its
+`name`, `title`, `description`, `inputSchema` and `annotations`, so a schema-only swap is a
+change too. The pins persist across runs, so a rug pull between client restarts is caught:
+by default in `${XDG_STATE_HOME:-~/.local/state}/frisk/pins/<sha256 of the server
+command>.json`, or in the file `--pins FILE` names; `--no-pins` keeps them in memory only
+and writes nothing. The file maps tool names to hashes, never descriptions; it is written
+only while the proxy runs, atomically (a temp file in the same directory, then a rename),
+with mode 0600 in a 0700 directory. `--on-change flag` (the default) keeps a changed tool,
+annotates it and pins the new definition; `--on-change drop` drops it and keeps the old
+pin, so only the approved definition gets through (delete the pins file to approve the
+new one). A pins file that cannot be read or is not a map of names to hashes is logged and
+the proxy starts as on a first run; a pins file that cannot be written is logged once
+(`pins not persisted`) and the proxy keeps relaying with its pins in memory.
 
 ## Use it as an MCP server (let your agent vet *before* it installs)
 
@@ -489,12 +577,25 @@ narrow what an agent may ask for:
 ## GitHub Action
 
 ```yaml
-- uses: Thandv/frisk@v0
-  with:
-    targets: "."          # paths / git URLs to scan
-    fail-on: "block"      # block | warn | never
-    sarif: "true"         # upload findings to the Security tab
+permissions:
+  contents: read
+  security-events: write  # required for sarif: "true" (the upload to the Security tab)
+steps:
+  - uses: actions/checkout@v4
+  - uses: Thandv/frisk@v0
+    with:
+      targets: "."          # paths / git URLs to scan
+      fail-on: "block"      # block | warn | never
+      sarif: "true"         # upload findings to the Security tab
 ```
+
+The Action installs frisk into its own venv (`$RUNNER_TEMP/frisk-venv`, never the runner's
+Python) and scans once: the text report goes to the job log, the SARIF to
+`$RUNNER_TEMP/frisk.sarif` (`--sarif-out`), and the job fails as `fail-on` says. `sarif`
+decides only whether that file is uploaded, which needs `permissions: security-events:
+write`; set `sarif: "false"` in a job without it. Inputs reach the scan only through
+environment variables, never as text in its script, so a `targets` value cannot run shell
+code: it is split on whitespace (spaces or newlines) into paths and URLs, each taken literally.
 
 Finding paths are relative to what you name: `targets: "skills plugins"` reports
 `skills/foo/SKILL.md`, so code-scanning annotations land on the right repository file

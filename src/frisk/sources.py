@@ -39,8 +39,51 @@ _GIT_URL = re.compile(r"^(https?://[^\s]+?(\.git)?|git@[^\s][^\s:]*:[^\s]+|githu
 def is_git_url(s: str) -> bool:
     if Path(s).exists():
         return False
+    if s.startswith("file://"):  # never cloned, except through the test seam
+        return _file_urls_allowed()
     return bool(_GIT_URL.match(s.strip())) or s.startswith(("https://github.com/",
                                                             "https://gitlab.com/"))
+
+
+# The test seam for cloning a local bare repository: a file:// target is a git URL only when
+# a test sets this flag AND FRISK_TEST_ALLOW_FILE_URL=1, and only then may git use the file
+# protocol. Never set outside tests.
+_ALLOW_FILE_URL_FOR_TESTS = False
+
+
+def _file_urls_allowed() -> bool:
+    return _ALLOW_FILE_URL_FOR_TESTS and os.environ.get("FRISK_TEST_ALLOW_FILE_URL") == "1"
+
+
+# git configuration for cloning an untrusted URL: only https and ssh, and none of git's
+# ways to run code from the clone or the environment (hooks, fsmonitor), write symlinks,
+# fetch submodules or prompt for anything.
+_GIT_HARDENING = ("-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.ssh.allow=always",
+                  "-c", "core.hooksPath=/dev/null", "-c", "core.symlinks=false", "-c", "core.fsmonitor=false")
+_GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", "GIT_ASKPASS": "/bin/false",
+            "GIT_CONFIG_NOSYSTEM": "1", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
+
+
+def git_clone_argv(url: str, dest: str) -> list[str]:
+    """The git command that clones `url` into `dest`: hardened, shallow, the URL after '--'."""
+    seam = ("-c", "protocol.file.allow=always") if _file_urls_allowed() else ()
+    return ["git", *_GIT_HARDENING, *seam, "clone", "--depth", "1", "--no-recurse-submodules", "--quiet",
+            "--", url, dest]
+
+
+def _check_git_target(target: str) -> None:
+    """Refuse (ValueError), before git runs, a target holding whitespace or a control
+    character (inside it: whitespace around it is dropped, as is_git_url reads it), and an
+    ssh-style or URL host that starts with '-' (read as an option)."""
+    target = target.strip()
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in target):
+        raise ValueError("refused: a git URL must not contain whitespace or control characters")
+    if "://" in target:
+        host = target.split("://", 1)[1].split("/", 1)[0].rpartition("@")[2]
+    else:  # scp-like 'user@host:path'
+        host = target.partition("@")[2].split(":", 1)[0]
+    if host.startswith("-"):
+        raise ValueError("refused: a git URL's host must not start with '-'")
 
 
 def display_target(target: str) -> str:
@@ -78,18 +121,17 @@ def _normalize_git(url: str) -> str:
 def materialize(target: str):
     """Yield (root_path: Path, label: str) for scanning; clean up clones afterward."""
     if is_git_url(target):
+        _check_git_target(target)
         tmp = tempfile.mkdtemp(prefix="frisk-")
         try:
             t0 = time.monotonic()
+            argv = git_clone_argv(_normalize_git(target), tmp)
             # The URL is not logged: it can carry credentials.
-            log.debug("git clone start args=6")
+            log.debug("git clone start args=%d", len(argv) - 1)
             try:
-                # git must never wait for a password: no terminal prompt and no stdin to read.
-                r = subprocess.run(
-                    ["git", "clone", "--depth", "1", "--quiet", _normalize_git(target), tmp],
-                    capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
-                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-                )
+                # git must never wait for a password: no prompt, no askpass, no stdin to read.
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
+                                   env={**os.environ, **_GIT_ENV})
             except Exception as e:
                 log.debug("git clone end status=error error=%s ms=%d", type(e).__name__, ms_since(t0))
                 if isinstance(e, subprocess.TimeoutExpired):  # its message is the whole command, URL and token
@@ -184,6 +226,10 @@ class ServerRef:
     # an index URL without its credentials, _env_pin), for frisk lock; never the value itself,
     # never printed.
     code_env: dict[str, str] = field(default_factory=dict)
+    # An npx, uvx or pipx package the config names with no exact version (pkg, pkg@latest,
+    # pkg@^1): its name, for frisk lock's note. Not part of how the server is classified,
+    # so not compared.
+    unpinned: str = field(default="", compare=False)
 
 
 def display_ref(s: ServerRef) -> str:
@@ -290,7 +336,8 @@ def _classify_command(name: str, spec: dict, cmd: str, project: Path | None) -> 
     if base == "uv":
         return _classify_uv(name, args, cwd)
     if base in ("npx", "uvx", "pipx"):
-        return _cached_package(name, base, _package_spec(base, args) or cmd)
+        spec = _package_spec(base, args)
+        return _unpinned(_cached_package(name, base, spec or cmd), base, spec)
     if base in _PKG_RUNNERS:
         pkg = next((a for a in args if not a.startswith("-")), "")
         return _package(name, _PKG_RUNNERS[base], pkg or cmd)
@@ -336,7 +383,8 @@ def _classify_uv(name: str, args: list[str], cwd: Path | None) -> ServerRef:
     else 'cwd'. `uv tool run` runs a PyPI package, like uvx."""
     opts, rest = _leading_options(args, _UV_VALUE_FLAGS)
     if rest[:2] == ["tool", "run"]:
-        return _cached_package(name, "uvx", _package_spec("uvx", rest[2:]) or "uv")
+        spec = _package_spec("uvx", rest[2:])
+        return _unpinned(_cached_package(name, "uvx", spec or "uv"), "uvx", spec)
     if rest[:1] != ["run"]:
         return ServerRef(name, "unknown", "uv", scannable=False, detail=_UNRESOLVED)
     run_opts, command = _leading_options(rest[1:], _UV_VALUE_FLAGS)
@@ -380,6 +428,33 @@ def _cached_package(name: str, runner: str, spec: str) -> ServerRef:
                      detail=f"{_PKG_RUNNERS[runner]} package {pkg} {c.version} from local cache "
                             f"{home_label(str(c.path))}",
                      package=spec, version=c.version, unscanned_deps=c.deps)
+
+
+def _unpinned(ref: ServerRef, runner: str, spec: str) -> ServerRef:
+    """`ref`, with `unpinned` set when the config names a registry package (`spec`, '' for
+    none) without an exact version."""
+    pkg, version = _split_spec(runner, spec)
+    if _registry_name(pkg) and not _exact_version(runner, version):
+        ref.unpinned = pkg
+    return ref
+
+
+def _registry_name(pkg: str) -> bool:
+    """A package name a registry serves (name or @scope/name): never a URL, path or git
+    spec, which may carry a credential and is not looked up."""
+    bare = pkg[1:].split("/", 1)[-1] if pkg.startswith("@") and pkg.count("/") == 1 else pkg
+    return bool(bare) and all(ch.isalnum() or ch in "._-" for ch in bare)
+
+
+def _exact_version(runner: str, version: str) -> bool:
+    """An exact version, as the runner pins one (1.2.3, 1.2.3-rc.1, 2.0.0a1, 1!2.0), not a
+    tag or range (latest, ^1.2, ~1, >=1, 1.x, 1.2.*). npm reads 1 or 1.2 as a range, so for
+    npx it takes major.minor.patch. A character check, no regex."""
+    if not (version[:1].isdigit() and all(ch.isalnum() or ch in ".-+_!" for ch in version)):
+        return False
+    if {"x", "X"} & set(version.split(".")):
+        return False
+    return runner != "npx" or version.split("-", 1)[0].split("+", 1)[0].count(".") == 2
 
 
 def _package_spec(runner: str, args: list[str]) -> str:

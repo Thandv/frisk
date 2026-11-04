@@ -51,7 +51,7 @@ class ProxyCase(unittest.TestCase):
     def start(self, *proxy_args: str, linger: bool = False) -> subprocess.Popen[bytes]:
         env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
                "FAKE_MCP_EXTRAS": "1", "FAKE_MCP_LINGER": "1" if linger else "0", "FRISK_DEBUG": "0",
-               "HOME": str(self.tmp)}
+               "HOME": str(self.tmp), "XDG_STATE_HOME": str(self.tmp)}  # FR-E6: pins never in the real state dir
         argv = proxy_args or ("--", sys.executable, str(FAKE_SERVER))
         proc = subprocess.Popen([sys.executable, "-m", "frisk.cli", "proxy", *argv], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.tmp))

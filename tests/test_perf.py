@@ -25,7 +25,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Callable
 
-from frisk import rules, surfaces
+from frisk import redact, rules, surfaces
 from frisk.rules import PerCommand, hidden_unicode
 
 SIZE = 1 << 20
@@ -92,6 +92,11 @@ SEEDS: dict[str, tuple[str, ...]] = {
     "surface:plain": ("x",),
     "unicode": (ZWJ, chr(0x1F600) + ZWJ, TAG, FLAG + TAG * 5 + chr(0xE007F), chr(0xE0100), chr(0xFEFF),
                 "a" + chr(0xAD)),
+    # FR-E6 F3.06: the excerpt redactor, over a whole text (engine runs it once per file with a finding).
+    "redact": ("password", "password ", 'key"', "passwd:", "token =>", "://a", "://" + "u" * 40, "-----BEGIN ",
+               "-----BEGIN " + "RSA PRIVATE KEY-----", "-----BEGIN " + " " * 40, "AK" + "IA",
+               "AK" + "IA" + "Z" * 15 + " ",
+               "Ab3" * 10 + "x ", "a1", "0123456789abcdef", "bearer ", "s" + "k-", "gh" + "p_", "key" + "y" * 64),
 }
 # Runs of one character class, given to every budgeted key as well.
 CLASS_RUNS = (" ", "a", "\n", "/", "-", "$", "(")
@@ -147,6 +152,7 @@ def linear() -> dict[str, Callable[[str], object]]:
     out = {rid: finditer_scan(rx) for rid, _cat, _sev, rx, _desc in rules.INSTRUCTION_RULES}
     out.update({f"surface:{surfaces.name_of(s)}": extract_scan(s) for s in surfaces.load()})
     out["unicode"] = hidden_unicode
+    out["redact"] = redact.secret_spans
     return out
 
 

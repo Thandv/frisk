@@ -70,7 +70,8 @@ class TestGit(CliCase):
             code, _, err = run([URL], git)
         self.assertEqual(code, 2)
         ((argv, kwargs),) = git.calls
-        self.assertEqual(argv[:5], ["git", "clone", "--depth", "1", "--quiet"])
+        clone = argv.index("clone")  # FR-E6 H1.4: hardening options come first (tests/test_sources_git.py)
+        self.assertEqual([argv[0], *argv[clone:clone + 3]], ["git", "clone", "--depth", "1"])
         self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
         self.assertNotIn("shell", kwargs)
         env = kwargs["env"]
