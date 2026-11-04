@@ -31,7 +31,8 @@ shape (no request-id map):
         entries as "tool_description".
   - `sampling/createMessage` and `elicitation/create` requests from the server -> one
         with a block-level finding never reaches the client: the server gets a JSON-RPC
-        error for its id.
+        error for its id. Sampling is scanned as "tool_result", elicitation (the server's
+        own text to the user) as "tool_description".
 
 It fails closed: a tool entry, listing entry or content item it cannot inspect is
 dropped, a message whose inspection fails reaches the client as a JSON-RPC error for its
@@ -292,7 +293,9 @@ class Proxy:
         refused with an error to the server and never forwarded."""
         method = msg["method"]
         try:
-            findings = scan_text(self._request_text(method, msg.get("params")), method, "tool_result").findings
+            # An elicitation is the server's own text to the user, judged as a description is.
+            context = "tool_description" if method == "elicitation/create" else "tool_result"
+            findings = scan_text(self._request_text(method, msg.get("params")), method, context).findings
             reason = _why(findings) if _blocks(findings) else ""
         except Exception as e:  # noqa: BLE001 - fail closed: a request that cannot be inspected is refused
             reason = f"inspection failed ({type(e).__name__})"

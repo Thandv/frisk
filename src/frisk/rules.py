@@ -120,12 +120,12 @@ _RM_TARGET = (r"[\"']?(?:(?:~|\$HOME|\$\{HOME\})[\"']?(?:/[\"']?\.(?:ssh|aws|gnu
 # "default": every code and text rule (--text, frisk-mcp). The frisk proxy's: "tool_description"
 # (the text rules, the commands that harm when an agent runs them, instructions to read or
 # send a credential file, and a private key or credential file named at all; a credential
-# directory or config file named in prose only warns) and "tool_result"
-# (the injection and tool-poisoning rules). The hidden-Unicode check runs in all three.
+# directory or config file named in prose only warns) and "tool_result" (the injection and
+# tool-poisoning rules, those instructions and those commands, but no other code rule: a
+# result may hold code, such as a file that calls eval). The hidden-Unicode check runs in all three.
 CONTEXTS = ("default", "tool_description", "tool_result")
 _EVERY = frozenset(CONTEXTS)
 _DEFAULT = frozenset({"default"})
-_NOT_RESULT = frozenset({"default", "tool_description"})
 _NOT_DEFAULT = frozenset({"tool_description", "tool_result"})
 _DESCRIPTION = frozenset({"tool_description"})
 
@@ -145,7 +145,7 @@ CODE_RULES: list[Rule] = [
      _r(r"\b(curl|wget)\b(?:(?!\b(?:curl|wget)\b)[^\n|]|\\\n)*\|(?:\s|\\\n)*(?:(?:\S*/)?(?:sudo|env)(?:\s+-\S+)*\s+)*"
         r"(?:\S*/)?(bash|sh|zsh|python[0-9.]*)\b"
         r"|\b(?:bash|sh|zsh)\s+(?:<\(|-c\s+[\"']?\$\()\s*(?:curl|wget)\b"),
-     "pipe-to-shell remote installer (curl|wget ... | sh)", _NOT_RESULT),
+     "pipe-to-shell remote installer (curl|wget ... | sh)", _EVERY),
     ("rce.eval_b64", "rce", "block",
      # Within 400 characters of the same parentheses, whitespace included (a separate \s*
      # before the window would try the window from every point of a whitespace run); the
@@ -192,7 +192,7 @@ CODE_RULES: list[Rule] = [
      "mention of a secret-bearing identifier", _DEFAULT),
     ("exfil.keychain_read", "exfil", "block",
      _r(r"\bsecurity\s+find-(generic|internet)-password\b"),
-     "macOS keychain password read (security find-*-password)", _NOT_RESULT),
+     "macOS keychain password read (security find-*-password)", _EVERY),
     ("exfil.keychain_mention", "exfil", "warn",
      _r(r"\bkeychain\b|\bsecurity\s+list-keychains\b"),
      "keychain reference (non-secret-reading)", _DEFAULT),
@@ -211,17 +211,17 @@ CODE_RULES: list[Rule] = [
      # quoted. Paths below those, such as temp and build directories, do not match.
      PerCommand(r"\brm\s+(?P<hit>(?=" + _ARGS + r"(?:-[a-z]*r|--recursive\b))(?=" + _ARGS + r"(?:-[a-z]*f|--force\b))"
                 r"(?=" + _ARGS + _RM_TARGET + r"))?" + rf"(?:[^\s;&|]+[ \t]+){{0,{_RM_SKIP}}}"),
-     "recursive force delete of a root, system, home or credential directory", _NOT_RESULT),
+     "recursive force delete of a root, system, home or credential directory", _EVERY),
     ("destroy.disk", "destructive", "block",
      # dd writing to a device (not the null/zero/stdio sinks), mkfs on a device, or a
      # redirect into a raw disk. dd to a regular file does not match. A run never crosses
      # another dd/mkfs (that one reaches the same target), so the scan stays linear.
      _r(r"\bdd\b(?:(?!\bdd\b)[^\n;&|])*\bof=[\"']?/dev/(?!(?:null|zero|stdout|stderr)\b|fd/)"
         r"|\bmkfs(?:\.\w+)?\b(?:(?!\bmkfs(?:\.\w+)?\b)[^\n;&|])*\s[\"']?/dev/|>\s*/dev/sd|>\s*/dev/disk"),
-     "raw disk write / format", _NOT_RESULT),
+     "raw disk write / format", _EVERY),
     ("destroy.forkbomb", "destructive", "block",
      _r(r":\(\)\s*\{\s*:\|:&\s*\}\s*;:"),
-     "fork bomb", _NOT_RESULT),
+     "fork bomb", _EVERY),
     ("destroy.chmod_777", "destructive", "warn",
      _r(r"\bchmod\s+(-R\s+)?0?777\b"),
      "world-writable chmod 777", _DEFAULT),

@@ -477,13 +477,15 @@ Wrap the server command in your client config:
 ```
 
 The proxy launches the real server, relays the protocol, and inspects every
-server-to-client message by its shape. Tool definitions, prompt and resource listing entries
-and the server's `instructions` are scanned as descriptions: the text rules, hidden Unicode,
+server-to-client message by its shape. Tool definitions, prompt and resource listing entries,
+the server's `instructions` and its elicitation requests are scanned as descriptions: the text rules, hidden Unicode,
 pipe-to-shell, destructive and keychain-reading commands, instructions to read or send a
 credential file, and a private key or credential file named at all (`exfil.secret_files_prose`);
 a credential directory or config file only named, as in a tool that reads `~/.ssh/config`,
-warns (`exfil.secret_paths_prose`). Everything else the model reads is scanned as a result: the
-injection and tool-poisoning rules and hidden Unicode, so code in a result (a file that calls
+warns (`exfil.secret_paths_prose`). Everything else the model reads (and sampling requests) is scanned as
+a result: the injection and tool-poisoning rules, instructions to read or send a credential
+file (`inject.sensitive_path_instruction`), pipe-to-shell, destructive and keychain-reading
+commands, and hidden Unicode, but no other code rule, so code in a result (a file that calls
 `eval`) is not mistaken for an attack ([prose rules](docs/rules.md#prose-rules)).
 - a tool with a **block**-level finding in its name, `title`, description, input or output
   schema or `annotations`, or too long to scan whole (over 2 MiB characters), is
