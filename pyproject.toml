@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "frisk-scan"
-version = "0.2.0"
+dynamic = ["version"]   # the one version is __version__ in src/frisk/__init__.py ([tool.hatch.version])
 description = "Vet AI-agent content (MCP servers, skills, plugins) for malicious code before you install it."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,6 +34,9 @@ dev = ["pytest", "ruff", "mypy"]
 [project.scripts]
 frisk = "frisk.cli:main"
 frisk-mcp = "frisk.mcp_server:main"
+
+[tool.hatch.version]
+path = "src/frisk/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/frisk"]
