@@ -15,6 +15,7 @@ hidden inside tool descriptions or invisible unicode. `frisk` is the cheap layer
 that catches the obvious-but-invisible stuff before it reaches your machine or
 your agent.
 
+<!-- frisk-demo: scan -->
 ```
 $ frisk examples/malicious-skill
 [BLOCK] rce            examples/malicious-skill/SKILL.md:11  pipe-to-shell remote installer (curl|wget ... | sh)
@@ -37,6 +38,7 @@ $ frisk examples/malicious-skill
 scanned 1 file, skipped 0
 verdict:   BLOCK    4 blocking · 4 warnings · 8 total  (examples/malicious-skill)
 ```
+<!-- /frisk-demo -->
 
 ## What it detects
 
@@ -217,6 +219,7 @@ Point `frisk` at your MCP config and it resolves and scans every server you have
 ```bash
 frisk --mcp-config ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
+<!-- frisk-demo: mcp-audit -->
 ```
 $ frisk --mcp-config claude_desktop_config.json
 MCP config audit: claude_desktop_config.json
@@ -236,6 +239,7 @@ MCP config audit: claude_desktop_config.json
 scanned 3 files, skipped 0
 verdict:   WARN    0 blocking · 2 warnings · 2 total  (claude_desktop_config.json)
 ```
+<!-- /frisk-demo -->
 
 A server frisk could not scan is never passed over in silence: it raises a
 `coverage.unscanned` warning, so the verdict is at least WARN (never PASS), and each
@@ -353,14 +357,25 @@ frisk lock ./my-skill --mcp-config ~/.../claude_desktop_config.json   # pin what
 # ...later, or in CI / a pre-run hook...
 frisk verify                                                          # fails if anything changed
 ```
-```
-  [ok   ] ./my-skill
-  [ok   ] claude_desktop_config.json
-  [DRIFT] claude_desktop_config.json::some-server
-           ~ changed: tools.py
 
-verify: DRIFT DETECTED  (1 of 3 entries changed)
+For example, with `examples/clean-skill` and the config from the audit above locked
+(`frisk lock examples/clean-skill --mcp-config claude_desktop_config.json`), and a line then
+added to the `notes-server` script:
+
+<!-- frisk-demo: drift -->
 ```
+$ frisk verify
+  [ok   ] examples/clean-skill
+  [ok   ] claude_desktop_config.json
+  [DRIFT] claude_desktop_config.json::notes-server
+           ~ changed: server.py
+  [ok   ] claude_desktop_config.json::weather
+  [ok   ] claude_desktop_config.json::some-remote
+  [ok   ] claude_desktop_config.json::npm-tool
+
+verify: DRIFT DETECTED  (1 of 6 entries changed)
+```
+<!-- /frisk-demo -->
 
 An entry frisk cannot verify (a target that is gone or cannot be cloned, a malformed
 entry) is listed as `[error]` with the reason and counted apart from drift: the summary
@@ -666,6 +681,10 @@ bash scripts/verify.sh        # unittest under every local interpreter found (CL
 fails or if fewer than `FRISK_MIN_PYTHONS` (default 2) interpreters were found.
 `FRISK_VERIFY_PYTHONS` (space-separated paths) replaces the list of interpreters it tries;
 it installs nothing and uses no network.
+
+The sample outputs above marked `<!-- frisk-demo: NAME -->` are real runs: `python3
+scripts/gen_readme_demo.py` rebuilds them (in a temp directory and HOME, with a copy of
+`examples/` and a fixture MCP config), and `tests/test_docs.py` fails while one is stale.
 
 Optional extras, never needed at runtime: `pip install -e ".[test]"` (pytest) and
 `pip install -e ".[dev]"` (pytest, ruff, mypy, coverage). CI runs the suite on Python 3.9
