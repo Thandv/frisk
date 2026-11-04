@@ -115,18 +115,20 @@ class TestRoots(ScopeCase):
                 self.assertIn("is outside FRISK_MCP_ROOTS", refusal(source))
 
     def test_broad_targets_are_refused_by_default_and_allowed_when_named(self) -> None:
-        for source in ("/", str(self.home), "/System"):
+        # /System exists only on macOS; CI also runs on Linux.
+        system = ["/System"] if Path("/System").is_dir() else []
+        for source in ["/", str(self.home), *system]:
             with self.subTest(source=source):
                 self.assertIn("is too broad to scan; name it in FRISK_MCP_ROOTS", refusal(source))
                 self.assertIn("too broad", refusal(source, "vet_mcp_server"))
         (self.home / "notes.md").write_text("fine\n", encoding="utf-8")
-        os.environ["FRISK_MCP_ROOTS"] = os.pathsep.join([str(self.home), "/", "/System"])
+        os.environ["FRISK_MCP_ROOTS"] = os.pathsep.join([str(self.home), "/", *system])
         self.assertEqual(summary(str(self.home))["verdict"], "PASS")
         with mock.patch.object(mcp_server, "scan_path", return_value=mcp_server.ScanResult()) as scan:
-            for source in ("/", "/System"):
+            for source in ["/", *system]:
                 with self.subTest(allowed=source):
                     self.assertEqual(summary(source)["verdict"], "PASS")
-        self.assertEqual([c.args[0] for c in scan.call_args_list], [Path("/"), Path("/System")])
+        self.assertEqual([c.args[0] for c in scan.call_args_list], [Path(s) for s in ["/", *system]])
 
 
 class TestNoNetwork(ScopeCase):
