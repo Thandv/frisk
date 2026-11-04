@@ -8,28 +8,15 @@ Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
 """
 from __future__ import annotations
 
-import importlib.util
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import ModuleType
 from unittest import mock
 
-REPO = Path(__file__).resolve().parent.parent
-
-
-def load_script(name: str) -> ModuleType:
-    """scripts/<name>.py as a module, without writing its bytecode into the repo."""
-    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / f"{name}.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module  # dataclasses look their module up there
-    with mock.patch.object(sys, "dont_write_bytecode", True):
-        spec.loader.exec_module(module)
-    return module
+from _scripts import REPO, load_script
 
 
 gen = load_script("gen_readme_demo")
