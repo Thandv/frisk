@@ -10,8 +10,11 @@ Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 from _subproc import REPO
 from test_ci_workflow import job, steps
@@ -66,7 +69,14 @@ class TestVerifyScript(unittest.TestCase):
     def test_named_interpreters_that_are_missing_are_skipped_and_fail(self) -> None:
         missing = ["/nonexistent/python3", "/nonexistent/python3.14"]
         env = {"PATH": "/usr/bin:/bin", "FRISK_VERIFY_PYTHONS": " ".join(missing)}
-        r = subprocess.run(["bash", str(VERIFY)], env=env, capture_output=True, text=True, timeout=60, check=False)
+        # A copy in an empty tree: even if the override stopped working, there is no suite for
+        # the script to run, so this test can never run the suite again.
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "scripts").mkdir()
+            copy = Path(tmp) / "scripts" / "verify.sh"
+            shutil.copy(VERIFY, copy)
+            r = subprocess.run(["bash", str(copy)], env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=60, check=False)
         self.assertEqual(r.returncode, 1)
         self.assertEqual(r.stdout.splitlines(), [f"skip: {p} not found" for p in missing])
         self.assertIn("only 0 interpreter(s) ran", r.stderr)
