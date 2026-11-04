@@ -56,8 +56,12 @@ whatever the name — and on the shell commands inside other files: fenced code 
 inline code (in an ordinary document such as a README, inline code at most warns; it blocks
 in agent-instruction files, and code blocks block everywhere),
 Makefile recipes, Dockerfile `RUN` instructions, justfile recipes and `package.json`
-`scripts`. Text rules (injection, tool poisoning, hidden Unicode) run on every file,
-including markdown HTML comments that a renderer hides.
+`scripts`, and in any `.json` file (`hooks/hooks.json`, `.mcp.json`, ...) the value of a
+`command`, `run`, `script`, `shell` or `exec` key, an `args` array joined after its
+`command`, and any string holding a shell pipeline. Text rules (injection, tool poisoning,
+hidden Unicode) run on every file, including markdown HTML comments that a renderer hides,
+and on each `.json` string as it decodes, so `\u` escapes hide nothing; a `.json` file that
+does not parse is still text-scanned and raises a `coverage.surface_error` warning.
 
 Every rule id, its severity, what it matches and what to do about a hit:
 [docs/rules.md](docs/rules.md).

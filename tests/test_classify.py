@@ -105,9 +105,11 @@ class TestPackageJsonScripts(TempDir):
 
     def test_malformed_package_json_is_a_coverage_note_not_a_crash(self) -> None:
         result = self.scan("package.json", '{"scripts": {"postinstall": "x",\n')
-        self.assertEqual([(f.rule, f.severity) for f in result.findings], [("coverage.surface_error", "warn")])
+        # Both surfaces that read it as JSON note it (json_values: FR-E3b item 4).
+        self.assertEqual([(f.rule, f.severity) for f in result.findings], [("coverage.surface_error", "warn")] * 2)
         self.assertEqual([(s.reason, s.detail) for s in result.coverage.skipped],
-                         [("surface_error", "package_json: JSONDecodeError")])
+                         [("surface_error", "json_values: JSONDecodeError"),
+                          ("surface_error", "package_json: JSONDecodeError")])
         self.assertEqual(result.coverage.files_scanned, 1)
 
 

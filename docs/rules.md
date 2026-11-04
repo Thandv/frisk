@@ -9,7 +9,7 @@ Severity: **block** fails a scan by default; **warn** fails only with `--fail-on
 
 ## Code rules
 
-Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks (` ``` ` or `~~~`, any length; an unclosed fence runs to the end of the file) in every other text file, on indented code blocks and inline code spans in markdown (`.md`, `.markdown`, `.mdc`), and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command.
+Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks (` ``` ` or `~~~`, any length; an unclosed fence runs to the end of the file) in every other text file, on indented code blocks and inline code spans in markdown (`.md`, `.markdown`, `.mdc`), and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command. In a `.json` file, the decoded value of a `command`, `run`, `script`, `shell` or `exec` key (an array of strings under one is joined with spaces), an `args` array joined after its object's `command`, and any other string value holding a shell pipeline are code too; a finding is reported at the line of the string (for a join, of the command).
 
 Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md` or `.markdown` that is not an agent-instruction file) report a code rule at most as `warn`: a document that mentions a risky call by name is not running it. In agent-instruction files (see [inject.sensitive_path_instruction](#inject.sensitive_path_instruction) for the list) and in fenced or indented code blocks everywhere, code rules keep the severity listed below. Text rules keep their severity in every form.
 
@@ -167,7 +167,7 @@ Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md`
 
 ## Text rules
 
-Run on the full text of every file frisk reads, code files included, and on `--text` input. Markdown HTML comments, which renderers hide, are text-scanned like everything else.
+Run on the full text of every file frisk reads, code files included, and on `--text` input. Markdown HTML comments, which renderers hide, are text-scanned like everything else. Each string of a `.json` file written with a backslash escape is also scanned as the text it decodes to, and reported at its line.
 
 <a id="inject.ignore_prev"></a>
 ### inject.ignore_prev

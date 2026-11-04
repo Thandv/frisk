@@ -465,7 +465,8 @@ class ControlCharacterTest(AuditCase):
         (pkg / "node_modules" / "acme-tool" / "package.json").write_text(
             json.dumps({"version": "1.0.0" + mark, "dependencies": {"dep" + mark: "^1"}}), encoding="utf-8")
         out = run(["--mcp-config", self.config({"tool": {"command": "npx", "args": ["acme-tool"]}})])[1]
-        line = next(x for x in out.splitlines() if x.startswith("  [PASS ] tool"))
+        # The escaped bidi, zero-width and tag characters in the package.json block (FR-E3b item 4).
+        line = next(x for x in out.splitlines() if x.startswith("  [BLOCK] tool"))
         self.assertEqual(line.count("\\x1b"), 2)  # the version and the dependency name
         self.assert_escaped(out)
 

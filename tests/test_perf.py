@@ -87,6 +87,11 @@ SEEDS: dict[str, tuple[str, ...]] = {
     "surface:build_recipes": ("\tx\\\n", "RUN x\\\n", " x\\\n", "a:b;"),
     "surface:fences": ("```\n", "```x\n", "~~~\n", "x ```"),
     "surface:instructions": ("x",),
+    # FR-E3b item 4: each seed is an element of a JSON array (see JSON_ARRAY), so the file parses.
+    "surface:json_values": ('"a", ', '"a|b", ', '"\\u200b", ', '"\\"x\\"", ', '{"command": "x", "args": ["-c", "y"]}, ',
+                            '{"args": ["-c"]}, ', '{"run": ["a", "b"]}, ', '["a"], ', '{"\\u0061": "b"}, ',
+                            '"' + "\\\\" * 20 + '", ', '"' + " |" * 20 + '", '),
+    "regex:json_values._PIPE": ("a|", "a |", "a| ", "|", "||", " | ", "a" + " " * 40),
     "surface:markdown": ("`", "` `", "<!--", "    x\n", "\n\n    x\n", "* x\n", "```\n", "1. x\n"),
     "surface:package_json": ('"a": "b", ', '"\\"": "\\\\", '),
     "surface:plain": ("x",),
@@ -104,8 +109,9 @@ CLASS_RUNS = (" ", "a", "\n", "/", "-", "$", "(")
 # repeated inside a scripts object, so the file parses.
 SURFACE_FILES = {"fences": ("notes.txt",), "markdown": ("README.md",), "plain": ("x.py",),
                  "build_recipes": ("Makefile", "Dockerfile", "justfile"), "instructions": ("SKILL.md",),
-                 "package_json": ("package.json",)}
+                 "package_json": ("package.json",), "json_values": ("x.json",)}
 PACKAGE_JSON = ('{"scripts": {', '"z": "y"}}')
+JSON_ARRAY = ("[", '"z"]')
 
 
 def repeat(seed: str, size: int) -> str:
@@ -128,21 +134,23 @@ def finditer_scan(pattern: re.Pattern[str] | PerCommand) -> Callable[[str], obje
 def extract_scan(surface: ModuleType) -> Callable[[str], object]:
     def scan(text: str) -> None:
         for name in SURFACE_FILES[surfaces.name_of(surface)]:
-            body = PACKAGE_JSON[0] + text + PACKAGE_JSON[1] if name == "package.json" else text
+            wrap = {"package.json": PACKAGE_JSON, "x.json": JSON_ARRAY}.get(name, ("", ""))
+            body = wrap[0] + text + wrap[1]
             surface.extract(Path(name), body)
     return scan
 
 
 def budgeted() -> dict[str, Callable[[str], object]]:
     """Held to BUDGET_S on 1 MiB: the rules of CODE_RULES and TEXT_RULES, and the regexes the
-    surfaces run over a whole file. package_json's run only on text json.loads accepted (one
-    match per string literal) or between two literals, so its extract() covers them."""
+    surfaces run over a whole file. package_json's, and json_values' _TOKEN, run only on text
+    json.loads accepted (one match per string literal) or between two literals, so their
+    extract() covers them."""
     out = {rid: finditer_scan(rx) for rid, _cat, _sev, rx, _desc in rules.CODE_RULES + rules.TEXT_RULES}
     for surface in surfaces.load():
         if surfaces.name_of(surface) == "package_json":
             continue
         for name, value in vars(surface).items():
-            if isinstance(value, re.Pattern):
+            if isinstance(value, re.Pattern) and (surfaces.name_of(surface), name) != ("json_values", "_TOKEN"):
                 out[f"regex:{surfaces.name_of(surface)}.{name}"] = finditer_scan(value)
     return out
 
