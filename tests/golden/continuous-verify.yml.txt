@@ -1,0 +1,4 @@
+frisk: clean — no findings in examples/continuous-verify.yml
+
+scanned 1 file, skipped 0
+verdict:   PASS    0 blocking · 0 warnings · 0 total  (examples/continuous-verify.yml)

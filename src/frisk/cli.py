@@ -138,12 +138,31 @@ def _positive(value: str) -> int:
     return n
 
 
+_SCAN_EPILOG = """\
+subcommands:
+  frisk [options] TARGET ...    scan (this help)
+  frisk lock                    pin a content fingerprint of approved content (frisk lock --help)
+  frisk verify                  re-check pinned content for drift (frisk verify --help)
+  frisk proxy [options] -- CMD  check an MCP server's tools at runtime (frisk proxy: usage)
+
+exit status of a scan:
+  0  no finding reached the --fail-on level (always 0 with --fail-on never)
+  1  the worst finding reached the --fail-on level (default: block)
+  2  a usage error, no target, or a target, MCP config, --stdin or --sarif-out FILE that
+     cannot be read or written (a file inside a target that cannot be read is a warning)
+frisk lock exits 0, or 2 on an error. frisk verify exits 0, 1 on drift or an entry it could
+not verify, 2 on a lockfile it cannot read. frisk proxy exits with the server's status, or 2
+on a usage error or a server it cannot start.
+"""
+
+
 def _cmd_scan(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
         prog="frisk",
-        description="Static, zero-execution security scanner for AI-agent content "
-                    "(MCP servers, Claude Code skills/plugins/subagents, Cursor rules). "
-                    "Subcommands: lock, verify, proxy.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Static, zero-execution security scanner for AI-agent content (MCP servers,\n"
+                    "Claude Code skills/plugins/subagents, Cursor rules).",
+        epilog=_SCAN_EPILOG,
     )
     p.add_argument("targets", nargs="*",
                    help="local paths and/or git URLs to scan; an MCP config file is audited as with --mcp-config")

@@ -100,6 +100,10 @@ finding's `message` repeats its `description`. `scripts/foreman-frisk-scan.sh` i
 (installed nowhere) for the owner's wrapper that lets Foreman's admission scan call
 `frisk --stdin --json`.
 
+Exit codes of a scan (also in `frisk --help`): 0 when no finding reached the `--fail-on`
+level, 1 when the worst finding did, 2 for a usage error, no target, or a target, MCP
+config, `--stdin` or `--sarif-out` file that cannot be read or written.
+
 Every readable file under the target is scanned; scripts, build files and `package.json`
 scripts get the code rules too (see [What it detects](#what-it-detects)). A target that is
 an MCP config file (`.claude.json`, `.mcp.json`, `mcp.json`, `claude_desktop_config.json`,
