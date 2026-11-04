@@ -47,8 +47,8 @@ verdict:   BLOCK    4 blocking · 4 warnings · 8 total  (examples/malicious-ski
 | **Remote code execution** | `curl … \| bash` (also `\| sudo -E bash`, `\| /bin/sh`, `bash <(curl …)`, `sh -c "$(curl …)"`), `eval`/`exec`, `os.system`, `shell=True`, pickle, base64-exec |
 | **Secret exfiltration** | reads of `.ssh`/`.aws`/`.gnupg`, secret env vars, macOS keychain, network egress |
 | **Destructive ops** | `rm -rf` of `/`, a system directory (`/etc`, `/usr`, …), `~`/`$HOME`, a home credential directory (`~/.ssh`, `~/.aws`, …) or a glob over them (any flag spelling; temp and build paths pass), `dd` or `mkfs` onto a `/dev` device (not `/dev/null` or a file), fork bombs, `chmod 777` |
-| **Prompt injection** | "ignore previous instructions", fake tool-call markup, role overrides, "POST data to URL"; in agent-instruction files (`SKILL.md`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `agents/`/`commands/` markdown, markdown at any depth in `.claude/` agents, commands, rules, skills and output-styles, `.cursorrules`, `*.mdc`), telling the agent to copy, read or send a key or credential file |
-| **Tool poisoning** (MCP) | hidden directives in tool descriptions: "do not tell the user", `<IMPORTANT>` blocks, read-then-send |
+| **Prompt injection** | phrases that tell the model to ignore or disregard what came before, fake tool-call markup, chat-template role overrides, an instruction to send data to a URL; in agent-instruction files (`SKILL.md`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `agents/`/`commands/` markdown, markdown at any depth in `.claude/` agents, commands, rules, skills and output-styles, `.cursorrules`, `*.mdc`), telling the agent to copy, read or send a key or credential file |
+| **Tool poisoning** (MCP) | hidden directives in tool descriptions: telling the model to keep an action from the user, `<IMPORTANT>` blocks, reading a credential file |
 | **Obfuscation** | zero-width characters, bidi overrides and Unicode tag characters used to hide instructions (block; emoji joiners and the England, Scotland and Wales flags pass); runs of variation selectors, invisible operators, soft hyphens, U+180E and a byte-order mark after the start (warn) |
 
 Code rules (RCE, exfiltration, destructive) run on scripts — by extension (`.py`, `.sh`,
@@ -109,12 +109,35 @@ instruction-override phrase, or any other block-level finding, gets BLOCK and ex
 gets a broken pipe) and raises a `coverage.truncated` warning, so it is never PASS;
 input that is not UTF-8 is scanned with the bad bytes replaced and raises
 `coverage.unreadable`. In `--json`, each finding's `message` repeats its `description`.
-`scripts/foreman-frisk-scan.sh` is a template (installed nowhere) for the owner's wrapper
-that lets Foreman's admission scan call `frisk --stdin --json`.
 
-Exit codes of a scan (also in `frisk --help`): 0 when no finding reached the `--fail-on`
-level, 1 when the worst finding did, 2 for a usage error, no target, or a target, MCP
-config, `--stdin` or `--sarif-out` file that cannot be read or written.
+### Exit codes
+
+From `frisk --help`:
+
+- a scan: 0 when no finding reached the `--fail-on` level (always 0 with `--fail-on
+  never`), 1 when the worst finding did (default level: `block`), 2 for a usage error, no
+  target, or a target, MCP config, `--stdin` or `--sarif-out` file that cannot be read or
+  written (a file inside a target that cannot be read is a warning, not exit 2);
+- `frisk lock`: 0, or 2 on an error;
+- `frisk verify`: 0, 1 on drift or an entry it could not verify, 2 on a lockfile it
+  cannot read;
+- `frisk proxy`: the server's status (128 + the signal number if a signal ended it), or 2
+  on a usage error, a server it cannot start or a `--log` file it cannot open.
+
+`frisk-mcp` runs until its input ends; it answers errors as JSON-RPC errors or `isError`
+results ([below](#use-it-as-an-mcp-server-let-your-agent-vet-before-it-installs)).
+
+### Foreman's admission scan (the `--stdin` contract)
+
+Foreman (a separate project) can run frisk on each brief before admitting it. Its contract,
+as `scripts/foreman-frisk-scan.sh` states it: Foreman runs a command named `frisk-scan`
+with `--stdin --json` (a 20 s timeout) when one is on its PATH, writes the brief to its
+standard input, and reads `severity`, `rule` and `message` from each entry of `findings`.
+Foreman treats any non-zero exit as "frisk failed" and drops the findings, so the wrapper
+puts `--fail-on never` first: a BLOCK exits 0, an input frisk cannot read still exits 2.
+frisk installs no `frisk-scan` command: the script is a template, installed nowhere, and
+making that command (`foreman-frisk-scan.sh FRISK_COMMAND`, the copy put on Foreman's PATH
+as `frisk-scan`) is the owner's step.
 
 Every readable file under the target is scanned; scripts, build files and `package.json`
 scripts get the code rules too (see [What it detects](#what-it-detects)). A target that is
@@ -159,8 +182,9 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   shebang), compiled Python (`.pyc`, `.pyo`), Java (`.jar`, `.class`) and archives
   (`.zip`, `.tar`, `.gz`, `.tgz`) each also raise a `coverage.binary` **warning**, so the
   verdict is never PASS while executable content went unscanned. Media (images, fonts,
-  audio, video, PDF) and opaque data (`.bin`, `.dat`, `.db`, `.sqlite`, `.npy`,
-  `.parquet`) that is not valid UTF-8 are skipped silently. A non-UTF-8 file with NUL bytes and an extension
+  audio, video, PDF, by extension) are never read, whatever they hold, and opaque data
+  (`.bin`, `.dat`, `.db`, `.sqlite`, `.npy`, `.parquet`) that is not valid UTF-8 is not
+  scanned; both are skipped silently. A non-UTF-8 file with NUL bytes and an extension
   frisk does not list as code or text also raises `coverage.binary`.
 - `unreadable`: a file that cannot be read or is not valid UTF-8, or a directory that
   cannot be listed, raises a `coverage.unreadable` warning naming the error. Any other
@@ -519,12 +543,13 @@ Wrap the server command in your client config:
 
 The proxy launches the real server, relays the protocol, and inspects every
 server-to-client message by its shape. Tool definitions, prompt and resource listing entries,
-the server's `instructions` and its elicitation requests are scanned as descriptions: the text rules, hidden Unicode,
+the server's `instructions` and its elicitation requests are scanned as descriptions (context
+`tool_description`): the text rules, hidden Unicode,
 pipe-to-shell, destructive and keychain-reading commands, instructions to read or send a
 credential file, and a private key or credential file named at all (`exfil.secret_files_prose`);
 a credential directory or config file only named, as in a tool that reads `~/.ssh/config`,
 warns (`exfil.secret_paths_prose`). Everything else the model reads (and sampling requests) is scanned as
-a result: the injection and tool-poisoning rules, instructions to read or send a credential
+a result (context `tool_result`): the injection and tool-poisoning rules, instructions to read or send a credential
 file (`inject.sensitive_path_instruction`), pipe-to-shell, destructive and keychain-reading
 commands, and hidden Unicode, but no other code rule, so code in a result (a file that calls
 `eval`) is not mistaken for an attack ([prose rules](docs/rules.md#prose-rules)).
