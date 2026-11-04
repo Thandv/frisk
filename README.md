@@ -94,13 +94,13 @@ frisk ./skill --max-file-bytes 8388608 # read files up to 8 MiB (default 2 MiB)
 frisk ~/.claude.json                   # audit an MCP config (same as --mcp-config)
 ```
 
-`--stdin` reads at most `--max-file-bytes` bytes (default 2 MiB) of standard input and
-scans them as `--text` would, labelled `<stdin>`. Longer input is read only that far and
-raises a `coverage.truncated` warning, so it is never PASS; input that is not UTF-8 is
-scanned with the bad bytes replaced and raises `coverage.unreadable`. In `--json`, each
-finding's `message` repeats its `description`. `scripts/foreman-frisk-scan.sh` is a template
-(installed nowhere) for the owner's wrapper that lets Foreman's admission scan call
-`frisk --stdin --json`.
+`--stdin` scans at most `--max-file-bytes` bytes (default 2 MiB) of standard input as
+`--text` would, labelled `<stdin>`. Longer input is read to its end (so the writer never
+gets a broken pipe) and raises a `coverage.truncated` warning, so it is never PASS;
+input that is not UTF-8 is scanned with the bad bytes replaced and raises
+`coverage.unreadable`. In `--json`, each finding's `message` repeats its `description`.
+`scripts/foreman-frisk-scan.sh` is a template (installed nowhere) for the owner's wrapper
+that lets Foreman's admission scan call `frisk --stdin --json`.
 
 Exit codes of a scan (also in `frisk --help`): 0 when no finding reached the `--fail-on`
 level, 1 when the worst finding did, 2 for a usage error, no target, or a target, MCP

@@ -16,6 +16,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import io
+import json
 import os
 import pty
 import re
@@ -75,6 +76,15 @@ class TestTextReport(unittest.TestCase):
                 self.assertEqual(r.stdout.decode("utf-8"), golden(f"{name}.txt"))
                 self.assertEqual(r.stderr, b"")
                 self.assertEqual(r.returncode, 1 if name == "malicious-skill" else 0)
+
+
+    def test_a_file_target_spelled_with_a_trailing_slash_is_shown_as_before(self) -> None:
+        # The refactor must not change how a target's paths are shown: these are main 787880b's
+        # bytes, where the shown path comes from Path(target).is_file(). The doubled 'S' is a
+        # display bug older than the refactor; a fix for it changes this pin on purpose.
+        r = run_cli(["--json", "examples/malicious-skill/SKILL.md/"])
+        paths = {f["path"] for f in json.loads(r.stdout)["findings"]}
+        self.assertEqual(paths, {"examples/malicious-skill/SSKILL.md"})
 
 
 class TestMcpSummaries(unittest.TestCase):

@@ -349,7 +349,7 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 ### coverage.truncated
 
 - Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
-- Matches: A text scanned as a string (`--text`, a frisk-mcp `scan_text` call, a tool description or tool result in `frisk proxy`) longer than the size limit (2 MiB characters; `--max-file-bytes` for `--text`). Its first and last halves of the limit are pattern-matched, with line numbers from the start of the text; the hidden-Unicode check reads all of it. The middle is not pattern-matched, so the verdict is never PASS. Standard input (`--stdin`) longer than `--max-file-bytes` bytes is read only that far: its first part is pattern-matched, the rest is never read.
+- Matches: A text scanned as a string (`--text`, a frisk-mcp `scan_text` call, a tool description or tool result in `frisk proxy`) longer than the size limit (2 MiB characters; `--max-file-bytes` for `--text`). Its first and last halves of the limit are pattern-matched, with line numbers from the start of the text; the hidden-Unicode check reads all of it. The middle is not pattern-matched, so the verdict is never PASS. Standard input (`--stdin`) longer than `--max-file-bytes` bytes is pattern-matched only that far: the rest is read and dropped, never scanned.
 - Likely false positive: A long, legitimate document passed as text.
 - On a hit: Scan the text in smaller parts, or as a file with a larger `--max-file-bytes`.
 

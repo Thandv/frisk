@@ -1035,10 +1035,10 @@ output of a run is unchanged.
 <!-- changes/FR-E7-t3.md, added in bdc2bed -->
 
 - `frisk --stdin` scans text read from standard input, labelled `<stdin>`, as `--text`
-  scans a string. It reads at most `--max-file-bytes` bytes (default 2 MiB, 2097152);
-  longer input is read only that far and raises the warning `coverage.truncated`
-  ("standard input is over the N-byte limit: only its first N bytes were read and
-  pattern-matched"), so it is never PASS. A multi-byte character cut at the limit is left
+  scans a string. It scans at most `--max-file-bytes` bytes (default 2 MiB, 2097152);
+  longer input is read to its end but scanned only that far, and raises the warning
+  `coverage.truncated` ("standard input is over the N-byte limit: only its first N bytes
+  were pattern-matched"), so it is never PASS. A multi-byte character cut at the limit is left
   out. Input that is not valid UTF-8 is scanned with the bad bytes replaced and raises
   `coverage.unreadable`; it never ends in a traceback. Empty input is PASS.
   The `coverage.truncated` rule's description (SARIF `shortDescription`, docs/rules.md)

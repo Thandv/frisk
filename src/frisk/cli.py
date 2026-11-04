@@ -23,7 +23,7 @@ def _shown(target: str, result: ScanResult) -> ScanResult:
     """A target's scan with the paths shown; they follow docs/adr/0001-finding-paths.md."""
     if is_git_url(target):
         return reroot(result, "", "git")  # clone-relative
-    return reroot(result, display_prefix(target, os.path.isfile(target)), "local")
+    return reroot(result, display_prefix(target, Path(target).is_file()), "local")
 
 
 def _distinct(targets: list[str]) -> list[str]:
@@ -102,11 +102,12 @@ def _audit_config(path: str, limits: ScanLimits | None = None) -> list[AuditReco
 
 
 def _scan_stdin(max_bytes: int) -> ScanResult:
-    """Scan standard input as text, reading at most `max_bytes` bytes of it.
+    """Scan standard input as text, at most its first `max_bytes` bytes.
 
-    Longer input is read only that far and raises coverage.truncated (a character cut at the
-    limit is left out), so it is never PASS; input that is not UTF-8 is scanned with the bad
-    bytes replaced and raises coverage.unreadable.
+    Longer input raises coverage.truncated (a character cut at the limit is left out), so it
+    is never PASS; the rest is read to its end and dropped, so a writer never gets a broken
+    pipe (Foreman's admission scan drops every finding then). Input that is not UTF-8 is
+    scanned with the bad bytes replaced and raises coverage.unreadable.
     """
     stream = getattr(sys.stdin, "buffer", None)
     if stream is None:
@@ -114,6 +115,8 @@ def _scan_stdin(max_bytes: int) -> ScanResult:
     data = stream.read(max_bytes + 1)
     truncated = len(data) > max_bytes
     data = data[:max_bytes]
+    while truncated and stream.read(1 << 16):  # drain, unscanned
+        pass
     unreadable = False
     try:
         text = codecs.getincrementaldecoder("utf-8")().decode(data, final=not truncated)
@@ -125,7 +128,7 @@ def _scan_stdin(max_bytes: int) -> ScanResult:
                                        "(UnicodeDecodeError); scanned with undecodable bytes replaced"))
     if truncated:
         result.extend(coverage_warning("<stdin>", "coverage.truncated", f"standard input is over the {max_bytes}-byte "
-                                       f"limit: only its first {max_bytes} bytes were read and pattern-matched"))
+                                       f"limit: only its first {max_bytes} bytes were pattern-matched"))
     return reroot(result, "", "text")
 
 
@@ -170,7 +173,7 @@ def _cmd_scan(argv: list[str]) -> int:
                    help="audit every server in an MCP config file (repeatable)")
     p.add_argument("--text", metavar="STR", help="scan a raw string instead of a path")
     p.add_argument("--stdin", action="store_true",
-                   help="scan text read from standard input: at most --max-file-bytes bytes are read, and longer "
+                   help="scan text read from standard input: at most --max-file-bytes bytes are scanned, and longer "
                         "input warns (coverage.truncated)")
     p.add_argument("--json", action="store_true", help="emit findings as JSON")
     p.add_argument("--sarif", action="store_true", help="emit SARIF 2.1.0 (GitHub code scanning)")

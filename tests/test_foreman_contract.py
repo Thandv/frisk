@@ -84,6 +84,29 @@ class TestStdinBounds(unittest.TestCase):
         self.assertEqual(rules(r.stdout), ["coverage.truncated"])
         self.assertEqual(doc["verdict"], "WARN")
 
+    def test_a_writer_of_input_far_over_the_cap_never_gets_a_broken_pipe(self) -> None:
+        # Foreman's execFileSync throws on EPIPE, and its catch then drops every frisk finding, so
+        # input past the cap must be read to its end (and not scanned) before frisk exits. 4 MiB
+        # past a 64-byte cap fits in no pipe buffer.
+        with tempfile.TemporaryDirectory() as home:
+            proc = subprocess.Popen(["bash", str(TEMPLATE), FRISK, "--max-file-bytes", "64", "--stdin", "--json"],
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    bufsize=0, env=child_env(home), cwd=str(REPO))
+            assert proc.stdin is not None and proc.stdout is not None
+            broken = False
+            try:
+                for _ in range(64):
+                    proc.stdin.write(b"x" * 65536)
+            except BrokenPipeError:
+                broken = True
+            finally:
+                proc.stdin.close()
+            out = proc.stdout.read()
+            proc.stdout.close()
+            self.assertEqual(proc.wait(timeout=20), 0)
+        self.assertFalse(broken, "frisk exited before reading all of its input")
+        self.assertEqual(rules(out), ["coverage.truncated"])
+
     def test_input_at_the_cap_is_read_whole(self) -> None:
         r = foreman(b"x" * MAX_FILE_BYTES)
         self.assertEqual(json.loads(r.stdout)["verdict"], "PASS")
