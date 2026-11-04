@@ -80,7 +80,9 @@ def literals(path: Path, text: str) -> list[tuple[int, int, bool]]:
 
 def _walk(path: Path, text: str) -> tuple[list[_Literal], list[list[_Literal]]]:
     """Every string literal, and the commands: each the literals it joins, command first."""
-    json.loads(text)
+    # Integers are kept as written: converting one takes quadratic time on Python 3.9, and
+    # 3.11+ refuses one of over 4300 digits, which would leave the file's commands unread.
+    json.loads(text, parse_int=str)
     package = path.name == "package.json"
     strings: list[_Literal] = []
     commands: list[list[_Literal]] = []

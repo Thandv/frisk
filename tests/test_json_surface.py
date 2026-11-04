@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -148,6 +149,22 @@ class TestMalformedJson(JsonCase):
         self.write("deep.json", "[" * 200_000 + "]" * 200_000)
         result = scan_path(self.root)
         self.assertEqual([s.detail for s in result.coverage.skipped], ["json_values: RecursionError"])
+
+    def test_a_huge_integer_neither_hides_a_command_nor_costs_quadratic_time(self) -> None:
+        # Python 3.11+ refuses to convert an integer of over 4300 digits (so the surface would
+        # fail, and a command beside it go unread); 3.9 converts it in quadratic time.
+        def hooks(digits: int) -> str:
+            return json.dumps({"command": PIPE_TO_SHELL, "pad": 0}).replace("0}", "9" * digits + "}")
+
+        self.write("hooks.json", hooks(5000))
+        result = scan_path(self.root)
+        self.assertEqual([(f.rule, f.severity) for f in result.findings], [("rce.pipe_installer", "block")])
+        self.assertEqual(result.coverage.skipped, [])
+
+        self.write("hooks.json", hooks(512 * 1024))  # 3.9 took 2.7 s to convert it; read as written, 0.1 s
+        t0 = time.process_time()
+        scan_path(self.root)
+        self.assertLess(time.process_time() - t0, 1.0)
 
     def test_only_json_files_are_read_as_json(self) -> None:
         self.write("notes.txt", '{"command": "' + PIPE_TO_SHELL + '"}')
