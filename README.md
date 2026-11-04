@@ -65,8 +65,10 @@ hidden Unicode) run on every file, including markdown HTML comments that a rende
 and on each `.json` string as it decodes, so `\u` escapes hide nothing; a `.json` file that
 does not parse is still text-scanned and raises a `coverage.surface_error` warning.
 
-Every rule id, its severity, what it matches and what to do about a hit:
-[docs/rules.md](docs/rules.md).
+Every rule id, its severity, what it matches, why it matters and what to do about a hit:
+[docs/rules.md](docs/rules.md), generated from the rule tables by `scripts/gen_rules_doc.py`.
+The full lists of the extensions read as scripts, as text, or not at all, and the size
+limits, are in its [Files](docs/rules.md#files) section.
 
 ## Install
 
