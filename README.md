@@ -662,10 +662,14 @@ bash scripts/verify.sh        # unittest under every local interpreter found (CL
 
 `scripts/verify.sh` prints one PASS/FAIL line per interpreter and fails if any run
 fails or if fewer than `FRISK_MIN_PYTHONS` (default 2) interpreters were found.
+`FRISK_VERIFY_PYTHONS` (space-separated paths) replaces the list of interpreters it tries;
+it installs nothing and uses no network.
 
 Optional extras, never needed at runtime: `pip install -e ".[test]"` (pytest) and
-`pip install -e ".[dev]"` (pytest, ruff, mypy). CI runs `ruff check` and `mypy src`
-in an advisory lint job; their config is in `pyproject.toml`.
+`pip install -e ".[dev]"` (pytest, ruff, mypy, coverage). CI runs the suite on Python 3.9
+to 3.14 on Linux and on one macOS job, and a blocking lint job: `ruff check`, `mypy src`
+and a coverage report for `src/frisk` (no minimum yet); the tool config is in
+`pyproject.toml`.
 
 Debug logs: `FRISK_DEBUG=1` (for `frisk`, `frisk proxy` and `frisk-mcp`) prints
 `[frisk debug]` lines to stderr: git clones (exit code, duration; not the URL),

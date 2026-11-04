@@ -26,10 +26,10 @@ Issues = "https://github.com/Thandv/frisk/issues"
 
 [project.optional-dependencies]
 # Never needed at runtime. `test` is what the CI test legs install; `dev` adds the
-# linters for the separate lint job, so a linter release that drops an old Python
-# cannot break the test matrix.
+# linters and coverage for the separate lint job, so a linter release that drops an old
+# Python cannot break the test matrix.
 test = ["pytest"]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "ruff", "mypy", "coverage"]
 
 [project.scripts]
 frisk = "frisk.cli:main"

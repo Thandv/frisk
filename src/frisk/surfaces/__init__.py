@@ -40,7 +40,7 @@ def discover(path: Iterable[str], package: str) -> list[ModuleType]:
     return [importlib.import_module(f"{package}.{name}") for name in names]
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def load() -> tuple[ModuleType, ...]:
     """The surfaces shipped in this package, discovered once per process."""
     return tuple(discover(__path__, __name__))
