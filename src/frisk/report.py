@@ -148,7 +148,8 @@ def to_json(result: ScanResult, target: str, servers: list[AuditRecord] | None =
         "verdict": verdict(findings),
         "worst_severity": worst_severity(findings),
         "counts": counts(findings),
-        "findings": [{**f.as_dict(), "owasp": owasp_for(f.category)} for f in findings],
+        # message repeats description: the field Foreman's admission scan reads.
+        "findings": [{**f.as_dict(), "message": f.description, "owasp": owasp_for(f.category)} for f in findings],
         "coverage": result.coverage.as_dict(),
     }
     if servers is not None:

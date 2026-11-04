@@ -1,4 +1,4 @@
-usage: frisk [-h] [--mcp-config FILE] [--text STR] [--json] [--sarif] [--sarif-out FILE]
+usage: frisk [-h] [--mcp-config FILE] [--text STR] [--stdin] [--json] [--sarif] [--sarif-out FILE]
              [--max-file-bytes N] [--fail-on {block,warn,never}] [-q] [-V]
              [targets ...]
 
@@ -13,6 +13,8 @@ options:
   -h, --help            show this help message and exit
   --mcp-config FILE     audit every server in an MCP config file (repeatable)
   --text STR            scan a raw string instead of a path
+  --stdin               scan text read from standard input: at most --max-file-bytes bytes are
+                        read, and longer input warns (coverage.truncated)
   --json                emit findings as JSON
   --sarif               emit SARIF 2.1.0 (GitHub code scanning)
   --sarif-out FILE      also write SARIF 2.1.0 to FILE; the report is printed as usual and the

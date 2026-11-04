@@ -31,4 +31,5 @@ only. 0.2.0 was tagged but is never uploaded: its proxy fails open. The next rel
 
 Switching Foreman's admission scanner on is a separate owner act, done later and on purpose:
 Foreman runs `frisk-scan --stdin --json` when a `frisk-scan` command is on its PATH. The
-owner makes that command as a small wrapper around the installed `frisk`.
+owner makes that command as a small wrapper around the installed `frisk`; the template is
+`scripts/foreman-frisk-scan.sh`, which frisk installs nowhere.

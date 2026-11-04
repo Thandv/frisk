@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import contextlib
 import json
 import os
@@ -100,6 +101,34 @@ def _audit_config(path: str, limits: ScanLimits | None = None) -> list[AuditReco
     return records
 
 
+def _scan_stdin(max_bytes: int) -> ScanResult:
+    """Scan standard input as text, reading at most `max_bytes` bytes of it.
+
+    Longer input is read only that far and raises coverage.truncated (a character cut at the
+    limit is left out), so it is never PASS; input that is not UTF-8 is scanned with the bad
+    bytes replaced and raises coverage.unreadable.
+    """
+    stream = getattr(sys.stdin, "buffer", None)
+    if stream is None:
+        raise ValueError("--stdin: standard input is not readable")
+    data = stream.read(max_bytes + 1)
+    truncated = len(data) > max_bytes
+    data = data[:max_bytes]
+    unreadable = False
+    try:
+        text = codecs.getincrementaldecoder("utf-8")().decode(data, final=not truncated)
+    except UnicodeDecodeError:
+        text, unreadable = data.decode("utf-8", errors="replace"), True
+    result = scan_text(text.replace("\r\n", "\n").replace("\r", "\n"), "<stdin>", max_chars=max_bytes)
+    if unreadable:
+        result.extend(coverage_warning("<stdin>", "coverage.unreadable", "standard input is not valid UTF-8 "
+                                       "(UnicodeDecodeError); scanned with undecodable bytes replaced"))
+    if truncated:
+        result.extend(coverage_warning("<stdin>", "coverage.truncated", f"standard input is over the {max_bytes}-byte "
+                                       f"limit: only its first {max_bytes} bytes were read and pattern-matched"))
+    return reroot(result, "", "text")
+
+
 # --- scan (default) ---------------------------------------------------------
 
 def _positive(value: str) -> int:
@@ -121,6 +150,9 @@ def _cmd_scan(argv: list[str]) -> int:
     p.add_argument("--mcp-config", action="append", default=[], metavar="FILE",
                    help="audit every server in an MCP config file (repeatable)")
     p.add_argument("--text", metavar="STR", help="scan a raw string instead of a path")
+    p.add_argument("--stdin", action="store_true",
+                   help="scan text read from standard input: at most --max-file-bytes bytes are read, and longer "
+                        "input warns (coverage.truncated)")
     p.add_argument("--json", action="store_true", help="emit findings as JSON")
     p.add_argument("--sarif", action="store_true", help="emit SARIF 2.1.0 (GitHub code scanning)")
     p.add_argument("--sarif-out", metavar="FILE",
@@ -134,7 +166,7 @@ def _cmd_scan(argv: list[str]) -> int:
     p.add_argument("-V", "--version", action="version", version=f"frisk {__version__}")
     args = p.parse_args(argv)
 
-    if not args.targets and not args.mcp_config and args.text is None:
+    if not args.targets and not args.mcp_config and args.text is None and not args.stdin:
         p.print_help()
         return 2
 
@@ -142,10 +174,13 @@ def _cmd_scan(argv: list[str]) -> int:
     limits = ScanLimits(max_file_bytes=args.max_file_bytes)
     audits: list[str] = []
     servers: list[AuditRecord] = []
-    label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or "<text>"
+    label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or (
+        "<stdin>" if args.stdin and args.text is None else "<text>")
     try:
         if args.text is not None:
             result.extend(scan_text(args.text, "<text>", max_chars=args.max_file_bytes))
+        if args.stdin:
+            result.extend(_scan_stdin(args.max_file_bytes))
         # A config named as a target is audited, never text-scanned: its env values must not show.
         targets, configs = split_configs(args.targets, args.mcp_config)
         for t in _distinct(targets):
