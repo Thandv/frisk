@@ -40,6 +40,9 @@ verdict:   BLOCK    4 blocking · 4 warnings · 8 total  (examples/malicious-ski
 ```
 <!-- /frisk-demo -->
 
+Guides: [rule reference](docs/rules.md) · [runtime proxy](docs/proxy.md) ·
+[MCP server](docs/mcp-server.md) · [threat model](docs/threat-model.md).
+
 ## What it detects
 
 | Category | Examples |
@@ -533,7 +536,8 @@ point your MCP client at frisk instead of the server, and every tool description
 is re-checked on *every* load — so a clean-at-approval, malicious-later swap
 ("rug pull") is caught in real time, not on a schedule.
 
-Wrap the server command in your client config:
+Wrap the server command in your client config (a Claude Code walkthrough, where the pins
+live and how to read the log: [docs/proxy.md](docs/proxy.md)):
 
 ```json
 { "mcpServers": {
@@ -633,7 +637,8 @@ Add `frisk` to any MCP client so an agent can check a tool before adding it:
 ```
 
 Tools exposed: `scan_text(text)`, `scan_artifact(source)`, `vet_mcp_server(repo)` —
-each returns a `{verdict, findings, advice}` JSON the agent can act on.
+each returns a `{verdict, findings, advice}` JSON the agent can act on. In Claude Code:
+`claude mcp add frisk -- frisk-mcp`; the full guide is [docs/mcp-server.md](docs/mcp-server.md).
 
 `frisk-mcp` speaks MCP protocol versions `2024-11-05`, `2025-03-26` and `2025-06-18`:
 `initialize` answers with the client's version when it is one of these, else with
@@ -646,8 +651,8 @@ not exist, a clone that fails, a missing argument) answers with an `isError` res
 
 `scan_artifact` and `vet_mcp_server` are bounded so one call cannot hold the server: a scan
 stops after 20,000 files, 200 MiB read or 30 seconds, and files over 2 MiB are not read. A
-result that is incomplete for any reason (a limit, a skipped file, text over the limit) has
-`"degraded": true` and a `coverage` object (`files_scanned`, and `skipped` counts by
+result with any `coverage.*` finding (a limit, a file not read or not valid UTF-8, text over
+the limit) has `"degraded": true` and a `coverage` object (`files_scanned`, and `skipped` counts by
 reason). Results never include excerpts of the scanned content. Two environment variables
 narrow what an agent may ask for:
 
@@ -701,6 +706,8 @@ map to files in your repository. The full contract per target kind is in
 Static analysis is a **first line of defense, not a guarantee**. It can't see what
 a remote server or an unfetched npm/PyPI package does at runtime, and a determined
 attacker can evade regex. Treat a `PASS` as "no known-bad patterns found," not "safe."
+The limitations frisk accepts, each with its source, are listed in
+[docs/threat-model.md](docs/threat-model.md).
 
 ## Development
 

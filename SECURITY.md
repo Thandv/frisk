@@ -18,6 +18,12 @@ at untrusted code, but it also means:
 - Treat frisk as a **first line of defense and a triage tool**, alongside human review
   and runtime controls — not a guarantee.
 
+What frisk defends against, the limitations it accepts and how it hardens itself:
+[docs/threat-model.md](docs/threat-model.md). Every rule, with what it matches and its
+likely false positives: [docs/rules.md](docs/rules.md). The runtime proxy and the MCP
+server have their own guides: [docs/proxy.md](docs/proxy.md) and
+[docs/mcp-server.md](docs/mcp-server.md).
+
 ## A note on third-party findings
 
 If frisk flags something in someone else's project, that is a prompt for **review**,
