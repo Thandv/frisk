@@ -18,26 +18,26 @@ from . import Span
 from .fences import fence_blocks
 from .instructions import is_instruction_file
 
-_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)  # an unclosed comment hides the rest
+COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)  # an unclosed comment hides the rest
 _LINE = re.compile(r"[^\n]*\n|[^\n]+")
 _LIST_ITEM = re.compile(r"[ \t]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 _BLANK_LINE = re.compile(r"\n[ \t]*\n")
 _TICKS = re.compile(r"`+")
 
 
-def _gaps(regions: list[tuple[int, int]], end: int) -> list[tuple[int, int]]:
+def gaps(regions: list[tuple[int, int]], end: int) -> list[tuple[int, int]]:
     """The stretches of [0, end) that no region covers (regions sorted, not overlapping)."""
-    gaps, pos = [], 0
+    out, pos = [], 0
     for start, stop in regions:
         if start > pos:
-            gaps.append((pos, start))
+            out.append((pos, start))
         pos = max(pos, stop)
     if pos < end:
-        gaps.append((pos, end))
-    return gaps
+        out.append((pos, end))
+    return out
 
 
-def _inline_code(text: str, start: int, end: int) -> list[tuple[int, int]]:
+def inline_code(text: str, start: int, end: int) -> list[tuple[int, int]]:
     """Inline code in text[start:end]: a backtick run up to the next run of the same length in
     the same paragraph. Each paragraph is paired in one pass, so the cost stays linear."""
     spans = []
@@ -61,7 +61,7 @@ def _inline_code(text: str, start: int, end: int) -> list[tuple[int, int]]:
     return spans
 
 
-def _indented_blocks(text: str, start: int, end: int) -> list[tuple[int, int]]:
+def indented_blocks(text: str, start: int, end: int) -> list[tuple[int, int]]:
     """Indented code blocks in text[start:end]: after a blank line, not inside a list."""
     blocks: list[tuple[int, int]] = []
     after_blank, in_list, block = True, False, None
@@ -90,13 +90,13 @@ def extract(path: Path, text: str) -> list[Span]:
         return []
     fences = fence_blocks(text)
     blocks = [(start, end) for start, _, _, end in fences]
-    comments = [m.span() for a, b in _gaps(blocks, len(text)) for m in _COMMENT.finditer(text, a, b)]
+    comments = [m.span() for a, b in gaps(blocks, len(text)) for m in COMMENT.finditer(text, a, b)]
     hidden = sorted(blocks + comments)
     spans = [Span(body, end, "code") for _, body, end, _ in fences]
     spans += [Span(s, e, "md_html_comment") for s, e in comments]
-    indented = [blk for a, b in _gaps(hidden, len(text)) for blk in _indented_blocks(text, a, b)]
+    indented = [blk for a, b in gaps(hidden, len(text)) for blk in indented_blocks(text, a, b)]
     spans += [Span(s, e, "code") for s, e in indented]
     inline = "code" if is_instruction_file(path) else "md_inline_code"
-    for a, b in _gaps(sorted(hidden + indented), len(text)):
-        spans += [Span(s, e, inline) for s, e in _inline_code(text, a, b)]
+    for a, b in gaps(sorted(hidden + indented), len(text)):
+        spans += [Span(s, e, inline) for s, e in inline_code(text, a, b)]
     return spans

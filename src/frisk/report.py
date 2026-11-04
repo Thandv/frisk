@@ -8,11 +8,10 @@ import sys
 from collections import Counter
 from typing import NamedTuple
 
-from .engine import Coverage, Finding, ScanResult, sort_findings, verdict, worst_severity
+from .engine import Coverage, Finding, ScanResult, counts, sort_findings, verdict, worst_severity
 from .rules import RULE_META, SUSPECT_UNICODE, owasp_for
 from .sources import SERVER_KEYS, ServerRef, display_ref, display_url
 
-_USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 _C = {
     "block": "\033[31m", "warn": "\033[33m", "pass": "\033[32m",
     "dim": "\033[2m", "bold": "\033[1m", "reset": "\033[0m",
@@ -20,8 +19,14 @@ _C = {
 _VERDICT_COLOR = {"PASS": "pass", "WARN": "warn", "BLOCK": "block"}
 
 
-def _c(s: str, key: str) -> str:
-    return f"{_C[key]}{s}{_C['reset']}" if _USE_COLOR else s
+def use_color() -> bool:
+    """Whether colorize() adds ANSI codes: stdout is a terminal and NO_COLOR is not set, as they are now."""
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def colorize(s: str, key: str) -> str:
+    """`s` in the colour for `key` (a verdict colour such as "block", or "dim", "bold") when use_color()."""
+    return f"{_C[key]}{s}{_C['reset']}" if use_color() else s
 
 
 def _escape(cp: int) -> str:
@@ -59,20 +64,23 @@ class AuditRecord(NamedTuple):
 def audit_text(path: str, records: list[AuditRecord]) -> str:
     """The text audit of one config: a header, one line per server in config order, then
     how many servers were not scanned."""
-    lines = [_c(f"MCP config audit: {printable(path)}", "bold"), ""]
+    lines = [colorize(f"MCP config audit: {printable(path)}", "bold"), ""]
     if not records:
         lines.append(f"  no MCP servers found (frisk reads {SERVER_KEYS})")
     for rec in records:
         s = rec.server
-        tag = _c("SKIP ", "dim") if rec.verdict is None else _c(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
-        lines.append(f"  [{tag}] {printable(s.name):<22} {_c(s.kind, 'dim')}  {printable(_reason(s))}")
+        if rec.verdict is None:
+            tag = colorize("SKIP ", "dim")
+        else:
+            tag = colorize(f"{rec.verdict:<5}", _VERDICT_COLOR[rec.verdict])
+        lines.append(f"  [{tag}] {printable(s.name):<22} {colorize(s.kind, 'dim')}  {printable(_reason(s))}")
         if not s.scannable:
-            lines.append(_c(f"           → {printable(display_ref(s))}", "dim"))
+            lines.append(colorize(f"           → {printable(display_ref(s))}", "dim"))
     if records:
         total, skipped = len(records), sum(1 for rec in records if not rec.server.scannable)
         noun = "server" if total == 1 else "servers"
         summary = f"{skipped} of {total} {noun} not scanned" if skipped else f"scanned {total} of {total} {noun}"
-        lines += ["", "  " + _c(summary, "warn" if skipped else "dim")]
+        lines += ["", "  " + colorize(summary, "warn" if skipped else "dim")]
     return "\n".join(lines)
 
 
@@ -112,23 +120,22 @@ def to_text(result: ScanResult, target: str, show_coverage: bool = True) -> str:
     findings = result.findings
     lines: list[str] = []
     for f in findings:
-        mark = _c("BLOCK", "block") if f.severity == "block" else _c("warn ", "warn")
-        loc = _c(f"{printable(f.path)}:{f.line}", "dim")
+        mark = colorize("BLOCK", "block") if f.severity == "block" else colorize("warn ", "warn")
+        loc = colorize(f"{printable(f.path)}:{f.line}", "dim")
         lines.append(f"[{mark}] {f.category:<{_CATEGORY_WIDTH}} {loc}  {printable(f.description)}")
         if f.excerpt:
-            lines.append(_c(f"          | {printable(f.excerpt)}", "dim"))
-    blocks = sum(1 for f in findings if f.severity == "block")
-    warns = sum(1 for f in findings if f.severity == "warn")
+            lines.append(colorize(f"          | {printable(f.excerpt)}", "dim"))
+    n = counts(findings)
     v = verdict(findings)
-    banner = _c(f"  {v}  ", _VERDICT_COLOR[v])
+    banner = colorize(f"  {v}  ", _VERDICT_COLOR[v])
     if not findings:
-        lines.append(_c(f"frisk: clean — no findings in {printable(target)}", "pass"))
+        lines.append(colorize(f"frisk: clean — no findings in {printable(target)}", "pass"))
     lines.append("")
     if show_coverage:
-        lines.append(_c(coverage_line(result.coverage), "dim"))
-    lines.append(f"{_c('verdict', 'bold')}: {banner}  "
-                 f"{blocks} blocking · {warns} warnings · {len(findings)} total  "
-                 f"({_c(printable(target), 'dim')})")
+        lines.append(colorize(coverage_line(result.coverage), "dim"))
+    lines.append(f"{colorize('verdict', 'bold')}: {banner}  "
+                 f"{n['block']} blocking · {n['warn']} warnings · {n['total']} total  "
+                 f"({colorize(printable(target), 'dim')})")
     return "\n".join(lines)
 
 
@@ -140,11 +147,7 @@ def to_json(result: ScanResult, target: str, servers: list[AuditRecord] | None =
         "target": target,
         "verdict": verdict(findings),
         "worst_severity": worst_severity(findings),
-        "counts": {
-            "block": sum(1 for f in findings if f.severity == "block"),
-            "warn": sum(1 for f in findings if f.severity == "warn"),
-            "total": len(findings),
-        },
+        "counts": counts(findings),
         "findings": [{**f.as_dict(), "owasp": owasp_for(f.category)} for f in findings],
         "coverage": result.coverage.as_dict(),
     }

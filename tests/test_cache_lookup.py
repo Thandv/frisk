@@ -34,7 +34,7 @@ NPX_HASH = "0123456789abcdef"
 
 def run(argv: list[str]) -> tuple[int, str]:
     out = io.StringIO()
-    with mock.patch("frisk.report._USE_COLOR", False), contextlib.redirect_stdout(out):
+    with mock.patch("frisk.report.use_color", return_value=False), contextlib.redirect_stdout(out):
         code = main(argv)
     return code, out.getvalue()
 

@@ -90,7 +90,7 @@ class AuditTextTest(unittest.TestCase):
         ]
 
     def test_plain_text(self) -> None:
-        with mock.patch("frisk.report._USE_COLOR", False):
+        with mock.patch("frisk.report.use_color", return_value=False):
             text = audit_text("cfg.json", self.records())
         self.assertEqual(text, "\n".join([
             "MCP config audit: cfg.json",
@@ -104,14 +104,14 @@ class AuditTextTest(unittest.TestCase):
         ]))
 
     def test_empty_config_says_so(self) -> None:
-        with mock.patch("frisk.report._USE_COLOR", False):
+        with mock.patch("frisk.report.use_color", return_value=False):
             self.assertEqual(audit_text("cfg.json", []),
                              # FR-E4 owner decision (N5): names the keys (was "(no servers found in config)")
                              "MCP config audit: cfg.json\n\n  no MCP servers found (frisk reads 'mcpServers' and "
                              "'servers', at the top level and in each 'projects' entry)")
 
     def test_colour_marks_each_verdict(self) -> None:
-        with mock.patch("frisk.report._USE_COLOR", True):
+        with mock.patch("frisk.report.use_color", return_value=True):
             text = audit_text("cfg.json", self.records())
         self.assertIn("[\033[32mPASS \033[0m] ok", text)
         self.assertIn("[\033[2mSKIP \033[0m] far", text)

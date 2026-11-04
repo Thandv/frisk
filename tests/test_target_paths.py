@@ -184,7 +184,7 @@ class TestOtherTargetKinds(ProjectCase):
             self.assertEqual(target, url)
             yield self.proj / "skill", target
 
-        with mock.patch("frisk.cli.materialize", fake_materialize), \
+        with mock.patch("frisk.engine.materialize", fake_materialize), \
                 mock.patch("frisk.sources.subprocess.run", side_effect=AssertionError("network")):
             self.assert_layout(run_json([url]), "")
 

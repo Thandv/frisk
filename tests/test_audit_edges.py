@@ -33,7 +33,7 @@ FORMATS = {"text": [], "json": ["--json"], "sarif": ["--sarif"], "quiet": ["-q"]
 
 def run(argv: list[str]) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
-    with mock.patch("frisk.report._USE_COLOR", False), \
+    with mock.patch("frisk.report.use_color", return_value=False), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = main(argv)
     return code, out.getvalue(), err.getvalue()

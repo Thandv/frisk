@@ -3,27 +3,26 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import sys
 from pathlib import Path
 
 from . import __version__
 from .engine import (MAX_FILE_BYTES, ScanLimits, ScanResult, coverage_warning, display_prefix, reroot, scan_path,
-                     scan_text, verdict, fails)
-from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
-from .sources import (SERVER_KEYS, display_ref, display_target, display_url, home_label, is_git_url, materialize,
+                     scan_target, scan_text, verdict, fails)
+from .report import AuditRecord, audit_text, colorize, printable, to_text, to_json, to_sarif
+from .sources import (SERVER_KEYS, display_ref, display_target, display_url, home_label, is_git_url,
                       parse_mcp_config, split_configs)
 from . import pin, proxy
 from .debug import setup_debug
 
 
-def _scan_target(target: str, limits: ScanLimits) -> ScanResult:
-    """Scan one target; paths follow docs/adr/0001-finding-paths.md."""
-    with materialize(target) as (root, _label):
-        result = scan_path(root, limits=limits)
-        if is_git_url(target):
-            return reroot(result, "", "git")  # clone-relative
-        return reroot(result, display_prefix(target, root.is_file()), "local")
+def _shown(target: str, result: ScanResult) -> ScanResult:
+    """A target's scan with the paths shown; they follow docs/adr/0001-finding-paths.md."""
+    if is_git_url(target):
+        return reroot(result, "", "git")  # clone-relative
+    return reroot(result, display_prefix(target, os.path.isfile(target)), "local")
 
 
 def _distinct(targets: list[str]) -> list[str]:
@@ -115,7 +114,7 @@ def _cmd_scan(argv: list[str]) -> int:
         prog="frisk",
         description="Static, zero-execution security scanner for AI-agent content "
                     "(MCP servers, Claude Code skills/plugins/subagents, Cursor rules). "
-                    "Subcommands: lock, verify.",
+                    "Subcommands: lock, verify, proxy.",
     )
     p.add_argument("targets", nargs="*",
                    help="local paths and/or git URLs to scan; an MCP config file is audited as with --mcp-config")
@@ -150,7 +149,7 @@ def _cmd_scan(argv: list[str]) -> int:
         # A config named as a target is audited, never text-scanned: its env values must not show.
         targets, configs = split_configs(args.targets, args.mcp_config)
         for t in _distinct(targets):
-            result.extend(_scan_target(t, limits))
+            result.extend(_shown(t, scan_target(t, limits)))
         for cfg in configs:
             records = _audit_config(cfg, limits)
             if not records:  # nothing was audited: never PASS
@@ -213,7 +212,7 @@ def _cmd_lock(argv: list[str]) -> int:
     for note in notes:
         print(f"frisk lock: {printable(note)}", file=sys.stderr)
     n = len(lock["entries"])
-    print(_c(f"frisk: pinned {n} entr{'y' if n == 1 else 'ies'} → {args.lockfile}", "pass"))
+    print(colorize(f"frisk: pinned {n} entr{'y' if n == 1 else 'ies'} → {args.lockfile}", "pass"))
     return 0
 
 
@@ -235,36 +234,35 @@ def _cmd_verify(argv: list[str]) -> int:
         return 2
 
     if args.json:
-        import json
         print(json.dumps(report, indent=2))
     else:
         for r in report:
             entry = printable(r["entry"])
             if r["status"] == "ok":
-                print(f"  [{_c('ok   ', 'pass')}] {entry}")
+                print(f"  [{colorize('ok   ', 'pass')}] {entry}")
             elif r["status"] == "error":
-                print(f"  [{_c('error', 'warn')}] {entry}  {printable(r.get('detail', ''))}")
+                print(f"  [{colorize('error', 'warn')}] {entry}  {printable(r.get('detail', ''))}")
             else:
-                print(f"  [{_c('DRIFT', 'block')}] {entry}")
+                print(f"  [{colorize('DRIFT', 'block')}] {entry}")
                 if r.get("launch"):
-                    print(_c("           ~ changed: how it starts (command, args, cwd, URL, env or header names)",
+                    print(colorize("           ~ changed: how it starts (command, args, cwd, URL, env or header names)",
                              "block"))
                 for name in r.get("env", []):
-                    print(_c(f"           ~ {printable(name)} changed", "block"))
+                    print(colorize(f"           ~ {printable(name)} changed", "block"))
                 for f in r.get("changed", []):
-                    print(_c(f"           ~ changed: {printable(f)}", "block"))
+                    print(colorize(f"           ~ changed: {printable(f)}", "block"))
                 for f in r.get("added", []):
-                    print(_c(f"           + added:   {printable(f)}", "warn"))
+                    print(colorize(f"           + added:   {printable(f)}", "warn"))
                 for f in r.get("removed", []):
-                    print(_c(f"           - removed: {printable(f)}", "warn"))
+                    print(colorize(f"           - removed: {printable(f)}", "warn"))
         changed, failed = sum(1 for r in report if r["status"] == "DRIFT"), pin.unverified(report)
         could_not = f"could not verify {failed} entr{'y' if failed == 1 else 'ies'}"
         if changed:
-            v = _c("DRIFT DETECTED", "block")
+            v = colorize("DRIFT DETECTED", "block")
         elif failed:
-            v = _c(could_not, "warn")
+            v = colorize(could_not, "warn")
         else:
-            v = _c("no drift", "pass")
+            v = colorize("no drift", "pass")
         also = f"; {could_not}" if changed and failed else ""
         print(f"\nverify: {v}  ({changed} of {len(report)} entries changed{also})")
     return 1 if pin.has_drift(report) or pin.unverified(report) else 0

@@ -81,7 +81,7 @@ SEEDS: dict[str, tuple[str, ...]] = {
     "regex:build_recipes._DOCKER": ("RUN x\\\n", "RUN ", "\\\n", "RUN \\"),
     "regex:build_recipes._JUST": (" x\\\n", " ", "\\\n", " \\"),
     "regex:fences._OPEN": ("```\n", "x ```", "`", " ```x\n", "``` ```\n", "~~~\n", "x`", "\t"),
-    "regex:markdown._COMMENT": ("<!--", "<!-", "<", "-->"),
+    "regex:markdown.COMMENT": ("<!--", "<!-", "<", "-->"),
     "regex:markdown._LINE": ("x", "\n"),
     "regex:markdown._LIST_ITEM": ("* x\n", "1. ", "123456789."),
     "regex:markdown._BLANK_LINE": ("\n", "\n \t", " "),

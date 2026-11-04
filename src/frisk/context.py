@@ -36,7 +36,7 @@ from typing import Callable
 from .rules import MARKDOWN_EXTS
 from .surfaces import json_values
 from .surfaces.fences import fence_blocks
-from .surfaces.markdown import _COMMENT, _gaps, _indented_blocks, _inline_code
+from .surfaces.markdown import COMMENT, gaps, indented_blocks, inline_code
 
 CONTEXTS = ("code", "code_string", "code_docstring", "code_comment", "md_fence", "md_inline_code", "md_indented",
             "md_html_comment", "md_quoted_mention", "md_prose", "json_command", "json_string", "front_matter",
@@ -428,15 +428,15 @@ def _markdown(text: str) -> list[Region]:
         taken = sorted(taken + found)  # found lies in the gaps of taken: two sorted runs, merged
 
     def free() -> list[tuple[int, int]]:
-        return _gaps(taken, len(text))
+        return gaps(taken, len(text))
 
     front = _FRONT_MATTER.match(text)
     after = front.end() if front else 0
     add([front.span()] if front else [], "front_matter")
     add([(max(s, after), e) for s, e in _fences(text) if e > after], "md_fence")
-    add([m.span() for a, b in free() for m in _COMMENT.finditer(text, a, b)], "md_html_comment")
-    add([blk for a, b in free() for blk in _indented_blocks(text, a, b)], "md_indented")
-    add([code for a, b in free() for code in _inline_code(text, a, b)], "md_inline_code")
+    add([m.span() for a, b in free() for m in COMMENT.finditer(text, a, b)], "md_html_comment")
+    add([blk for a, b in free() for blk in indented_blocks(text, a, b)], "md_indented")
+    add([code for a, b in free() for code in inline_code(text, a, b)], "md_inline_code")
     add([m.span() for a, b in free() for m in _QUOTED.finditer(text, a, b)], "md_quoted_mention")
     return out
 

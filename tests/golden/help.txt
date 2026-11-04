@@ -3,7 +3,7 @@ usage: frisk [-h] [--mcp-config FILE] [--text STR] [--json] [--sarif] [--sarif-o
              [targets ...]
 
 Static, zero-execution security scanner for AI-agent content (MCP servers, Claude Code
-skills/plugins/subagents, Cursor rules). Subcommands: lock, verify.
+skills/plugins/subagents, Cursor rules). Subcommands: lock, verify, proxy.
 
 positional arguments:
   targets               local paths and/or git URLs to scan; an MCP config file is audited as with

