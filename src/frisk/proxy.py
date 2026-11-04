@@ -59,6 +59,7 @@ import time
 from pathlib import Path
 from typing import Callable, TextIO
 
+from . import jsonread
 from .debug import log as _root_log, ms_since
 from .engine import Finding, scan_text, worst_severity
 
@@ -588,7 +589,7 @@ class Proxy:
     def _parse(self, line: str) -> object:
         try:
             line.encode("utf-8")  # bytes that were not UTF-8 arrive as lone surrogates
-            return json.loads(line)
+            return jsonread.loads(line)
         except (ValueError, RecursionError):  # not UTF-8, not JSON, or nested too deep to read
             self._log(f"dropped a server line that is not JSON ({len(line)} characters)")
             return _UNPARSED
