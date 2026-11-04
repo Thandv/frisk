@@ -129,7 +129,7 @@ TOOLS = {
 }
 
 
-def _tools_list():
+def _tools_list() -> list[dict[str, object]]:
     return [{"name": n, "description": d,
              "inputSchema": {"type": "object", "properties": props, "required": req}}
             for n, (_, d, props, req) in TOOLS.items()]

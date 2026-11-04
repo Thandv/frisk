@@ -77,6 +77,8 @@ The package is `frisk-scan`; the commands are `frisk` and `frisk-mcp` (there is 
 `frisk-scan` command).
 
 Zero third-party dependencies — stdlib only, by design (a security tool you can audit in one sitting).
+The code to audit is `src/frisk`: about 4,400 lines of Python, counting every non-blank line
+of its `.py` files.
 
 ## Usage
 
