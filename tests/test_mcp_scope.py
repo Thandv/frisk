@@ -124,7 +124,7 @@ class TestRoots(ScopeCase):
         (self.home / "notes.md").write_text("fine\n", encoding="utf-8")
         os.environ["FRISK_MCP_ROOTS"] = os.pathsep.join([str(self.home), "/", *system])
         self.assertEqual(summary(str(self.home))["verdict"], "PASS")
-        with mock.patch.object(mcp_server, "scan_path", return_value=mcp_server.ScanResult()) as scan:
+        with mock.patch("frisk.engine.scan_path", return_value=mcp_server.ScanResult()) as scan:
             for source in ["/", *system]:
                 with self.subTest(allowed=source):
                     self.assertEqual(summary(source)["verdict"], "PASS")

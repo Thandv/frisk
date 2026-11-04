@@ -43,7 +43,7 @@ class GitRecorder:
 def run(argv: list[str], git: GitRecorder | None = None) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     with mock.patch("frisk.sources.subprocess.run", git or GitRecorder()), \
-            mock.patch("frisk.report._USE_COLOR", False), \
+            mock.patch("frisk.report.use_color", return_value=False), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = main(argv)
     return code, out.getvalue(), err.getvalue()

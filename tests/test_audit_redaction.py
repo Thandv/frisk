@@ -29,7 +29,7 @@ CANARY = "c4n" + "ary-" + "51f0" + "e2d7"
 
 def run(argv: list[str]) -> str:
     out = io.StringIO()
-    with mock.patch("frisk.report._USE_COLOR", False), contextlib.redirect_stdout(out):
+    with mock.patch("frisk.report.use_color", return_value=False), contextlib.redirect_stdout(out):
         main(argv)
     return out.getvalue()
 
@@ -68,7 +68,7 @@ class DisplayRefTest(unittest.TestCase):
 
     def test_audit_text_shows_refs_only_through_display_ref(self) -> None:
         rec = AuditRecord(ref("remote", "https://raw.example.invalid/x"), ScanResult(), None)
-        with mock.patch("frisk.report._USE_COLOR", False), \
+        with mock.patch("frisk.report.use_color", return_value=False), \
                 mock.patch.object(report, "display_ref", return_value="<shown>"):
             text = audit_text("cfg.json", [rec])
         self.assertIn("→ <shown>", text)
@@ -176,7 +176,8 @@ class HostOnlyTest(unittest.TestCase):
 
     def outputs(self, argv: list[str]) -> tuple[str, str]:
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.dict(os.environ, {"FRISK_DEBUG": "1"}), mock.patch("frisk.report._USE_COLOR", False), \
+        with mock.patch.dict(os.environ, {"FRISK_DEBUG": "1"}), \
+                mock.patch("frisk.report.use_color", return_value=False), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             main(argv)
         return out.getvalue(), err.getvalue()
@@ -263,7 +264,7 @@ class GitTargetCredentialTest(unittest.TestCase):
         """Exit code, and stdout plus stderr with debug lines on."""
         out, err = io.StringIO(), io.StringIO()
         with mock.patch("frisk.sources.subprocess.run", git), mock.patch.dict(os.environ, {"FRISK_DEBUG": "1"}), \
-                mock.patch("frisk.report._USE_COLOR", False), contextlib.redirect_stdout(out), \
+                mock.patch("frisk.report.use_color", return_value=False), contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(err):
             code = main(argv)
         return code, out.getvalue() + err.getvalue()

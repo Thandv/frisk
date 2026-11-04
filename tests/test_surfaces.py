@@ -40,7 +40,7 @@ def lines_of(findings: list[engine.Finding], rule: str) -> list[int]:
 
 def cli(argv: list[str]) -> str:
     out = io.StringIO()
-    with mock.patch("frisk.report._USE_COLOR", False), contextlib.redirect_stdout(out):
+    with mock.patch("frisk.report.use_color", return_value=False), contextlib.redirect_stdout(out):
         main(argv)
     return out.getvalue()
 

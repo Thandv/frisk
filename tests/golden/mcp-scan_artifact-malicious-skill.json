@@ -1,0 +1,77 @@
+{
+  "source": "examples/malicious-skill",
+  "verdict": "BLOCK",
+  "worst_severity": "block",
+  "counts": {
+    "block": 4,
+    "warn": 4,
+    "total": 8
+  },
+  "findings": [
+    {
+      "severity": "block",
+      "category": "rce",
+      "rule": "rce.pipe_installer",
+      "where": "SKILL.md:11",
+      "description": "pipe-to-shell remote installer (curl|wget ... | sh)",
+      "owasp": "LLM03:2025 Supply Chain"
+    },
+    {
+      "severity": "block",
+      "category": "tool-poisoning",
+      "rule": "inject.hide_from_user",
+      "where": "SKILL.md:14",
+      "description": "tool-poisoning: instruction to hide an action from the user",
+      "owasp": "LLM01:2025 Prompt Injection"
+    },
+    {
+      "severity": "block",
+      "category": "injection",
+      "rule": "inject.sensitive_path_instruction",
+      "where": "SKILL.md:18",
+      "description": "instruction to the agent to copy, read or send a credential file",
+      "owasp": "LLM01:2025 Prompt Injection"
+    },
+    {
+      "severity": "block",
+      "category": "injection",
+      "rule": "inject.ignore_prev",
+      "where": "SKILL.md:19",
+      "description": "prompt-injection: 'ignore previous instructions'",
+      "owasp": "LLM01:2025 Prompt Injection"
+    },
+    {
+      "severity": "warn",
+      "category": "injection",
+      "rule": "inject.exfil_instr",
+      "where": "SKILL.md:15",
+      "description": "instruction to send data to an external URL",
+      "owasp": "LLM01:2025 Prompt Injection"
+    },
+    {
+      "severity": "warn",
+      "category": "tool-poisoning",
+      "rule": "inject.hidden_important",
+      "where": "SKILL.md:17",
+      "description": "tool-poisoning: hidden <IMPORTANT>/<SECRET> directive block in description",
+      "owasp": "LLM01:2025 Prompt Injection"
+    },
+    {
+      "severity": "warn",
+      "category": "tool-poisoning",
+      "rule": "inject.before_using",
+      "where": "SKILL.md:18",
+      "description": "tool-poisoning: side-effect instruction prefixed to a tool description",
+      "owasp": "LLM01:2025 Prompt Injection"
+    },
+    {
+      "severity": "warn",
+      "category": "tool-poisoning",
+      "rule": "inject.read_then_send",
+      "where": "SKILL.md:18",
+      "description": "tool-poisoning: instruction to read sensitive files",
+      "owasp": "LLM01:2025 Prompt Injection"
+    }
+  ],
+  "advice": "DO NOT install or run this. It contains high-severity patterns (code execution, secret exfiltration, destructive ops, or hidden instructions). Show the findings to the user."
+}

@@ -359,7 +359,8 @@ COVERAGE_RULES = [
     ("coverage.too_large", "coverage", "block",
      "a file over the size limit, not read: it fails the scan, since anything could be in it"),
     ("coverage.truncated", "coverage", "warn",
-     "text over the size limit: only its first and last parts were pattern-matched"),
+     "text over the size limit: only part of it was pattern-matched (the first and last parts of a string, "
+     "the first part of standard input)"),
     ("coverage.no_servers", "coverage", "warn",
      "an MCP config in which frisk found no servers, so nothing in it was audited"),
     ("fs.symlink_escape", "exfil", "warn",

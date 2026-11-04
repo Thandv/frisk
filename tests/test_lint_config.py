@@ -32,7 +32,7 @@ class TestLintConfig(unittest.TestCase):
         self.assertEqual(project["dependencies"], [])
         extras = project["optional-dependencies"]
         self.assertEqual(extras["test"], ["pytest"])
-        self.assertEqual(set(extras["dev"]), {"pytest", "ruff", "mypy"})
+        self.assertEqual(set(extras["dev"]), {"pytest", "ruff", "mypy", "coverage"})  # coverage: FR-E7 t5
 
 
 if __name__ == "__main__":

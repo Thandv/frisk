@@ -2,10 +2,13 @@
 # Run the stdlib unittest suite under every local interpreter frisk supports.
 #
 # Candidates: the macOS Command Line Tools python3 (3.9, the runtime floor) and
-# python3.12 / 3.13 / 3.14 from Homebrew (/opt/homebrew/bin or /usr/local/bin).
+# python3.12 / 3.13 / 3.14 from Homebrew (/opt/homebrew/bin or /usr/local/bin), or
+# exactly the space-separated interpreter paths in FRISK_VERIFY_PYTHONS (CI sets it to
+# the job's python). A missing candidate is skipped.
 # Interpreters are deduplicated by resolved path. Prints one PASS/FAIL line each.
 # Exits non-zero if any run fails, or if fewer than FRISK_MIN_PYTHONS (default 2)
 # interpreters ran, so it can never pass vacuously.
+# It makes no network access and installs nothing (no pip, no venv).
 set -u -o pipefail
 
 min="${FRISK_MIN_PYTHONS:-2}"
@@ -15,12 +18,16 @@ esac
 
 cd "$(dirname "$0")/.." || exit 2
 
-candidates=(/Library/Developer/CommandLineTools/usr/bin/python3)
-for prefix in /opt/homebrew/bin /usr/local/bin; do
-  for v in 3.12 3.13 3.14; do
-    candidates+=("$prefix/python$v")
+if [ -n "${FRISK_VERIFY_PYTHONS:-}" ]; then
+  read -r -a candidates <<<"$FRISK_VERIFY_PYTHONS"
+else
+  candidates=(/Library/Developer/CommandLineTools/usr/bin/python3)
+  for prefix in /opt/homebrew/bin /usr/local/bin; do
+    for v in 3.12 3.13 3.14; do
+      candidates+=("$prefix/python$v")
+    done
   done
-done
+fi
 
 seen=" "
 ran=0
@@ -29,7 +36,10 @@ log="$(mktemp "${TMPDIR:-/tmp}/frisk-verify.XXXXXX")" || exit 2
 trap 'rm -f "$log"' EXIT
 
 for py in "${candidates[@]}"; do
-  [ -x "$py" ] || continue
+  if [ ! -x "$py" ]; then
+    [ -n "${FRISK_VERIFY_PYTHONS:-}" ] && echo "skip: $py not found"
+    continue
+  fi
   real="$("$py" -c 'import os, sys; print(os.path.realpath(sys.executable))' 2>/dev/null)" || continue
   case "$seen" in *" $real "*) continue ;; esac
   seen="$seen$real "

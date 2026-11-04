@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
@@ -118,7 +119,7 @@ def _normalize_git(url: str) -> str:
 
 
 @contextlib.contextmanager
-def materialize(target: str):
+def materialize(target: str) -> Iterator[tuple[Path, str]]:
     """Yield (root_path: Path, label: str) for scanning; clean up clones afterward."""
     if is_git_url(target):
         _check_git_target(target)

@@ -1,0 +1,12 @@
+{
+  "source": "examples/clean-skill",
+  "verdict": "PASS",
+  "worst_severity": null,
+  "counts": {
+    "block": 0,
+    "warn": 0,
+    "total": 0
+  },
+  "findings": [],
+  "advice": "No known-malicious patterns found. Static scan only \u2014 not a guarantee; remote/package behavior is not covered."
+}

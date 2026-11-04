@@ -17,6 +17,7 @@ from .rules import (
     ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, CONTEXTS, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, PROSE_RULES,
     RULE_META, INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
 )
+from .sources import materialize
 from .surfaces import Span
 
 log = _root_log.getChild("engine")
@@ -363,6 +364,13 @@ def scan_path(path: str | Path, root: Path | None = None, limits: ScanLimits | N
     return result.sort()
 
 
+def scan_target(target: str, limits: ScanLimits | None = None) -> ScanResult:
+    """Scan a local path or a git URL (cloned to a temp dir, removed afterwards) within
+    `limits`; paths are relative to the target, as scan_path reports them."""
+    with materialize(target) as (root, _label):
+        return scan_path(root, limits=limits)
+
+
 def _walk(top: Path, base: Path, limits: ScanLimits, result: ScanResult) -> tuple[str, str, str] | None:
     """Scan the files below `top` into `result` (walk.entries: name order, no symlink
     followed, no .git directory entered). A symlink to a file inside the root is scanned
@@ -527,6 +535,13 @@ def _join(prefix: str, path: str) -> str:
     if path == "." and prefix.endswith("/"):
         return prefix.rstrip("/") or "/"
     return prefix + path
+
+
+def counts(findings: list[Finding]) -> dict[str, int]:
+    """{"block": n, "warn": n, "total": n}: how many findings there are at each severity."""
+    return {"block": sum(1 for f in findings if f.severity == "block"),
+            "warn": sum(1 for f in findings if f.severity == "warn"),
+            "total": len(findings)}
 
 
 def worst_severity(findings: list[Finding]) -> str | None:

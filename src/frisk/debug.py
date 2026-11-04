@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+from typing import TextIO
 
 log = logging.getLogger("frisk")
 
@@ -56,11 +57,11 @@ class _Stderr(logging.StreamHandler):
     """Writes to whatever sys.stderr is at emit time (never a stale capture)."""
 
     @property
-    def stream(self):
+    def stream(self) -> TextIO:
         return sys.stderr
 
     @stream.setter
-    def stream(self, _value):
+    def stream(self, _value: object) -> None:
         pass
 
 

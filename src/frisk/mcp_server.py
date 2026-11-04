@@ -26,10 +26,10 @@ from collections import Counter
 from pathlib import Path
 
 from . import __version__
-from .engine import ScanLimits, ScanResult, scan_path, scan_text, verdict, worst_severity
+from .engine import ScanLimits, ScanResult, counts, scan_target, scan_text, verdict, worst_severity
 from .rules import owasp_for
 from .debug import log as _root_log, ms_since, setup_debug
-from .sources import display_target, is_git_url, materialize
+from .sources import display_target, is_git_url
 
 log = _root_log.getChild("mcp")
 
@@ -50,14 +50,12 @@ def _summary(result: ScanResult, source: str) -> str:
     never gets the scanned text back) and advice; plus degraded: true and what was not
     scanned when coverage is incomplete."""
     findings = result.findings
-    blocks = sum(1 for f in findings if f.severity == "block")
-    warns = sum(1 for f in findings if f.severity == "warn")
     top = sorted(findings, key=lambda f: 0 if f.severity == "block" else 1)[:12]
     payload = {
         "source": source,
         "verdict": verdict(findings),
         "worst_severity": worst_severity(findings),
-        "counts": {"block": blocks, "warn": warns, "total": len(findings)},
+        "counts": counts(findings),
         "findings": [
             {"severity": f.severity, "category": f.category, "rule": f.rule,
              "where": f"{f.path}:{f.line}", "description": f.description,
@@ -87,9 +85,7 @@ def _advice(v: str) -> str:
 
 def _scan_source(source: str) -> str:
     _check_scope(source)
-    with materialize(source) as (root, _):
-        result = scan_path(root, root if root.is_dir() else None, MCP_LIMITS)
-    return _summary(result, display_target(source))
+    return _summary(scan_target(source, MCP_LIMITS), display_target(source))
 
 
 def _check_scope(source: str) -> None:
@@ -133,7 +129,7 @@ TOOLS = {
 }
 
 
-def _tools_list():
+def _tools_list() -> list[dict[str, object]]:
     return [{"name": n, "description": d,
              "inputSchema": {"type": "object", "properties": props, "required": req}}
             for n, (_, d, props, req) in TOOLS.items()]

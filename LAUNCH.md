@@ -33,7 +33,7 @@ frisk was tuned against real, popular MCP servers so it doesn't cry wolf:
 ## 30-second try-it (put this at the top of every post)
 
 ```bash
-pipx run frisk-scan https://github.com/some/mcp-server   # vet before you install
+pipx run --spec frisk-scan frisk https://github.com/some/mcp-server   # vet before you install
 frisk --mcp-config ~/.../claude_desktop_config.json      # audit what you already run
 frisk lock . && frisk verify                             # catch silent "rug pull" updates
 ```

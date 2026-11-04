@@ -8,22 +8,34 @@ permissions:
   contents: read
 
 jobs:
+  # Every supported Python on Linux, plus one macOS job. scripts/verify.sh runs the stdlib
+  # unittest suite (on the job's python only, through FRISK_VERIFY_PYTHONS); pytest runs it again
+  # with pytest's collection, as the local pre-commit gate does.
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[test]"
-      - run: python -m unittest discover -s tests -v
+      - run: python -m pip install -e ".[test]"
+      - name: scripts/verify.sh
+        env:
+          FRISK_MIN_PYTHONS: "1"
+        run: FRISK_VERIFY_PYTHONS="$(command -v python)" bash scripts/verify.sh
       - run: python -m pytest -q
 
-  # Advisory until a follow-up epic makes it blocking: ruff and mypy have never run
-  # on this code, so their first findings are triaged rather than gating merges.
+  # Blocking. Dev tools (the `dev` extra: pytest, ruff, mypy, coverage) are installed only here,
+  # never at runtime. Coverage is reported without a floor: the owner sets one from the
+  # first CI number. It does not see the CLI tests' child processes, so cli.py reads low.
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -31,13 +43,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -e ".[dev]"
-      - name: ruff check (advisory)
-        run: ruff check
-        continue-on-error: true
-      - name: mypy src (advisory)
-        run: mypy src
-        continue-on-error: true
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check
+      - run: mypy src
+      - run: coverage run -m pytest -q
+      - run: coverage report --include='src/frisk/*'
 
   # The composite Action itself, as a user runs it (uses: ./). sarif is 'false' on both
   # steps: this job has no security-events permission, and the malicious example's planted

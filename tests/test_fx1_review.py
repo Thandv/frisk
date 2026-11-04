@@ -30,7 +30,7 @@ CANARY = "c4n" + "ary-" + "f1x1" + "a7e5"
 
 def run(argv: list[str]) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
-    with mock.patch("frisk.report._USE_COLOR", False), contextlib.redirect_stdout(out), \
+    with mock.patch("frisk.report.use_color", return_value=False), contextlib.redirect_stdout(out), \
             contextlib.redirect_stderr(err):
         code = main(argv)
     return code, out.getvalue(), err.getvalue()

@@ -185,7 +185,7 @@ def default_pins_file(server_cmd: list[str]) -> Path:
 
 class Proxy:
     def __init__(self, server_cmd: list[str], log: TextIO = sys.stderr, pins_file: Path | None = None,
-                 on_change: str = "flag"):
+                 on_change: str = "flag") -> None:
         """`pins_file` (None: pins live in memory only) holds the tool pins across runs;
         `on_change` says what a tool whose definition changed since it was pinned gets:
         'flag' (kept, annotated, re-pinned) or 'drop' (dropped, its pin kept)."""

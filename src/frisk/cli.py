@@ -2,28 +2,28 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import contextlib
+import json
 import os
 import sys
 from pathlib import Path
 
 from . import __version__
 from .engine import (MAX_FILE_BYTES, ScanLimits, ScanResult, coverage_warning, display_prefix, reroot, scan_path,
-                     scan_text, verdict, fails)
-from .report import AuditRecord, audit_text, printable, to_text, to_json, to_sarif, _c
-from .sources import (SERVER_KEYS, display_ref, display_target, display_url, home_label, is_git_url, materialize,
+                     scan_target, scan_text, verdict, fails)
+from .report import AuditRecord, audit_text, colorize, printable, to_text, to_json, to_sarif
+from .sources import (SERVER_KEYS, display_ref, display_target, display_url, home_label, is_git_url,
                       parse_mcp_config, split_configs)
 from . import pin, proxy
 from .debug import setup_debug
 
 
-def _scan_target(target: str, limits: ScanLimits) -> ScanResult:
-    """Scan one target; paths follow docs/adr/0001-finding-paths.md."""
-    with materialize(target) as (root, _label):
-        result = scan_path(root, limits=limits)
-        if is_git_url(target):
-            return reroot(result, "", "git")  # clone-relative
-        return reroot(result, display_prefix(target, root.is_file()), "local")
+def _shown(target: str, result: ScanResult) -> ScanResult:
+    """A target's scan with the paths shown; they follow docs/adr/0001-finding-paths.md."""
+    if is_git_url(target):
+        return reroot(result, "", "git")  # clone-relative
+    return reroot(result, display_prefix(target, Path(target).is_file()), "local")
 
 
 def _distinct(targets: list[str]) -> list[str]:
@@ -101,6 +101,37 @@ def _audit_config(path: str, limits: ScanLimits | None = None) -> list[AuditReco
     return records
 
 
+def _scan_stdin(max_bytes: int) -> ScanResult:
+    """Scan standard input as text, at most its first `max_bytes` bytes.
+
+    Longer input raises coverage.truncated (a character cut at the limit is left out), so it
+    is never PASS; the rest is read to its end and dropped, so a writer never gets a broken
+    pipe (Foreman's admission scan drops every finding then). Input that is not UTF-8 is
+    scanned with the bad bytes replaced and raises coverage.unreadable.
+    """
+    stream = getattr(sys.stdin, "buffer", None)
+    if stream is None:
+        raise ValueError("--stdin: standard input is not readable")
+    data = stream.read(max_bytes + 1)
+    truncated = len(data) > max_bytes
+    data = data[:max_bytes]
+    while truncated and stream.read(1 << 16):  # drain, unscanned
+        pass
+    unreadable = False
+    try:
+        text = codecs.getincrementaldecoder("utf-8")().decode(data, final=not truncated)
+    except UnicodeDecodeError:
+        text, unreadable = data.decode("utf-8", errors="replace"), True
+    result = scan_text(text.replace("\r\n", "\n").replace("\r", "\n"), "<stdin>", max_chars=max_bytes)
+    if unreadable:
+        result.extend(coverage_warning("<stdin>", "coverage.unreadable", "standard input is not valid UTF-8 "
+                                       "(UnicodeDecodeError); scanned with undecodable bytes replaced"))
+    if truncated:
+        result.extend(coverage_warning("<stdin>", "coverage.truncated", f"standard input is over the {max_bytes}-byte "
+                                       f"limit: only its first {max_bytes} bytes were pattern-matched"))
+    return reroot(result, "", "text")
+
+
 # --- scan (default) ---------------------------------------------------------
 
 def _positive(value: str) -> int:
@@ -110,18 +141,40 @@ def _positive(value: str) -> int:
     return n
 
 
+_SCAN_EPILOG = """\
+subcommands:
+  frisk [options] TARGET ...    scan (this help)
+  frisk lock                    pin a content fingerprint of approved content (frisk lock --help)
+  frisk verify                  re-check pinned content for drift (frisk verify --help)
+  frisk proxy [options] -- CMD  check an MCP server's tools at runtime (frisk proxy: usage)
+
+exit status of a scan:
+  0  no finding reached the --fail-on level (always 0 with --fail-on never)
+  1  the worst finding reached the --fail-on level (default: block)
+  2  a usage error, no target, or a target, MCP config, --stdin or --sarif-out FILE that
+     cannot be read or written (a file inside a target that cannot be read is a warning)
+frisk lock exits 0, or 2 on an error. frisk verify exits 0, 1 on drift or an entry it could
+not verify, 2 on a lockfile it cannot read. frisk proxy exits with the server's status, or 2
+on a usage error or a server it cannot start.
+"""
+
+
 def _cmd_scan(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
         prog="frisk",
-        description="Static, zero-execution security scanner for AI-agent content "
-                    "(MCP servers, Claude Code skills/plugins/subagents, Cursor rules). "
-                    "Subcommands: lock, verify.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Static, zero-execution security scanner for AI-agent content (MCP servers,\n"
+                    "Claude Code skills/plugins/subagents, Cursor rules).",
+        epilog=_SCAN_EPILOG,
     )
     p.add_argument("targets", nargs="*",
                    help="local paths and/or git URLs to scan; an MCP config file is audited as with --mcp-config")
     p.add_argument("--mcp-config", action="append", default=[], metavar="FILE",
                    help="audit every server in an MCP config file (repeatable)")
     p.add_argument("--text", metavar="STR", help="scan a raw string instead of a path")
+    p.add_argument("--stdin", action="store_true",
+                   help="scan text read from standard input: at most --max-file-bytes bytes are scanned, and longer "
+                        "input warns (coverage.truncated)")
     p.add_argument("--json", action="store_true", help="emit findings as JSON")
     p.add_argument("--sarif", action="store_true", help="emit SARIF 2.1.0 (GitHub code scanning)")
     p.add_argument("--sarif-out", metavar="FILE",
@@ -135,7 +188,7 @@ def _cmd_scan(argv: list[str]) -> int:
     p.add_argument("-V", "--version", action="version", version=f"frisk {__version__}")
     args = p.parse_args(argv)
 
-    if not args.targets and not args.mcp_config and args.text is None:
+    if not args.targets and not args.mcp_config and args.text is None and not args.stdin:
         p.print_help()
         return 2
 
@@ -143,14 +196,17 @@ def _cmd_scan(argv: list[str]) -> int:
     limits = ScanLimits(max_file_bytes=args.max_file_bytes)
     audits: list[str] = []
     servers: list[AuditRecord] = []
-    label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or "<text>"
+    label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or (
+        "<stdin>" if args.stdin and args.text is None else "<text>")
     try:
         if args.text is not None:
             result.extend(scan_text(args.text, "<text>", max_chars=args.max_file_bytes))
+        if args.stdin:
+            result.extend(_scan_stdin(args.max_file_bytes))
         # A config named as a target is audited, never text-scanned: its env values must not show.
         targets, configs = split_configs(args.targets, args.mcp_config)
         for t in _distinct(targets):
-            result.extend(_scan_target(t, limits))
+            result.extend(_shown(t, scan_target(t, limits)))
         for cfg in configs:
             records = _audit_config(cfg, limits)
             if not records:  # nothing was audited: never PASS
@@ -213,7 +269,7 @@ def _cmd_lock(argv: list[str]) -> int:
     for note in notes:
         print(f"frisk lock: {printable(note)}", file=sys.stderr)
     n = len(lock["entries"])
-    print(_c(f"frisk: pinned {n} entr{'y' if n == 1 else 'ies'} → {args.lockfile}", "pass"))
+    print(colorize(f"frisk: pinned {n} entr{'y' if n == 1 else 'ies'} → {args.lockfile}", "pass"))
     return 0
 
 
@@ -235,36 +291,35 @@ def _cmd_verify(argv: list[str]) -> int:
         return 2
 
     if args.json:
-        import json
         print(json.dumps(report, indent=2))
     else:
         for r in report:
             entry = printable(r["entry"])
             if r["status"] == "ok":
-                print(f"  [{_c('ok   ', 'pass')}] {entry}")
+                print(f"  [{colorize('ok   ', 'pass')}] {entry}")
             elif r["status"] == "error":
-                print(f"  [{_c('error', 'warn')}] {entry}  {printable(r.get('detail', ''))}")
+                print(f"  [{colorize('error', 'warn')}] {entry}  {printable(r.get('detail', ''))}")
             else:
-                print(f"  [{_c('DRIFT', 'block')}] {entry}")
+                print(f"  [{colorize('DRIFT', 'block')}] {entry}")
                 if r.get("launch"):
-                    print(_c("           ~ changed: how it starts (command, args, cwd, URL, env or header names)",
+                    print(colorize("           ~ changed: how it starts (command, args, cwd, URL, env or header names)",
                              "block"))
                 for name in r.get("env", []):
-                    print(_c(f"           ~ {printable(name)} changed", "block"))
+                    print(colorize(f"           ~ {printable(name)} changed", "block"))
                 for f in r.get("changed", []):
-                    print(_c(f"           ~ changed: {printable(f)}", "block"))
+                    print(colorize(f"           ~ changed: {printable(f)}", "block"))
                 for f in r.get("added", []):
-                    print(_c(f"           + added:   {printable(f)}", "warn"))
+                    print(colorize(f"           + added:   {printable(f)}", "warn"))
                 for f in r.get("removed", []):
-                    print(_c(f"           - removed: {printable(f)}", "warn"))
+                    print(colorize(f"           - removed: {printable(f)}", "warn"))
         changed, failed = sum(1 for r in report if r["status"] == "DRIFT"), pin.unverified(report)
         could_not = f"could not verify {failed} entr{'y' if failed == 1 else 'ies'}"
         if changed:
-            v = _c("DRIFT DETECTED", "block")
+            v = colorize("DRIFT DETECTED", "block")
         elif failed:
-            v = _c(could_not, "warn")
+            v = colorize(could_not, "warn")
         else:
-            v = _c("no drift", "pass")
+            v = colorize("no drift", "pass")
         also = f"; {could_not}" if changed and failed else ""
         print(f"\nverify: {v}  ({changed} of {len(report)} entries changed{also})")
     return 1 if pin.has_drift(report) or pin.unverified(report) else 0
