@@ -67,7 +67,7 @@ SECTION_INTROS: dict[str, str] = {
     "Hidden characters": "Run with the text rules.",
     "Coverage": ("Reported for content frisk could not pattern-match, so a scan is never PASS while executable "
                  "content went unscanned. Media files (images, fonts, audio, video, PDF) are skipped silently "
-                 "and only counted in coverage."),
+                 "and only counted in coverage, unless their first bytes are text."),
 }
 
 RULE_DOCS: dict[str, RuleDoc] = {
@@ -433,7 +433,8 @@ RULE_DOCS: dict[str, RuleDoc] = {
                  "written and with the NUL bytes dropped, and a finding from either counts once. Only media, "
                  "executables, archives, opaque data formats (.bin, .dat, .db, .sqlite, .npy, .parquet) and "
                  "non-UTF-8 files with NUL bytes and an unlisted extension are not scanned (media and "
-                 "non-UTF-8 opaque data silently, the others with coverage.binary). UTF-16 text is not "
+                 "non-UTF-8 opaque data silently, the others with coverage.binary); a media file whose "
+                 "first bytes are text is scanned. UTF-16 text is not "
                  "decoded. The entry is also listed in coverage.skipped with reason unreadable."),
         why=("A file that cannot be read, or reads only with replaced bytes, may hold content frisk did not "
              "match."),

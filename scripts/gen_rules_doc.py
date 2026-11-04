@@ -68,7 +68,10 @@ def _files() -> str:
   (fenced code blocks; in markdown, {_exts(rules.MARKDOWN_EXTS)}, also indented code and inline
   code; build-file recipes; command values in JSON: see [Code rules](#code-rules)), whatever its
   extension or none (`Makefile`, `Dockerfile` and `.bashrc` are read).
-- Never read, skipped silently: media ({_exts(rules.MEDIA_EXTS)}).
+- Skipped silently: media ({_exts(rules.MEDIA_EXTS)}) whose first
+  {engine.MEDIA_SNIFF_BYTES:,} bytes are not text (a NUL byte, or not UTF-8), at any size. A
+  media-named file that starts as text, such as a script saved as `setup.png`, is read like any
+  other file.
 - Not read, a [coverage.binary](#coverage.binary) warning: executables and compiled code
   ({_exts(rules.EXECUTABLE_EXTS)}) and archives ({_exts(rules.ARCHIVE_EXTS)}).
 - A file that is not valid UTF-8 is scanned with the bad bytes replaced and warns

@@ -60,7 +60,7 @@ from pathlib import Path
 from typing import IO, Callable, TextIO
 
 from . import jsonread
-from .debug import log as _root_log, ms_since
+from .debug import log as _root_log, ms_since, redact
 from .engine import Finding, scan_text, worst_severity
 
 log = _root_log.getChild("proxy")
@@ -517,7 +517,8 @@ class Proxy:
         output closed) or a SIGTERM/SIGINT arrives; on every path the server is stopped
         (terminate, STOP_GRACE_S, kill) and reaped. Returns the server's exit status (128 +
         the signal number for one ended by a signal). Raises LaunchError if it cannot start."""
-        self._log("started; wrapping: " + " ".join(self.server_cmd))
+        # Redacted as debug lines are, so a key passed as an argument never reaches the log.
+        self._log("started; wrapping: " + redact(" ".join(self.server_cmd)))
         t0 = time.monotonic()
         log.debug("server start argv0=%s args=%d", self.server_cmd[0], len(self.server_cmd) - 1)
         try:

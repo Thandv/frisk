@@ -187,9 +187,11 @@ object (`files_scanned`, and `skipped` entries with `path`, `reason` and `detail
   shebang), compiled Python (`.pyc`, `.pyo`), Java (`.jar`, `.class`) and archives
   (`.zip`, `.tar`, `.gz`, `.tgz`) each also raise a `coverage.binary` **warning**, so the
   verdict is never PASS while executable content went unscanned. Media (images, fonts,
-  audio, video, PDF, by extension) are never read, whatever they hold, and opaque data
-  (`.bin`, `.dat`, `.db`, `.sqlite`, `.npy`, `.parquet`) that is not valid UTF-8 is not
-  scanned; both are skipped silently. A non-UTF-8 file with NUL bytes and an extension
+  audio, video, PDF, by extension) whose first 1,024 bytes are not text (a NUL byte, or not
+  UTF-8) are not scanned, at any size, and opaque data (`.bin`, `.dat`, `.db`, `.sqlite`,
+  `.npy`, `.parquet`) that is not valid UTF-8 is not scanned; both are skipped silently. A
+  media-named file that starts as text (a script saved as `setup.png`) is scanned like any
+  other file. A non-UTF-8 file with NUL bytes and an extension
   frisk does not list as code or text also raises `coverage.binary`.
 - `unreadable`: a file that cannot be read or is not valid UTF-8, or a directory that
   cannot be listed, raises a `coverage.unreadable` warning naming the error. Any other

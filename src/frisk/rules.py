@@ -41,7 +41,7 @@ TEXT_EXTS = {
 }
 # Markdown: the markdown surface finds their code and hidden regions.
 MARKDOWN_EXTS = {".md", ".markdown", ".mdc"}
-# Media: never read, no finding, counted in coverage.skipped as "binary".
+# Media: no finding, counted in coverage.skipped as "binary"; scanned if it starts as text (engine._text_head).
 MEDIA_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".pdf", ".woff",
     ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".wav", ".mov",

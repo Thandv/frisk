@@ -1,6 +1,7 @@
 """Static scan engine. Zero-execution: reads bytes, matches regex, returns findings."""
 from __future__ import annotations
 
+import codecs
 import os
 import posixpath
 import re
@@ -231,6 +232,25 @@ def _not_scanned(rel: str, reason: str, detail: str, rule: str | None = None,
     return result
 
 
+# How much of a media-named file is read to tell real media from text saved under its name.
+MEDIA_SNIFF_BYTES = 1024
+
+
+def _text_head(path: Path) -> bool:
+    """Whether the file's first MEDIA_SNIFF_BYTES are text: not empty, no NUL byte, valid UTF-8
+    (a character cut at the end aside). Images, fonts, audio, video and PDFs fail this within
+    their first bytes; a script or instructions saved under a media name pass, and are scanned."""
+    with open(path, "rb") as fh:
+        head = fh.read(MEDIA_SNIFF_BYTES)
+    if not head or b"\0" in head:
+        return False
+    try:
+        codecs.getincrementaldecoder("utf-8")().decode(head, final=False)
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 def _read_text(path: Path, rel: str, max_bytes: int | None) -> tuple[str | None, ScanResult]:
     """The file's text (newlines normalised as text-mode reading does), plus coverage notes.
 
@@ -242,8 +262,6 @@ def _read_text(path: Path, rel: str, max_bytes: int | None) -> tuple[str | None,
     ext = path.suffix.lower()
     if ext == ".":  # Python 3.14 reports 'name.' as suffix '.', 3.9 as '': no extension
         ext = ""
-    if ext in MEDIA_EXTS:
-        return None, _not_scanned(rel, "binary", ext)
     if ext in EXECUTABLE_EXTS:
         return None, _not_scanned(rel, "binary", ext, "coverage.binary",
                                   f"executable content not scanned ({ext})")
@@ -256,6 +274,8 @@ def _read_text(path: Path, rel: str, max_bytes: int | None) -> tuple[str | None,
             return None, _not_scanned(rel, "special", "symlink")
         if not stat.S_ISREG(st.st_mode):
             return None, _not_scanned(rel, "special", walk.special_kind(st.st_mode))
+        if ext in MEDIA_EXTS and not _text_head(path):  # real media: skipped silently, at any size
+            return None, _not_scanned(rel, "binary", ext)
         size = st.st_size
         if max_bytes is not None and size > max_bytes:
             return None, _not_scanned(rel, "too_large", f"{size} bytes", "coverage.too_large",

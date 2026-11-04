@@ -21,7 +21,10 @@ string (`engine.scan_text`): `default` (`--text`, `--stdin`, frisk-mcp's `scan_t
   (fenced code blocks; in markdown, `.markdown`, `.md`, `.mdc`, also indented code and inline
   code; build-file recipes; command values in JSON: see [Code rules](#code-rules)), whatever its
   extension or none (`Makefile`, `Dockerfile` and `.bashrc` are read).
-- Never read, skipped silently: media (`.bmp`, `.gif`, `.ico`, `.jpeg`, `.jpg`, `.mov`, `.mp3`, `.mp4`, `.otf`, `.pdf`, `.png`, `.ttf`, `.wav`, `.webp`, `.woff`, `.woff2`).
+- Skipped silently: media (`.bmp`, `.gif`, `.ico`, `.jpeg`, `.jpg`, `.mov`, `.mp3`, `.mp4`, `.otf`, `.pdf`, `.png`, `.ttf`, `.wav`, `.webp`, `.woff`, `.woff2`) whose first
+  1,024 bytes are not text (a NUL byte, or not UTF-8), at any size. A
+  media-named file that starts as text, such as a script saved as `setup.png`, is read like any
+  other file.
 - Not read, a [coverage.binary](#coverage.binary) warning: executables and compiled code
   (`.class`, `.dll`, `.dylib`, `.exe`, `.jar`, `.node`, `.pyc`, `.pyo`, `.so`, `.wasm`) and archives (`.gz`, `.tar`, `.tgz`, `.zip`).
 - A file that is not valid UTF-8 is scanned with the bad bytes replaced and warns
@@ -454,7 +457,7 @@ Run with the text rules.
 
 ## Coverage
 
-Reported for content frisk could not pattern-match, so a scan is never PASS while executable content went unscanned. Media files (images, fonts, audio, video, PDF) are skipped silently and only counted in coverage.
+Reported for content frisk could not pattern-match, so a scan is never PASS while executable content went unscanned. Media files (images, fonts, audio, video, PDF) are skipped silently and only counted in coverage, unless their first bytes are text.
 
 <a id="coverage.binary"></a>
 ### coverage.binary
@@ -474,7 +477,7 @@ Reported for content frisk could not pattern-match, so a scan is never PASS whil
 - Severity: `warn` · Category: `coverage` · OWASP LLM Top 10 (2025): LLM03:2025 Supply Chain
 - Reported as: `file that could not be read or is not valid UTF-8, or a directory that could not be listed`
 - Runs on: reported by the scan itself, not a pattern
-- Matches: A file that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError). Also a directory that could not be listed (its contents were not scanned). A non-UTF-8 file is still scanned with the undecodable bytes replaced, so one bad byte cannot hide a payload; a file with NUL bytes is matched twice, as written and with the NUL bytes dropped, and a finding from either counts once. Only media, executables, archives, opaque data formats (.bin, .dat, .db, .sqlite, .npy, .parquet) and non-UTF-8 files with NUL bytes and an unlisted extension are not scanned (media and non-UTF-8 opaque data silently, the others with coverage.binary). UTF-16 text is not decoded. The entry is also listed in coverage.skipped with reason unreadable.
+- Matches: A file that could not be read (the error class is named, for example PermissionError) or is not valid UTF-8 (UnicodeDecodeError). Also a directory that could not be listed (its contents were not scanned). A non-UTF-8 file is still scanned with the undecodable bytes replaced, so one bad byte cannot hide a payload; a file with NUL bytes is matched twice, as written and with the NUL bytes dropped, and a finding from either counts once. Only media, executables, archives, opaque data formats (.bin, .dat, .db, .sqlite, .npy, .parquet) and non-UTF-8 files with NUL bytes and an unlisted extension are not scanned (media and non-UTF-8 opaque data silently, the others with coverage.binary); a media file whose first bytes are text is scanned. UTF-16 text is not decoded. The entry is also listed in coverage.skipped with reason unreadable.
 - Why it matters: A file that cannot be read, or reads only with replaced bytes, may hold content frisk did not match.
 - Example (in words): A script saved in a legacy single-byte encoding.
 - Likely false positive: A legacy Latin-1 encoded script or document.

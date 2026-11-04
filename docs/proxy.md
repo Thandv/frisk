@@ -83,7 +83,7 @@ never the text of a description, result or request.
 
 | Line | Meaning |
 |---|---|
-| `started; wrapping: <command>` | The proxy started the server. The command is logged as given, arguments included. |
+| `started; wrapping: <command>` | The proxy started the server. The command is logged with its arguments, secrets redacted as in debug lines (`token=[REDACTED]`); a bare token as an argument of its own is not recognised. |
 | `BLOCKED tool '<name>': <rule> (<n> findings)` | The tool had a block-level finding and was dropped. |
 | `flagged tool '<name>': ...` | The tool was kept and annotated: warn-level findings, or a changed definition. |
 | `dropped tool '<name>': definition changed since it was pinned (possible rug pull)` | `--on-change drop` dropped a changed tool. |

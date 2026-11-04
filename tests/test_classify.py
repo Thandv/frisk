@@ -43,7 +43,7 @@ class TestShebang(TempDir):
 
     def test_binary_files_still_yield_no_pattern_findings(self) -> None:
         payload = ("#!/bin/sh\n" + INSTALLER + "\n").encode("utf-8")
-        (self.root / "logo.png").write_bytes(payload)
+        (self.root / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n" + payload)  # a real PNG signature first
         (self.root / "tool").write_bytes(b"\x7fELF\xff\xfe" + payload)
         self.assertEqual(scan_file(self.root / "logo.png", self.root).findings, [])
         self.assertEqual([f.rule for f in scan_file(self.root / "tool", self.root).findings], ["coverage.binary"])
