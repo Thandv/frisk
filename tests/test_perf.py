@@ -7,7 +7,7 @@ the characters its windows take; each seed is repeated with no terminator, so a 
 that could be rescanned from many starts would be. The test fails when anything it should
 scan has no entry, and when an entry names nothing.
 
-- Budget: each rule in CODE_RULES and TEXT_RULES and each surface regex scans 1 MiB of each
+- Budget: each rule in CODE_RULES, TEXT_RULES and PROSE_RULES and each surface regex scans 1 MiB of each
   of its seeds (and of CLASS_RUNS) within BUDGET_S of CPU time. The worst cases measured
   are in the FR-E5 notes; the unbounded rce.shell_true gap, for one, took 1.4 s on 64 KiB.
 - Linearity: the agent-instruction rule and the Python loops (each surface's extract(),
@@ -49,6 +49,7 @@ SEEDS: dict[str, tuple[str, ...]] = {
     "rce.pickle": ("pickle.load ", "pickle.", "marshal.loads "),
     "rce.dynamic_import": ("__import__ ", "importlib.", "importlib.import_module "),
     "exfil.secret_paths": ("~/.", "$HOME/.", "/.", ".ss", "id_rs"),
+    "exfil.secret_paths_prose": ("~/.", "$HOME/.", "/.", ".ss", "id_rs"),
     "exfil.dotenv": (".env", ".en", "."),
     "exfil.secret_env_read": ("$", "${", "os.environ", "getenv ", "$" + "x" * 29, "$t", "$tokex", "ENV[t",
                               "getenv" + "t" * 24, "process.env "),
@@ -145,7 +146,8 @@ def budgeted() -> dict[str, Callable[[str], object]]:
     surfaces run over a whole file. package_json's, and json_values' _TOKEN, run only on text
     json.loads accepted (one match per string literal) or between two literals, so their
     extract() covers them."""
-    out = {rid: finditer_scan(rx) for rid, _cat, _sev, rx, _desc in rules.CODE_RULES + rules.TEXT_RULES}
+    out = {rid: finditer_scan(rx) for rid, _cat, _sev, rx, _desc, _ctx in
+           rules.CODE_RULES + rules.TEXT_RULES + rules.PROSE_RULES}
     for surface in surfaces.load():
         if surfaces.name_of(surface) == "package_json":
             continue
@@ -157,7 +159,7 @@ def budgeted() -> dict[str, Callable[[str], object]]:
 
 def linear() -> dict[str, Callable[[str], object]]:
     """Held to linear growth: the instruction rules, each surface's extract(), hidden_unicode."""
-    out = {rid: finditer_scan(rx) for rid, _cat, _sev, rx, _desc in rules.INSTRUCTION_RULES}
+    out = {rid: finditer_scan(rx) for rid, _cat, _sev, rx, _desc, _ctx in rules.INSTRUCTION_RULES}
     out.update({f"surface:{surfaces.name_of(s)}": extract_scan(s) for s in surfaces.load()})
     out["unicode"] = hidden_unicode
     out["redact"] = redact.secret_spans

@@ -146,7 +146,7 @@ def _cmd_scan(argv: list[str]) -> int:
     label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or "<text>"
     try:
         if args.text is not None:
-            result.extend(scan_text(args.text, "<text>", args.max_file_bytes))
+            result.extend(scan_text(args.text, "<text>", max_chars=args.max_file_bytes))
         # A config named as a target is audited, never text-scanned: its env values must not show.
         targets, configs = split_configs(args.targets, args.mcp_config)
         for t in _distinct(targets):

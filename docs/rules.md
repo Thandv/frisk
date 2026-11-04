@@ -253,6 +253,18 @@ Run on agent-instruction files only, where the text addresses the agent: `SKILL.
 - Likely false positive: A key-management skill whose stated job is to read a key.
 - On a hit: Reject: an instruction file that tells the agent to read or send key material is an exfiltration attempt.
 
+## Prose rules
+
+Run only where text is scanned as a string in a context (`engine.scan_text`). `tool_description` runs the text rules, `rce.pipe_installer`, `destroy.rm_rf`, `destroy.disk`, `destroy.forkbomb`, [inject.sensitive_path_instruction](#inject.sensitive_path_instruction), the hidden-Unicode check and the rule below; `tool_result` runs the text rules, inject.sensitive_path_instruction and the hidden-Unicode check; `default` (`--text` and frisk-mcp's `scan_text`) runs every code and text rule and the hidden-Unicode check. Files are not scanned with these.
+
+<a id="exfil.secret_paths_prose"></a>
+### exfil.secret_paths_prose
+
+- Severity: `warn` · Category: `exfil` · OWASP LLM Top 10 (2025): LLM02:2025 Sensitive Information Disclosure
+- Matches: The pattern of [exfil.secret_paths](#exfil.secret_paths) (the `.ssh`, `.aws` or `.gnupg` directory, the AWS credentials file, `id_rsa`) in a tool description, where it names a path rather than reading one.
+- Likely false positive: A tool that reports on SSH hosts from `~/.ssh/config` or manages AWS profiles.
+- On a hit: Check that the tool's job needs the path. An instruction to read or send a key from it blocks as inject.sensitive_path_instruction, and the tool is dropped.
+
 ## Hidden characters
 
 Run with the text rules.

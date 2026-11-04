@@ -14,8 +14,8 @@ from . import surfaces, walk
 from .debug import log as _root_log
 from .redact import Redactor
 from .rules import (
-    ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
-    INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
+    ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, CONTEXTS, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, PROSE_RULES,
+    RULE_META, INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
 )
 from .surfaces import Span
 
@@ -121,10 +121,12 @@ def _excerpt(secrets: Redactor, lo: int, hi: int, idx: int, after: int = 80) -> 
 
 
 # Kinds with their own rules; every other kind is a text kind: TEXT_RULES and the hidden-
-# Unicode check. scan_text over its bound splits those two: "window" (the rules on a head
-# or tail window) and "unicode" (the check on the whole text).
+# Unicode check. scan_text runs the rules of its context ("context:<name>") and, as its own
+# span, the hidden-Unicode check ("unicode") on the whole text.
 _RULES_FOR_KIND = {"code": CODE_RULES, "md_inline_code": CODE_RULES, "instruction": INSTRUCTION_RULES,
-                   "window": TEXT_RULES, "unicode": []}
+                   "unicode": [],
+                   **{f"context:{c}": [r for r in CODE_RULES + TEXT_RULES + INSTRUCTION_RULES + PROSE_RULES
+                                       if c in r[5]] for c in CONTEXTS}}
 _WARN_CAPPED_KINDS = {"md_inline_code"}  # a block finding from these spans reports as warn
 
 
@@ -159,7 +161,7 @@ def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Fin
                            source_line=text[starts[line - 1]:end]))
 
     capped = span.kind in _WARN_CAPPED_KINDS
-    for rid, cat, sev, rx, desc in _RULES_FOR_KIND.get(span.kind, TEXT_RULES):
+    for rid, cat, sev, rx, desc, _contexts in _RULES_FOR_KIND.get(span.kind, TEXT_RULES):
         if capped and sev == "block":
             sev = "warn"
         for m in rx.finditer(seg):
@@ -183,21 +185,26 @@ def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
     return sort_findings(out)
 
 
-def scan_text(text: str, label: str = "<text>", max_chars: int = MAX_FILE_BYTES) -> ScanResult:
-    """Scan a raw string as both code and prose (--text, frisk-mcp, the proxy).
+def scan_text(text: str, label: str = "<text>", context: str = "default",
+              max_chars: int = MAX_FILE_BYTES) -> ScanResult:
+    """Scan a raw string with the rules of `context` (rules.CONTEXTS) and the hidden-Unicode
+    check: "default" runs every code and text rule (--text, frisk-mcp); the proxy scans tool
+    descriptions as "tool_description" and what the model reads as "tool_result".
 
     The one truncation policy for every caller: a text longer than `max_chars` has the rules
     run on its first and last max_chars // 2 characters (lines count from the start of the
     whole text), the hidden-Unicode check on all of it, and a coverage.truncated warning, so
     the verdict is never PASS.
     """
+    if context not in CONTEXTS:
+        raise ValueError(f"unknown scan_text context {context!r}; one of {CONTEXTS}")
+    kind = f"context:{context}"
     whole = len(text)
     if whole <= max_chars:
-        findings = _scan_spans(text, [Span(0, whole, "code"), Span(0, whole, "text")], label)
+        findings = _scan_spans(text, [Span(0, whole, kind), Span(0, whole, "unicode")], label)
     else:
         half = max_chars // 2
-        windows = [Span(start, end, kind) for start, end in ((0, half), (whole - half, whole))
-                   for kind in ("code", "window")]
+        windows = [Span(start, end, kind) for start, end in ((0, half), (whole - half, whole))]
         findings = _scan_spans(text, windows + [Span(0, whole, "unicode")], label)
         category, severity, _ = RULE_META["coverage.truncated"]
         findings = sort_findings(findings + [Finding(

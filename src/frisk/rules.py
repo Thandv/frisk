@@ -3,10 +3,14 @@
 All content is treated as UNTRUSTED. Rules are regular expressions matched against
 text; nothing here imports, executes, or evaluates scanned content.
 
-Each rule is a tuple: (id, category, severity, pattern, description), where the pattern
-is a compiled regex or, for destroy.rm_rf, a PerCommand (one match per shell command).
+Each rule is a tuple: (id, category, severity, pattern, description, contexts), where the
+pattern is a compiled regex or, for destroy.rm_rf, a PerCommand (one match per shell
+command), and contexts names the engine.scan_text contexts (CONTEXTS) the rule runs in.
   CODE_RULES run against script files and fenced code blocks in markdown/JSON.
   TEXT_RULES run against the full text of any text/markdown/config file.
+  INSTRUCTION_RULES run against agent-instruction files.
+  PROSE_RULES run in scan_text only, in the contexts they name.
+Files are scanned by these lists, whatever a rule's contexts.
 
 Every pattern scans in linear time: each window between a rule's start and what it must
 find is bounded, and where a window could hold another start of the same rule (so that a
@@ -111,9 +115,26 @@ _RM_TARGET = (r"[\"']?(?:(?:~|\$HOME|\$\{HOME\})[\"']?(?:/[\"']?\.(?:ssh|aws|gnu
               r"[\"']?(?:/?\*|/)?[\"']?(?=[\s;&|)]|$)")
 
 
+# --- scan_text contexts ------------------------------------------------------
+
+# "default": every code and text rule (--text, frisk-mcp). The frisk proxy's: "tool_description"
+# (the text rules, the commands that harm when an agent runs them, and instructions to read
+# or send a credential file; a credential path named in prose only warns) and "tool_result"
+# (the injection and tool-poisoning rules). The hidden-Unicode check runs in all three.
+CONTEXTS = ("default", "tool_description", "tool_result")
+_EVERY = frozenset(CONTEXTS)
+_DEFAULT = frozenset({"default"})
+_NOT_RESULT = frozenset({"default", "tool_description"})
+_NOT_DEFAULT = frozenset({"tool_description", "tool_result"})
+_DESCRIPTION = frozenset({"tool_description"})
+
+_SECRET_PATHS = _r(r"(~|\$HOME)?/?\.(ssh|aws|gnupg)\b|\.aws/credentials|id_rsa\b")
+
+Rule = tuple[str, str, str, "re.Pattern[str] | PerCommand", str, frozenset[str]]
+
 # --- code rules -------------------------------------------------------------
 
-CODE_RULES: list[tuple[str, str, str, re.Pattern[str] | PerCommand, str]] = [
+CODE_RULES: list[Rule] = [
     # Remote code execution / piped installers
     ("rce.pipe_installer", "rce", "block",
      # Piped (lines may continue with a backslash before or after the pipe; the shell may be
@@ -123,40 +144,39 @@ CODE_RULES: list[tuple[str, str, str, re.Pattern[str] | PerCommand, str]] = [
      _r(r"\b(curl|wget)\b(?:(?!\b(?:curl|wget)\b)[^\n|]|\\\n)*\|(?:\s|\\\n)*(?:(?:\S*/)?(?:sudo|env)(?:\s+-\S+)*\s+)*"
         r"(?:\S*/)?(bash|sh|zsh|python[0-9.]*)\b"
         r"|\b(?:bash|sh|zsh)\s+(?:<\(|-c\s+[\"']?\$\()\s*(?:curl|wget)\b"),
-     "pipe-to-shell remote installer (curl|wget ... | sh)"),
+     "pipe-to-shell remote installer (curl|wget ... | sh)", _NOT_RESULT),
     ("rce.eval_b64", "rce", "block",
      # Within 400 characters of the same parentheses, whitespace included (a separate \s*
      # before the window would try the window from every point of a whitespace run); the
      # window stops at another eval( or exec(, which then matches the same decode.
      _r(r"(?<![.\w])(eval|exec)\s*\(" + _not_at(r"(?<![.\w])(?:eval|exec)\s*\(", "e", ")") + "{0,400}"
         r"b(ase)?64[._]?decode"),
-     "execution of base64-decoded payload"),
+     "execution of base64-decoded payload", _DEFAULT),
     ("rce.python_exec", "rce", "block",
      _r(r"(?<![.\w])exec\s*\(|\bos\.system\s*\(|\bos\.popen\s*\(|(?<![.\w])eval\s*\("),
-     "dynamic code/command execution (exec/eval/os.system/os.popen)"),
+     "dynamic code/command execution (exec/eval/os.system/os.popen)", _DEFAULT),
     ("rce.shell_true", "rce", "block",
      # Within 400 characters of the same call; the window stops at another subprocess call,
      # which then matches the same shell=True.
      _r(r"\bsubprocess\.(run|call|check_output|check_call|Popen)\s*\("
         + _not_at(r"\bsubprocess\.(?:run|call|check_output|check_call|Popen)\s*\(", "s", ")") + "{0,400}"
         r"shell\s*=\s*True"),
-     "subprocess with shell=True"),
+     "subprocess with shell=True", _DEFAULT),
     ("rce.shell_eval", "rce", "block",
      _r(r"(^|[;&|]\s*)eval\s+[\"$`]"),
-     "shell eval of dynamic string"),
+     "shell eval of dynamic string", _DEFAULT),
     ("rce.pickle", "rce", "block",
      _r(r"\b(pickle|cPickle|marshal)\.loads?\s*\("),
-     "deserialization of untrusted data (pickle/marshal)"),
+     "deserialization of untrusted data (pickle/marshal)", _DEFAULT),
     ("rce.dynamic_import", "rce", "warn",
      _r(r"\b__import__\s*\(|\bimportlib\.import_module\s*\("),
-     "dynamic import"),
+     "dynamic import", _DEFAULT),
     # Data exfiltration — secrets
-    ("exfil.secret_paths", "exfil", "block",
-     _r(r"(~|\$HOME)?/?\.(ssh|aws|gnupg)\b|\.aws/credentials|id_rsa\b"),
-     "access to credential/key directories (.ssh/.aws/.gnupg/id_rsa)"),
+    ("exfil.secret_paths", "exfil", "block", _SECRET_PATHS,
+     "access to credential/key directories (.ssh/.aws/.gnupg/id_rsa)", _DEFAULT),
     ("exfil.dotenv", "exfil", "warn",
      _r(r"\.env(\.|\b)"),
-     "access to .env file"),
+     "access to .env file", _DEFAULT),
     # Reading a secret from an env var is NORMAL for any tool that authenticates;
     # it's exfiltration only when paired with egress. Warn, don't block.
     ("exfil.secret_env_read", "exfil", "warn",
@@ -164,24 +184,24 @@ CODE_RULES: list[tuple[str, str, str, re.Pattern[str] | PerCommand, str]] = [
      # same name. The lookahead skips positions where no name can begin.
      _r(r"(os\.environ|getenv|process\.env|ENV\[|\$\{?)[^\n$]{0,30}(?=[tsap])"
         r"(TOKEN|SECRET|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|PASSWORD)"),
-     "reads a secret-bearing env var (normal for auth; review only with network egress)"),
+     "reads a secret-bearing env var (normal for auth; review only with network egress)", _DEFAULT),
     ("exfil.secret_name", "exfil", "warn",
      # Case-sensitive: SCREAMING_CASE names only, not ordinary identifiers like access_token.
      re.compile(r"\b[A-Z][A-Z0-9_]{2,}(TOKEN|SECRET|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|PASSWORD)\b"),
-     "mention of a secret-bearing identifier"),
+     "mention of a secret-bearing identifier", _DEFAULT),
     ("exfil.keychain_read", "exfil", "block",
      _r(r"\bsecurity\s+find-(generic|internet)-password\b"),
-     "macOS keychain password read (security find-*-password)"),
+     "macOS keychain password read (security find-*-password)", _DEFAULT),
     ("exfil.keychain_mention", "exfil", "warn",
      _r(r"\bkeychain\b|\bsecurity\s+list-keychains\b"),
-     "keychain reference (non-secret-reading)"),
+     "keychain reference (non-secret-reading)", _DEFAULT),
     # Data exfiltration — network from a script
     ("exfil.net_lib", "exfil", "warn",
      _r(r"\b(requests|urllib|urllib2|httplib|http\.client|aiohttp|httpx)\b"),
-     "network library use inside a script"),
+     "network library use inside a script", _DEFAULT),
     ("exfil.net_tool", "exfil", "warn",
      _r(r"(^|[;&|`$(\s])(nc|netcat|telnet|scp|sftp|rsync)\s"),
-     "network/transfer tool use inside a script"),
+     "network/transfer tool use inside a script", _DEFAULT),
     # Destructive operations
     ("destroy.rm_rf", "destructive", "block",
      # Recursive and force in any spelling (-rf, -fr, -r -f, --recursive --force); the target
@@ -190,20 +210,20 @@ CODE_RULES: list[tuple[str, str, str, re.Pattern[str] | PerCommand, str]] = [
      # quoted. Paths below those, such as temp and build directories, do not match.
      PerCommand(r"\brm\s+(?P<hit>(?=" + _ARGS + r"(?:-[a-z]*r|--recursive\b))(?=" + _ARGS + r"(?:-[a-z]*f|--force\b))"
                 r"(?=" + _ARGS + _RM_TARGET + r"))?" + rf"(?:[^\s;&|]+[ \t]+){{0,{_RM_SKIP}}}"),
-     "recursive force delete of a root, system, home or credential directory"),
+     "recursive force delete of a root, system, home or credential directory", _NOT_RESULT),
     ("destroy.disk", "destructive", "block",
      # dd writing to a device (not the null/zero/stdio sinks), mkfs on a device, or a
      # redirect into a raw disk. dd to a regular file does not match. A run never crosses
      # another dd/mkfs (that one reaches the same target), so the scan stays linear.
      _r(r"\bdd\b(?:(?!\bdd\b)[^\n;&|])*\bof=[\"']?/dev/(?!(?:null|zero|stdout|stderr)\b|fd/)"
         r"|\bmkfs(?:\.\w+)?\b(?:(?!\bmkfs(?:\.\w+)?\b)[^\n;&|])*\s[\"']?/dev/|>\s*/dev/sd|>\s*/dev/disk"),
-     "raw disk write / format"),
+     "raw disk write / format", _NOT_RESULT),
     ("destroy.forkbomb", "destructive", "block",
      _r(r":\(\)\s*\{\s*:\|:&\s*\}\s*;:"),
-     "fork bomb"),
+     "fork bomb", _NOT_RESULT),
     ("destroy.chmod_777", "destructive", "warn",
      _r(r"\bchmod\s+(-R\s+)?0?777\b"),
-     "world-writable chmod 777"),
+     "world-writable chmod 777", _DEFAULT),
 ]
 
 # --- text rules (prose, markdown, JSON tool descriptions, config) -----------
@@ -211,19 +231,19 @@ CODE_RULES: list[tuple[str, str, str, re.Pattern[str] | PerCommand, str]] = [
 _EXFIL_VERBS = r"sends?|sending|sent|posts?|posted|posting|exfiltrat(?:e|es|ed|ing)|uploads?|uploaded|uploading"
 _BEFORE_TO = _not_at(r"\b(?:" + _EXFIL_VERBS + r")\b", "speu", r"\n")
 
-TEXT_RULES = [
+TEXT_RULES: list[Rule] = [
     ("inject.ignore_prev", "injection", "block",
      _r(r"\bignore\s+(all\s+|the\s+)?(previous|prior|above|preceding)\s+(instructions|prompts?|context)"),
-     "prompt-injection: 'ignore previous instructions'"),
+     "prompt-injection: 'ignore previous instructions'", _EVERY),
     ("inject.disregard", "injection", "block",
      _r(r"\bdisregard\s+(all\s+|the\s+)?(previous|prior|above|system)\b"),
-     "prompt-injection: 'disregard the above/system'"),
+     "prompt-injection: 'disregard the above/system'", _EVERY),
     ("inject.fake_tool", "injection", "warn",
      _r(r"<\s*(function_calls|tool_call|invoke|antml:)"),
-     "embedded fake tool-call / function-call markup"),
+     "embedded fake tool-call / function-call markup", _EVERY),
     ("inject.role_override", "injection", "warn",
      _r(r"<\|im_start\|>\s*system|<\|system\|>"),
-     "embedded chat-template system role override"),
+     "embedded chat-template system role override", _EVERY),
     ("inject.exfil_instr", "injection", "warn",
      # Any inflection of the verb; at most one newline in the match, so never a blank line.
      # The text just before 'to', on its line, stops at another of these verbs, which then
@@ -232,23 +252,23 @@ TEXT_RULES = [
      _r(r"\b(" + _EXFIL_VERBS + r")\b(?:" + _BEFORE_TO + r"{0,40}\bto\b(?:[^\n]{0,40}\n)?[^\n]{0,45}"
         r"|[^\n]{0,40}\n" + _BEFORE_TO + r"{0,40}\bto\b[^\n]{0,45})"
         r":(?:(?<=https:)|(?<=http:))//"),
-     "instruction to send data to an external URL"),
+     "instruction to send data to an external URL", _EVERY),
     # --- MCP tool-poisoning patterns (hidden directives in tool descriptions) ---
     ("inject.hide_from_user", "tool-poisoning", "block",
      _r(r"\bdo\s+not\s+(tell|inform|mention|reveal|notify|show)\b[^\n]{0,30}\b(the\s+)?user\b"),
-     "tool-poisoning: instruction to hide an action from the user"),
+     "tool-poisoning: instruction to hide an action from the user", _EVERY),
     ("inject.hidden_important", "tool-poisoning", "warn",
      _r(r"<\s*important\s*>|<\s*secret\s*>|<\s*system[_-]?note\s*>"),
-     "tool-poisoning: hidden <IMPORTANT>/<SECRET> directive block in description"),
+     "tool-poisoning: hidden <IMPORTANT>/<SECRET> directive block in description", _EVERY),
     ("inject.before_using", "tool-poisoning", "warn",
      _r(r"\bbefore\s+(using|calling|invoking|you\s+use)\b[^\n]{0,40}\b(tool|function|this)\b"),
-     "tool-poisoning: side-effect instruction prefixed to a tool description"),
+     "tool-poisoning: side-effect instruction prefixed to a tool description", _EVERY),
     ("inject.read_then_send", "tool-poisoning", "warn",
      # Up to 40 characters on the line; the window stops at another read/cat/open, which
      # then matches the same file.
      _r(r"\b(read|cat|open)\b" + _not_at(r"\b(?:read|cat|open)\b", "rco", r"\n") + "{0,40}"
         r"\b(\.ssh|\.aws|\.env\b|id_rsa|credentials)\b"),
-     "tool-poisoning: instruction to read sensitive files"),
+     "tool-poisoning: instruction to read sensitive files", _EVERY),
 ]
 
 # --- instruction rules (agent-instruction files only: see surfaces/instructions.py) ------
@@ -265,11 +285,20 @@ _UNNEGATED_CLAUSE = r"(?:^|(?<=[.!?;:]))(?:(?!\b(?:never|not|no|avoid)\b|n['\u20
 # reaches the location of the next, which may be a defensive "never read ~/.ssh".
 _SAME_SENTENCE = r"(?:[^\n.!?;]|[.!?;](?=\S)){0,60}?"
 
-INSTRUCTION_RULES = [
+INSTRUCTION_RULES: list[Rule] = [
     ("inject.sensitive_path_instruction", "injection", "block",
      re.compile(_UNNEGATED_CLAUSE + r"\b(?:copy|send|upload|read|cat|include|attach|print)\b" + _SAME_SENTENCE
                 + _CREDENTIAL_LOCATION, re.IGNORECASE | re.MULTILINE),
-     "instruction to the agent to copy, read or send a credential file"),
+     "instruction to the agent to copy, read or send a credential file", _NOT_DEFAULT),
+]
+
+# --- prose rules (scan_text only: see CONTEXTS) ------------------------------------
+
+PROSE_RULES: list[Rule] = [
+    # exfil.secret_paths' pattern, at warn: a tool that says it reads ~/.ssh/config names a
+    # path; an instruction to read or send a key is inject.sensitive_path_instruction (block).
+    ("exfil.secret_paths_prose", "exfil", "warn", _SECRET_PATHS,
+     "names a credential/key directory (.ssh/.aws/.gnupg/id_rsa) in a tool description", _DESCRIPTION),
 ]
 
 # Suspicious invisible / control characters used to hide instructions:
@@ -412,7 +441,8 @@ def owasp_for(category: str) -> str:
 # Every rule id frisk can report -> (category, severity, description). docs/rules.md has
 # one section per id (tests/test_rules_doc.py keeps them in step).
 RULE_META: dict[str, tuple[str, str, str]] = {
-    **{rid: (cat, sev, desc) for rid, cat, sev, _rx, desc in CODE_RULES + TEXT_RULES + INSTRUCTION_RULES},
+    **{rid: (cat, sev, desc) for rid, cat, sev, _rx, desc, _ctx in CODE_RULES + TEXT_RULES + INSTRUCTION_RULES
+       + PROSE_RULES},
     **{rid: (cat, sev, desc) for rid, cat, sev, desc in UNICODE_RULES},
     **{rid: (cat, sev, desc) for rid, cat, sev, desc in COVERAGE_RULES},
 }
