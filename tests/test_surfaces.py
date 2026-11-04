@@ -98,7 +98,8 @@ class TestFileRelativeLines(unittest.TestCase):
 class TestDiscovery(unittest.TestCase):
     def test_real_package_lists_exactly_the_shipped_surfaces(self) -> None:
         self.assertEqual([surfaces.name_of(m) for m in surfaces.load()],
-                         ["build_recipes", "fences", "instructions", "markdown", "package_json", "plain"])
+                         ["build_recipes", "fences", "instructions", "json_values", "markdown", "package_json",
+                          "plain"])
 
     def test_discover_picks_up_a_new_module_in_a_temp_package(self) -> None:
         pkg = "frisk_tmp_surfaces_pkg"

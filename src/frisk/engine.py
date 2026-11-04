@@ -14,8 +14,8 @@ from . import surfaces, walk
 from .debug import log as _root_log
 from .redact import Redactor
 from .rules import (
-    ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, RULE_META,
-    INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
+    ARCHIVE_EXTS, CODE_EXTS, CODE_RULES, CONTEXTS, EXECUTABLE_EXTS, MEDIA_EXTS, OPAQUE_DATA_EXTS, PROSE_RULES,
+    RULE_META, INSTRUCTION_RULES, TEXT_EXTS, TEXT_RULES, executable_magic, hidden_unicode,
 )
 from .surfaces import Span
 
@@ -113,49 +113,61 @@ def _line_starts(text: str) -> list[int]:
     return [0] + [m.end() for m in _NEWLINE.finditer(text)]
 
 
-def _excerpt(secrets: Redactor, span: Span, idx: int, after: int = 80) -> str:
-    """The text around offset `idx` (10 characters before, `after` from it), inside the span,
+def _excerpt(secrets: Redactor, lo: int, hi: int, idx: int, after: int = 80) -> str:
+    """The text around offset `idx` (10 characters before, `after` from it), inside [lo, hi),
     with its secrets masked."""
-    snippet = secrets.window(max(span.start, idx - 10), min(span.end, idx + after)).replace("\n", "\\n")
+    snippet = secrets.window(max(lo, idx - 10), min(hi, idx + after)).replace("\n", "\\n")
     return snippet.strip()[:120]
 
 
 # Kinds with their own rules; every other kind is a text kind: TEXT_RULES and the hidden-
-# Unicode check. scan_text over its bound splits those two: "window" (the rules on a head
-# or tail window) and "unicode" (the check on the whole text).
+# Unicode check. scan_text runs the rules of its context ("context:<name>") and, as its own
+# span, the hidden-Unicode check ("unicode") on the whole text.
 _RULES_FOR_KIND = {"code": CODE_RULES, "md_inline_code": CODE_RULES, "instruction": INSTRUCTION_RULES,
-                   "window": TEXT_RULES, "unicode": []}
+                   "unicode": [],
+                   **{f"context:{c}": [r for r in CODE_RULES + TEXT_RULES + INSTRUCTION_RULES + PROSE_RULES
+                                       if c in r[5]] for c in CONTEXTS}}
 _WARN_CAPPED_KINDS = {"md_inline_code"}  # a block finding from these spans reports as warn
 
 
 def _scan_span(text: str, span: Span, starts: list[int], rel: str, out: list[Finding],
-               seen: set[tuple[int, str]], secrets: Redactor) -> None:
-    """Run the span's rules on text[span.start:span.end]; lines are file lines.
+               seen: set[tuple[int, str]], on_line: set[tuple[int, str]], secrets: Redactor) -> None:
+    """Run the span's rules on text[span.start:span.end] (or on span.text, when the span
+    carries its content); lines are file lines.
 
     The span is matched as its own string (so ^, lookbehinds and word boundaries see the
     span's edges, as they always have) and its excerpts stay inside it; offsets are
     shifted by span.start and mapped to a line through the file's line index. A rule that
     matched at the same file offset in an earlier, overlapping span is reported once.
+    A span with its own text reports every finding at span.start's line, and not at all
+    where that line already has a finding of the same rule.
     """
-    seg = text if (span.start, span.end) == (0, len(text)) else text[span.start:span.end]
+    decoded = span.text is not None
+    if span.text is not None:
+        seg, lo, hi, shift, words = span.text, 0, len(span.text), 0, Redactor(span.text)
+    else:
+        seg = text if (span.start, span.end) == (0, len(text)) else text[span.start:span.end]
+        lo, hi, shift, words = span.start, span.end, span.start, secrets
 
     def add(idx: int, rid: str, cat: str, sev: str, desc: str, excerpt: str) -> None:
-        if (span.start + idx, rid) in seen:
+        at = span.start if decoded else span.start + idx
+        line = bisect_right(starts, at)
+        if ((line, rid) in on_line) if decoded else ((at, rid) in seen):
             return
-        seen.add((span.start + idx, rid))
-        line = bisect_right(starts, span.start + idx)
+        seen.add((at, rid))
+        on_line.add((line, rid))
         end = starts[line] - 1 if line < len(starts) else len(text)
         out.append(Finding(rel, line, rid, cat, sev, desc, excerpt,
                            source_line=text[starts[line - 1]:end]))
 
     capped = span.kind in _WARN_CAPPED_KINDS
-    for rid, cat, sev, rx, desc in _RULES_FOR_KIND.get(span.kind, TEXT_RULES):
+    for rid, cat, sev, rx, desc, _contexts in _RULES_FOR_KIND.get(span.kind, TEXT_RULES):
         if capped and sev == "block":
             sev = "warn"
         for m in rx.finditer(seg):
-            add(m.start(), rid, cat, sev, desc, _excerpt(secrets, span, span.start + m.start()))
+            add(m.start(), rid, cat, sev, desc, _excerpt(words, lo, hi, shift + m.start()))
     if span.kind not in _RULES_FOR_KIND or span.kind == "unicode":  # every text kind
-        for idx, rid, desc in hidden_unicode(seg, span.start == 0):
+        for idx, rid, desc in hidden_unicode(seg, span.start == 0 and not decoded):
             cat, sev, _ = RULE_META[rid]
             add(idx, rid, cat, sev, desc, "")
 
@@ -164,28 +176,35 @@ def _scan_spans(text: str, spans: list[Span], rel: str) -> list[Finding]:
     starts = _line_starts(text)
     out: list[Finding] = []
     seen: set[tuple[int, str]] = set()
+    on_line: set[tuple[int, str]] = set()
     secrets = Redactor(text)
-    # Capped spans go last, so a match also found by an uncapped span keeps its severity.
-    for span in sorted(spans, key=lambda s: s.kind in _WARN_CAPPED_KINDS):
-        _scan_span(text, span, starts, rel, out, seen, secrets)
+    # Capped spans go after the others, so a match also found by an uncapped span keeps its
+    # severity; spans with their own text go last, so the file's own offsets come first.
+    for span in sorted(spans, key=lambda s: (s.text is not None, s.kind in _WARN_CAPPED_KINDS)):
+        _scan_span(text, span, starts, rel, out, seen, on_line, secrets)
     return sort_findings(out)
 
 
-def scan_text(text: str, label: str = "<text>", max_chars: int = MAX_FILE_BYTES) -> ScanResult:
-    """Scan a raw string as both code and prose (--text, frisk-mcp, the proxy).
+def scan_text(text: str, label: str = "<text>", context: str = "default",
+              max_chars: int = MAX_FILE_BYTES) -> ScanResult:
+    """Scan a raw string with the rules of `context` (rules.CONTEXTS) and the hidden-Unicode
+    check: "default" runs every code and text rule (--text, frisk-mcp); the proxy scans tool
+    descriptions as "tool_description" and what the model reads as "tool_result".
 
     The one truncation policy for every caller: a text longer than `max_chars` has the rules
     run on its first and last max_chars // 2 characters (lines count from the start of the
     whole text), the hidden-Unicode check on all of it, and a coverage.truncated warning, so
     the verdict is never PASS.
     """
+    if context not in CONTEXTS:
+        raise ValueError(f"unknown scan_text context {context!r}; one of {CONTEXTS}")
+    kind = f"context:{context}"
     whole = len(text)
     if whole <= max_chars:
-        findings = _scan_spans(text, [Span(0, whole, "code"), Span(0, whole, "text")], label)
+        findings = _scan_spans(text, [Span(0, whole, kind), Span(0, whole, "unicode")], label)
     else:
         half = max_chars // 2
-        windows = [Span(start, end, kind) for start, end in ((0, half), (whole - half, whole))
-                   for kind in ("code", "window")]
+        windows = [Span(start, end, kind) for start, end in ((0, half), (whole - half, whole))]
         findings = _scan_spans(text, windows + [Span(0, whole, "unicode")], label)
         category, severity, _ = RULE_META["coverage.truncated"]
         findings = sort_findings(findings + [Finding(

@@ -9,7 +9,7 @@ Severity: **block** fails a scan by default; **warn** fails only with `--fail-on
 
 ## Code rules
 
-Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks (` ``` ` or `~~~`, any length; an unclosed fence runs to the end of the file) in every other text file, on indented code blocks and inline code spans in markdown (`.md`, `.markdown`, `.mdc`), and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command.
+Run on script files (`.py`, `.sh`, `.js`, `.tsx` and the other code extensions, or any file whose first line is a `#!` shebang), on fenced code blocks (` ``` ` or `~~~`, any length; an unclosed fence runs to the end of the file) in every other text file, on indented code blocks and inline code spans in markdown (`.md`, `.markdown`, `.mdc`), and on the shell commands in build files: Makefile recipe lines (`Makefile`, `GNUmakefile`, `*.mk`), Dockerfile `RUN` instructions (`Dockerfile`, `Dockerfile.*`, `*.dockerfile`), justfile recipe lines and the `scripts` values of `package.json`. Backslash-continued lines belong to their command. In a `.json` file, the decoded value of a `command`, `run`, `script`, `shell` or `exec` key (an array of strings under one is joined with spaces), an `args` array joined after its object's `command`, and any other string value holding a shell pipeline are code too; a finding is reported at the line of the string (for a join, of the command).
 
 Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md` or `.markdown` that is not an agent-instruction file) report a code rule at most as `warn`: a document that mentions a risky call by name is not running it. In agent-instruction files (see [inject.sensitive_path_instruction](#inject.sensitive_path_instruction) for the list) and in fenced or indented code blocks everywhere, code rules keep the severity listed below. Text rules keep their severity in every form.
 
@@ -167,7 +167,7 @@ Inline code spans in an ordinary markdown document (a README, `docs/`, any `.md`
 
 ## Text rules
 
-Run on the full text of every file frisk reads, code files included, and on `--text` input. Markdown HTML comments, which renderers hide, are text-scanned like everything else.
+Run on the full text of every file frisk reads, code files included, and on `--text` input. Markdown HTML comments, which renderers hide, are text-scanned like everything else. Each string of a `.json` file written with a backslash escape is also scanned as the text it decodes to, and reported at its line.
 
 <a id="inject.ignore_prev"></a>
 ### inject.ignore_prev
@@ -252,6 +252,26 @@ Run on agent-instruction files only, where the text addresses the agent: `SKILL.
 - Matches: An imperative verb (copy, send, upload, read, cat, include, attach or print) followed within 60 characters, in the same sentence, by a credential location: the `.ssh` directory or an `id_rsa`/`id_ed25519`-style private key (not a `.pub` key, `.ssh/config` or `known_hosts`), the AWS credentials file, the gcloud or Azure config directory, the `.gnupg` directory, a private key or the keychain. A clause that negates the verb first (never, not, no, avoid, don't) does not match, so a defensive "never read the SSH key" passes, also after an imperative sentence such as "Read the README."
 - Likely false positive: A key-management skill whose stated job is to read a key.
 - On a hit: Reject: an instruction file that tells the agent to read or send key material is an exfiltration attempt.
+
+## Prose rules
+
+Run only where text is scanned as a string in a context (`engine.scan_text`). `frisk proxy` scans tool definitions, prompt and resource listing entries, the server's `instructions` and elicitation requests (the server's own text to the user) as `tool_description`, and everything else the model reads (tool results and their structured content, `prompts/get` messages, `resources/read` contents, error answers, sampling requests) as `tool_result`. `tool_description` runs the text rules, `rce.pipe_installer`, `exfil.keychain_read`, `destroy.rm_rf`, `destroy.disk`, `destroy.forkbomb`, [inject.sensitive_path_instruction](#inject.sensitive_path_instruction), the hidden-Unicode check and the two rules below; `tool_result` runs the text rules, inject.sensitive_path_instruction, `rce.pipe_installer`, `exfil.keychain_read`, `destroy.rm_rf`, `destroy.disk`, `destroy.forkbomb` and the hidden-Unicode check (no other code rule: a result may quote code, such as a file that calls `eval`); `default` (`--text` and frisk-mcp's `scan_text`) runs every code and text rule and the hidden-Unicode check. Files are not scanned with these.
+
+<a id="exfil.secret_paths_prose"></a>
+### exfil.secret_paths_prose
+
+- Severity: `warn` · Category: `exfil` · OWASP LLM Top 10 (2025): LLM02:2025 Sensitive Information Disclosure
+- Matches: The pattern of [exfil.secret_paths](#exfil.secret_paths) (the `.ssh`, `.aws` or `.gnupg` directory, the AWS credentials file, `id_rsa`) in a tool description, where it names a path rather than reading one.
+- Likely false positive: A tool that reports on SSH hosts from `~/.ssh/config` or manages AWS profiles.
+- On a hit: Check that the tool's job needs the path. An instruction to read or send a key from it blocks as inject.sensitive_path_instruction, and a private key or credential file named in the description blocks as [exfil.secret_files_prose](#exfil.secret_files_prose); either way the tool is dropped.
+
+<a id="exfil.secret_files_prose"></a>
+### exfil.secret_files_prose
+
+- Severity: `block` · Category: `exfil` · OWASP LLM Top 10 (2025): LLM02:2025 Sensitive Information Disclosure
+- Matches: A private key or credential file in a tool description: `id_rsa`, `id_dsa`, `id_ecdsa` or `id_ed25519` (not the `.pub` public key), the AWS credentials file, or the `.gnupg` directory, however the description asks for it (an instruction that uses another verb than inject.sensitive_path_instruction's, or a negation word such as "don't forget to", is still caught).
+- Likely false positive: A key-management tool that names the key file it generates or rotates.
+- On a hit: The tool is dropped. Keep it only if handling that exact file is the tool's stated purpose, and the server is one you trust.
 
 ## Hidden characters
 

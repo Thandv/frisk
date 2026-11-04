@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
-from . import pkgcache
+from . import jsonread, pkgcache
 from .debug import log as _root_log, ms_since, redact
 from .rules import CODE_EXTS
 
@@ -637,7 +637,7 @@ def parse_mcp_config(path: str | Path) -> list[ServerRef]:
     A config whose top level, mcpServers, projects or project entry is not a JSON object
     raises ValueError: frisk cannot tell which servers it holds.
     """
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = jsonread.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: the top level is not a JSON object")
     refs = [_server(name, spec) for name, spec in _servers(data, path).items()]
@@ -820,7 +820,7 @@ def looks_like_mcp_config(path: str | Path) -> bool:
         return True
     if p.suffix == ".json" and p.is_file():
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            data = jsonread.loads(p.read_text(encoding="utf-8"))
             return isinstance(data, dict) and "mcpServers" in data
         except Exception as e:
             log.debug("not an MCP config (unreadable JSON) error=%s", type(e).__name__)

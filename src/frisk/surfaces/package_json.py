@@ -18,7 +18,7 @@ _COLON = re.compile(r"\s*:\s*")
 def extract(path: Path, text: str) -> list[Span]:
     if path.name != "package.json":
         return []
-    data = json.loads(text)
+    data = json.loads(text, parse_int=str)  # its numbers are never used (see json_values)
     scripts = data.get("scripts") if isinstance(data, dict) else None
     if not isinstance(scripts, dict):
         return []

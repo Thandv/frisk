@@ -56,8 +56,12 @@ whatever the name — and on the shell commands inside other files: fenced code 
 inline code (in an ordinary document such as a README, inline code at most warns; it blocks
 in agent-instruction files, and code blocks block everywhere),
 Makefile recipes, Dockerfile `RUN` instructions, justfile recipes and `package.json`
-`scripts`. Text rules (injection, tool poisoning, hidden Unicode) run on every file,
-including markdown HTML comments that a renderer hides.
+`scripts`, and in any `.json` file (`hooks/hooks.json`, `.mcp.json`, ...) the value of a
+`command`, `run`, `script`, `shell` or `exec` key, an `args` array joined after its
+`command`, and any string holding a shell pipeline. Text rules (injection, tool poisoning,
+hidden Unicode) run on every file, including markdown HTML comments that a renderer hides,
+and on each `.json` string as it decodes, so `\u` escapes hide nothing; a `.json` file that
+does not parse is still text-scanned and raises a `coverage.surface_error` warning.
 
 Every rule id, its severity, what it matches and what to do about a hit:
 [docs/rules.md](docs/rules.md).
@@ -473,7 +477,16 @@ Wrap the server command in your client config:
 ```
 
 The proxy launches the real server, relays the protocol, and inspects every
-server-to-client message by its shape:
+server-to-client message by its shape. Tool definitions, prompt and resource listing entries,
+the server's `instructions` and its elicitation requests are scanned as descriptions: the text rules, hidden Unicode,
+pipe-to-shell, destructive and keychain-reading commands, instructions to read or send a
+credential file, and a private key or credential file named at all (`exfil.secret_files_prose`);
+a credential directory or config file only named, as in a tool that reads `~/.ssh/config`,
+warns (`exfil.secret_paths_prose`). Everything else the model reads (and sampling requests) is scanned as
+a result: the injection and tool-poisoning rules, instructions to read or send a credential
+file (`inject.sensitive_path_instruction`), pipe-to-shell, destructive and keychain-reading
+commands, and hidden Unicode, but no other code rule, so code in a result (a file that calls
+`eval`) is not mistaken for an attack ([prose rules](docs/rules.md#prose-rules)).
 - a tool with a **block**-level finding in its name, `title`, description, input or output
   schema or `annotations`, or too long to scan whole (over 2 MiB characters), is
   **dropped** (the model never sees it); so is a prompt or resource in a `prompts/list`,
@@ -522,7 +535,11 @@ stops reading (`client gone`), or on SIGTERM or SIGINT. The proxy exits with the
 status (128 + the signal number if a signal ended it). A server command that cannot be
 started, or a `--log` file that cannot be opened, is one line on stderr and exit code 2.
 
-Events are logged to stderr (add `--log frisk-proxy.log` to keep a file).
+Events are logged to stderr (add `--log frisk-proxy.log` to keep a file). A log line names
+the tool or entry, the rule id of its worst finding and how many findings there were
+(`BLOCKED tool 'x': inject.ignore_prev (2 findings)`), never the text of a description,
+result or request; a flagged tool's description is prefixed with that finding's description
+and rule id.
 
 <a id="proxy-pins"></a>
 **Pins.** Each tool is pinned by sha256 of the canonical JSON (sorted keys, compact) of its
