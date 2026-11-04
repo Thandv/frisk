@@ -477,7 +477,13 @@ Wrap the server command in your client config:
 ```
 
 The proxy launches the real server, relays the protocol, and inspects every
-server-to-client message by its shape:
+server-to-client message by its shape. Tool definitions, prompt and resource listing entries
+and the server's `instructions` are scanned as descriptions: the text rules, hidden Unicode,
+pipe-to-shell and destructive commands, and instructions to read or send a credential file
+(a credential path only named, as in a tool that reads `~/.ssh/config`, warns:
+`exfil.secret_paths_prose`). Everything else the model reads is scanned as a result: the
+injection and tool-poisoning rules and hidden Unicode, so code in a result (a file that calls
+`eval`) is not mistaken for an attack ([prose rules](docs/rules.md#prose-rules)).
 - a tool with a **block**-level finding in its name, `title`, description, input or output
   schema or `annotations`, or too long to scan whole (over 2 MiB characters), is
   **dropped** (the model never sees it); so is a prompt or resource in a `prompts/list`,
@@ -526,7 +532,11 @@ stops reading (`client gone`), or on SIGTERM or SIGINT. The proxy exits with the
 status (128 + the signal number if a signal ended it). A server command that cannot be
 started, or a `--log` file that cannot be opened, is one line on stderr and exit code 2.
 
-Events are logged to stderr (add `--log frisk-proxy.log` to keep a file).
+Events are logged to stderr (add `--log frisk-proxy.log` to keep a file). A log line names
+the tool or entry, the rule id of its worst finding and how many findings there were
+(`BLOCKED tool 'x': inject.ignore_prev (2 findings)`), never the text of a description,
+result or request; a flagged tool's description is prefixed with that finding's description
+and rule id.
 
 <a id="proxy-pins"></a>
 **Pins.** Each tool is pinned by sha256 of the canonical JSON (sorted keys, compact) of its
