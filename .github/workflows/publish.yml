@@ -1,25 +1,76 @@
 name: publish
-# Publishes to PyPI automatically when you cut a GitHub Release — no token needed.
-# Uses PyPI Trusted Publishing (OIDC). One-time setup on PyPI:
-#   https://pypi.org/manage/project/frisk-scan/settings/publishing/
-#   Add a publisher:  owner=Thandv  repo=frisk  workflow=publish.yml
+# Runs only when the owner publishes a GitHub Release (RELEASING.md): the suite, then a check
+# that the tag is 'v' + __version__, a build and twine check, then the PyPI upload (trusted
+# publishing, environment pypi, with attestations) and dist/* attached to the Release.
+# The PyPI trusted publisher and the pypi environment are one-time owner setup (RELEASING.md).
 on:
   release:
     types: [published]
 
 permissions:
   contents: read
-  id-token: write        # required for trusted publishing
 
 jobs:
-  pypi-publish:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install build
+          python-version: "3.13"
+      - name: scripts/verify.sh
+        env:
+          FRISK_MIN_PYTHONS: "1"
+        run: FRISK_VERIFY_PYTHONS="$(command -v python)" bash scripts/verify.sh
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: The release tag is v + __version__
+        run: python scripts/check_tag_version.py "$GITHUB_REF_NAME"
+      - run: python -m pip install build twine
       - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write   # trusted publishing (OIDC) and attestations; this job only
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+
+  release-assets:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # gh release upload; this job only
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Attach dist/* to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY"

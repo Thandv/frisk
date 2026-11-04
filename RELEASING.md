@@ -33,3 +33,23 @@ Switching Foreman's admission scanner on is a separate owner act, done later and
 Foreman runs `frisk-scan --stdin --json` when a `frisk-scan` command is on its PATH. The
 owner makes that command as a small wrapper around the installed `frisk`; the template is
 `scripts/foreman-frisk-scan.sh`, which frisk installs nowhere.
+
+## One-time setup before the first workflow release (owner-only)
+
+`.github/workflows/publish.yml` has never run. Publishing a GitHub Release starts it: a
+`test` job (`scripts/verify.sh`), then `build` (`scripts/check_tag_version.py` checks that
+the tag is `v` + `__version__`, then `python -m build` and `twine check`), then `publish`
+(PyPI, through trusted publishing, with attestations) and `release-assets` (attaches
+`dist/*` to the Release). Before the first one:
+
+1. **GitHub environment.** In the repository's Settings → Environments, create an
+   environment named `pypi`. Optionally require the owner's approval and limit it to tags
+   matching `v*`, so a publish waits for a click.
+2. **PyPI trusted publisher.** On PyPI, in the `frisk-scan` project's Publishing settings,
+   add a GitHub publisher with owner `Thandv`, repository `frisk`, workflow `publish.yml`
+   and environment `pypi`. No API token is stored anywhere.
+3. **The old publisher.** If a publisher was added earlier without an environment, remove
+   it, so only this workflow and environment can upload.
+
+The `publish` job alone gets `id-token: write` (for the trusted publisher and the
+attestations) and `release-assets` alone gets `contents: write`; every other job reads only.
