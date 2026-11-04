@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import time
+from typing import Callable
 from collections import Counter
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def _summary(result: ScanResult, source: str) -> str:
     scanned when coverage is incomplete."""
     findings = result.findings
     top = sorted(findings, key=lambda f: 0 if f.severity == "block" else 1)[:12]
-    payload = {
+    payload: dict[str, object] = {
         "source": source,
         "verdict": verdict(findings),
         "worst_severity": worst_severity(findings),
@@ -176,7 +177,8 @@ def _call(rid: object, params: dict) -> dict:
         return _error(rid, INVALID_PARAMS, f"unknown tool: {name!r}")
     t0 = time.monotonic()
     try:
-        text = str(TOOLS[name][0](**args))
+        tool: Callable[..., object] = TOOLS[name][0]
+        text = str(tool(**args))
     except TOOL_ERRORS as e:
         log.debug("tool end name=%s status=error error=%s ms=%d", name, type(e).__name__, ms_since(t0))
         return {"jsonrpc": "2.0", "id": rid,

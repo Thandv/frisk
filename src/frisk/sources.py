@@ -337,8 +337,8 @@ def _classify_command(name: str, spec: dict, cmd: str, project: Path | None) -> 
     if base == "uv":
         return _classify_uv(name, args, cwd)
     if base in ("npx", "uvx", "pipx"):
-        spec = _package_spec(base, args)
-        return _unpinned(_cached_package(name, base, spec or cmd), base, spec)
+        pkg_spec = _package_spec(base, args)
+        return _unpinned(_cached_package(name, base, pkg_spec or cmd), base, pkg_spec)
     if base in _PKG_RUNNERS:
         pkg = next((a for a in args if not a.startswith("-")), "")
         return _package(name, _PKG_RUNNERS[base], pkg or cmd)

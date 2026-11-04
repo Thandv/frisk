@@ -57,7 +57,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Callable, TextIO
+from typing import IO, Callable, TextIO
 
 from . import jsonread
 from .debug import log as _root_log, ms_since
@@ -201,7 +201,7 @@ class Proxy:
         self.stats = {"dropped": 0, "flagged": 0}
         # Where a refusal of a server request is written: the server's stdin while run()
         # relays (shared with the client->server thread, so writes take the lock).
-        self.server_in: TextIO | None = None
+        self.server_in: IO[str] | None = None
         self._server_lock = threading.Lock()
 
     def _log(self, msg: str) -> None:

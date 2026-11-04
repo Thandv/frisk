@@ -28,7 +28,7 @@ def fence_blocks(text: str) -> list[tuple[int, int, int, int]]:
     A block closes at the first later line holding only the same fence character, at
     least as many times as it opened; an unclosed block runs to the end of the text.
     """
-    blocks = []
+    blocks: list[tuple[int, int, int, int]] = []
     pos = 0
     while True:
         m = _OPEN.search(text, pos)
