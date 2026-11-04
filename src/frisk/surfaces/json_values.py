@@ -65,9 +65,25 @@ def _owner(frame: _Frame | None) -> str | None:
 def extract(path: Path, text: str) -> list[Span]:
     if path.suffix.lower() != ".json":
         return []
+    strings, commands = _walk(path, text)
+    return ([Span(lit.start, lit.end, "text", lit.value) for lit in strings if lit.escaped]
+            + [_code(parts) for parts in commands])
+
+
+def literals(path: Path, text: str) -> list[tuple[int, int, bool]]:
+    """(start, end, scanned as a command) for each string literal of the JSON `text`, in order;
+    raises ValueError when it is not JSON (context.py labels JSON by this)."""
+    strings, commands = _walk(path, text)
+    command = {lit.start for parts in commands for lit in parts}
+    return [(lit.start, lit.end, lit.start in command) for lit in strings]
+
+
+def _walk(path: Path, text: str) -> tuple[list[_Literal], list[list[_Literal]]]:
+    """Every string literal, and the commands: each the literals it joins, command first."""
     json.loads(text)
     package = path.name == "package.json"
-    spans: list[Span] = []
+    strings: list[_Literal] = []
+    commands: list[list[_Literal]] = []
     stack: list[_Frame] = []
     for m in _TOKEN.finditer(text):
         tok = m.group()
@@ -75,24 +91,23 @@ def extract(path: Path, text: str) -> list[Span]:
         if tok in ("{", "["):
             stack.append(_Frame(tok == "{", _owner(top)))
         elif tok in ("}", "]"):
-            _close(stack.pop(), stack[-1] if stack else None, spans)
+            _close(stack.pop(), stack[-1] if stack else None, commands)
         elif tok == ",":
             if top is not None and top.is_object:
                 top.expect_key = True
         elif tok != ":":
             escaped = "\\" in tok
             lit = _Literal(m.start(), m.end(), json.loads(tok) if escaped else tok[1:-1], escaped)
-            if lit.escaped:
-                spans.append(Span(lit.start, lit.end, "text", lit.value))
+            strings.append(lit)
             if top is not None and top.is_object and top.expect_key:
                 top.value_key, top.expect_key = lit.value, False
             else:
-                _value(lit, top, package, spans)
-    return spans
+                _value(lit, top, package, commands)
+    return strings, commands
 
 
-def _value(lit: _Literal, top: _Frame | None, package: bool, spans: list[Span]) -> None:
-    """A string value: code when its key says so or it holds a pipeline (in package.json,
+def _value(lit: _Literal, top: _Frame | None, package: bool, commands: list[list[_Literal]]) -> None:
+    """A string value: a command when its key says so or it holds a pipeline (in package.json,
     when it is a script). The strings of an array under a code key or args are kept for the
     join instead."""
     key = _owner(top)
@@ -106,25 +121,26 @@ def _value(lit: _Literal, top: _Frame | None, package: bool, spans: list[Span]) 
     else:
         command = key in CODE_KEYS or _PIPE.search(lit.value) is not None
     if command:
-        spans.append(_code([lit]))
+        commands.append([lit])
 
 
-def _close(done: _Frame, parent: _Frame | None, spans: list[Span]) -> None:
+def _close(done: _Frame, parent: _Frame | None, commands: list[list[_Literal]]) -> None:
     """A closed array under a code key is one command; an args array waits for its object,
     which joins it after its command."""
     if done.is_object:
         if done.args:
-            spans.append(_code(([done.command] if done.command else []) + done.args))
+            commands.append(([done.command] if done.command else []) + done.args)
     elif done.key == "args" and parent is not None and parent.is_object:
         parent.args = done.strings
     elif done.strings:
-        spans.append(_code(done.strings))
+        commands.append(done.strings)
 
 
 def _code(parts: list[_Literal]) -> Span:
     """A code span: one literal written with no escape is its raw body; otherwise the decoded
-    words joined with spaces, reported at the first literal's line."""
+    words joined with spaces, reported at the first literal's line (the command's: it may
+    come after its args, so the span ends at the last literal to end)."""
     first = parts[0]
     if len(parts) == 1 and not first.escaped:
         return Span(first.start + 1, first.end - 1, "code")
-    return Span(first.start, parts[-1].end, "code", " ".join(p.value for p in parts))
+    return Span(first.start, max(p.end for p in parts), "code", " ".join(p.value for p in parts))
