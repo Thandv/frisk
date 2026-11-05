@@ -1,6 +1,6 @@
 """FR-E8 t6 (F4.06): the user guides link correctly and name only what the code has.
 
-The one owner of link checks: every relative link and #anchor in README.md, SECURITY.md,
+The one owner of link checks: every relative link and #anchor in README.md, STATUS.md, SECURITY.md,
 CONTRIBUTING.md and docs/**/*.md resolves (a file that exists in the repo; an anchor that is
 an explicit `<a id>` or a GitHub heading slug of the target). Every `--flag` and `FRISK_*`
 name in docs/proxy.md and docs/mcp-server.md appears in src/frisk, and their limits match
@@ -31,7 +31,7 @@ FOUR = ("docs/rules.md", "docs/proxy.md", "docs/mcp-server.md", "docs/threat-mod
 
 
 def user_docs() -> list[Path]:
-    names = [REPO / "README.md", REPO / "SECURITY.md", REPO / "CONTRIBUTING.md"]
+    names = [REPO / "README.md", REPO / "STATUS.md", REPO / "SECURITY.md", REPO / "CONTRIBUTING.md"]
     return [p for p in names if p.exists()] + sorted((REPO / "docs").rglob("*.md"))
 
 

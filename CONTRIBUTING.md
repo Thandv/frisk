@@ -93,9 +93,14 @@ The repository is public, and frisk scans itself in its own tests, so:
   `tests/test_readme_commands.py` runs it in a sandbox (temp working directory with a copy
   of `examples/`, temp HOME with a fixture MCP config); a fence that needs the network sits
   after a `<!-- doc-test: network -->` line and is not run.
-- `tests/test_guides.py` checks every relative link and anchor in the README, SECURITY.md,
-  this file and `docs/`, and that each flag and `FRISK_*` variable the proxy and frisk-mcp
-  guides name exists in `src/frisk`.
+- `tests/test_guides.py` checks every relative link and anchor in the README, STATUS.md,
+  SECURITY.md, this file and `docs/`, and that each flag and `FRISK_*` variable the proxy and
+  frisk-mcp guides name exists in `src/frisk`.
+- `tests/test_doc_truth.py` checks that the README, STATUS.md, this file, SECURITY.md,
+  RELEASING.md and `docs/` name only commands and subcommands that exist, flags the CLI's
+  parsers really have, `FRISK_*` variables the code reads, files and modules that exist and
+  frisk versions with a CHANGELOG heading, and that STATUS.md's version, next release and
+  command list match the code.
 - A user-facing change updates its doc line in the same commit.
 
 ## Foreman tickets

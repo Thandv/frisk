@@ -81,7 +81,9 @@ pip install frisk-scan      # provides the `frisk` and `frisk-mcp` commands
 ```
 
 The package is `frisk-scan`; the commands are `frisk` and `frisk-mcp` (there is no
-`frisk-scan` command).
+`frisk-scan` command). PyPI has 0.1.0 only until 0.3.0 is released, so this README describes
+the code on `main`: install that from a clone (`pip install .`). What is released, tested
+and still owner-held is in [STATUS.md](STATUS.md).
 
 Zero third-party dependencies — stdlib only, by design (a security tool you can audit in one sitting).
 The code to audit is `src/frisk`: about 4,400 lines of Python, counting every non-blank line
@@ -141,8 +143,12 @@ standard input, and reads `severity`, `rule` and `message` from each entry of `f
 Foreman treats any non-zero exit as "frisk failed" and drops the findings, so the wrapper
 puts `--fail-on never` first: a BLOCK exits 0, an input frisk cannot read still exits 2.
 frisk installs no `frisk-scan` command: the script is a template, installed nowhere, and
-making that command (`foreman-frisk-scan.sh FRISK_COMMAND`, the copy put on Foreman's PATH
-as `frisk-scan`) is the owner's step.
+making that command is the owner's step. The template takes the frisk executable as its
+first argument, so an unedited copy named `frisk-scan` does not work: Foreman's `--stdin`
+arrives as that argument and the copy exits 2, which Foreman reads as "frisk failed". The
+`frisk-scan` on Foreman's PATH is instead a two-line script, `#!/bin/sh` and then
+`exec /path/to/foreman-frisk-scan.sh /path/to/frisk "$@"`, or a copy of the template edited
+to run your frisk directly.
 
 Every readable file under the target is scanned; scripts, build files and `package.json`
 scripts get the code rules too (see [What it detects](#what-it-detects)). A target that is
