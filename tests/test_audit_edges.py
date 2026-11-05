@@ -3,7 +3,7 @@
 Each edge states the behaviour held to be correct. Where today's behaviour is correct it is
 asserted exactly; a real defect is a test of the CORRECT behaviour marked
 @unittest.expectedFailure with a `# DEFECT-n:` line above it (the convention of
-test_epic_edges.py), so the suite stays green and a fix turns it into an unexpected success.
+test_scan_edges.py), so the suite stays green and a fix turns it into an unexpected success.
 
 Every path lives under a temp HOME shaped like a real one; the canary and payloads are
 assembled at runtime, hosts use the .invalid TLD, nothing is executed and nothing touches

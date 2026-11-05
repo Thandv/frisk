@@ -81,7 +81,10 @@ pip install frisk-scan      # provides the `frisk` and `frisk-mcp` commands
 ```
 
 The package is `frisk-scan`; the commands are `frisk` and `frisk-mcp` (there is no
-`frisk-scan` command).
+`frisk-scan` command). PyPI has 0.1.0 only until 0.3.0 is released, so this README describes
+the code on `main`: install that from a clone (`pip install .`). What is released, tested
+and still owner-held is in [STATUS.md](STATUS.md); a recorded first run, from a clone to a
+pinned MCP config, is in [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
 Zero third-party dependencies — stdlib only, by design (a security tool you can audit in one sitting).
 The code to audit is `src/frisk`: about 4,400 lines of Python, counting every non-blank line
@@ -141,8 +144,12 @@ standard input, and reads `severity`, `rule` and `message` from each entry of `f
 Foreman treats any non-zero exit as "frisk failed" and drops the findings, so the wrapper
 puts `--fail-on never` first: a BLOCK exits 0, an input frisk cannot read still exits 2.
 frisk installs no `frisk-scan` command: the script is a template, installed nowhere, and
-making that command (`foreman-frisk-scan.sh FRISK_COMMAND`, the copy put on Foreman's PATH
-as `frisk-scan`) is the owner's step.
+making that command is the owner's step. The template takes the frisk executable as its
+first argument, so an unedited copy named `frisk-scan` does not work: Foreman's `--stdin`
+arrives as that argument and the copy exits 2, which Foreman reads as "frisk failed". The
+`frisk-scan` on Foreman's PATH is instead a two-line script, `#!/bin/sh` and then
+`exec /path/to/foreman-frisk-scan.sh /path/to/frisk "$@"`, or a copy of the template edited
+to run your frisk directly.
 
 Every readable file under the target is scanned; scripts, build files and `package.json`
 scripts get the code rules too (see [What it detects](#what-it-detects)). A target that is
@@ -722,8 +729,9 @@ bash scripts/verify.sh        # the local CI: every interpreter found (CLT 3.9, 
 ```
 
 `scripts/verify.sh` runs the unittest suite under each interpreter, and pytest too where it
-imports, with one PASS/FAIL line per run; then `ruff check` and `mypy src` when they are on
-PATH (else a `skipped: <tool> not on PATH` line). It fails if any run fails or if fewer than
+imports, with one PASS/FAIL line per run; then `ruff check` and `mypy src`, from PATH or as
+`python -m <tool>` under an interpreter that ran (a linter it cannot find is a FAIL;
+`FRISK_VERIFY_LINT=skip` skips both). It fails if any run or linter fails or if fewer than
 `FRISK_MIN_PYTHONS` (default 2) interpreters were found. `FRISK_VERIFY_PYTHONS`
 (space-separated paths) replaces the list of interpreters it tries; it installs nothing and
 uses no network. How to add a rule, the test-payload policy and the rest:
