@@ -83,7 +83,8 @@ pip install frisk-scan      # provides the `frisk` and `frisk-mcp` commands
 The package is `frisk-scan`; the commands are `frisk` and `frisk-mcp` (there is no
 `frisk-scan` command). PyPI has 0.1.0 only until 0.3.0 is released, so this README describes
 the code on `main`: install that from a clone (`pip install .`). What is released, tested
-and still owner-held is in [STATUS.md](STATUS.md).
+and still owner-held is in [STATUS.md](STATUS.md); a recorded first run, from a clone to a
+pinned MCP config, is in [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
 Zero third-party dependencies — stdlib only, by design (a security tool you can audit in one sitting).
 The code to audit is `src/frisk`: about 4,400 lines of Python, counting every non-blank line

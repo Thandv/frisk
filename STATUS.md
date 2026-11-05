@@ -66,7 +66,16 @@ Each line names the tests that pin the behaviour. They run offline with a temp H
 - **Publishing.** `.github/workflows/publish.yml` has never run.
 - **Windows.** CI has no Windows job.
 
-Known gaps, each from an independent review and each severity 2:
+Known gaps:
+
+- **A lockfile inside a directory it pins** is part of what it pins, so `frisk verify`
+  reports DRIFT straight after `frisk lock` (`frisk lock .` then `frisk verify` shows
+  `+ added: .frisk-lock.json`). `examples/continuous-verify.yml` tells users to run
+  `frisk lock .`, so its scheduled check would fail at once. Found by the walkthrough
+  ([docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)) on 2026-11-05; not fixed. Until it is, keep
+  the lockfile outside the directories it pins.
+
+Two more, each from an independent review and each severity 2:
 
 - Text that spells a phrase with HTML character references (`&#…;`) is matched undecoded,
   so such a spelling passes. This is one case of the threat model's first limitation (the
