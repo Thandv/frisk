@@ -40,7 +40,7 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def fingerprint_path(root: Path) -> dict:
+def fingerprint_path(root: Path, lockfile: Path | None = None) -> dict:
     """Content fingerprint of a file or directory: an overall digest + per-file hashes.
 
     Walked with walk.entries, so no symlink is followed: a link (to a file or a directory,
@@ -48,7 +48,10 @@ def fingerprint_path(root: Path) -> dict:
     never by its target's bytes, so retargeting it is drift and content outside the tree is
     never read. FIFOs, sockets, devices and .git are not pinned. A `root` that is itself a
     link is pinned as frisk scans it (engine.scan_path): a directory link by the tree it
-    leads to, a file link by its target's bytes when that lies in the link's own directory."""
+    leads to, a file link by its target's bytes when that lies in the link's own directory.
+    `lockfile`, when it is a regular file at exactly that path below `root`, is not pinned:
+    the lock written there must not be drift (a file of its name elsewhere, or a link at its
+    path, still is)."""
     if os.path.islink(root) and not root.is_dir():
         link = walk.read_link(root, Path(os.path.realpath(root.parent)))
         h = _sha(root.read_bytes()) if link.inside and link.real.is_file() else _link_hash(root)
@@ -57,7 +60,10 @@ def fingerprint_path(root: Path) -> dict:
         h = _sha(root.read_bytes())
         return {"digest": h, "files": {root.name: h}}
     hashed: list[tuple[tuple[str, ...], str]] = []
+    skip = _lockfile_parts(root, lockfile)
     for entry in walk.entries(root):
+        if skip is not None and entry.kind == "file" and entry.path.relative_to(root).parts == skip:
+            continue
         try:
             if entry.kind in ("link", "dir_link"):
                 fh = _link_hash(entry.path)
@@ -79,12 +85,24 @@ def fingerprint_path(root: Path) -> dict:
     return {"digest": overall.hexdigest(), "files": files}
 
 
+def _lockfile_parts(root: Path, lockfile: Path | None) -> tuple[str, ...] | None:
+    """The lockfile's path below `root` as walk.entries names it, by resolved directory and
+    exact name; None when there is no lockfile or it lies outside `root`."""
+    if lockfile is None:
+        return None
+    where = Path(os.path.realpath(lockfile.parent)) / lockfile.name
+    try:
+        return where.relative_to(os.path.realpath(root)).parts
+    except ValueError:
+        return None
+
+
 def _link_hash(link: Path) -> str:
     """A symlink as pinned: a marker plus its target as written, never the target's content."""
     return _sha(b"symlink\0" + os.fsencode(os.readlink(link)))
 
 
-def _entry_for_target(target: str, base: Path | None) -> dict:
+def _entry_for_target(target: str, base: Path | None, lockfile: Path | None = None) -> dict:
     """The target's content, pinned under its credential-free form (display_target): a token
     in a git URL is used for this clone but never stored; verify re-clones the clean URL,
     and git's own credential helper supplies any auth it needs. A local path is stored
@@ -93,7 +111,7 @@ def _entry_for_target(target: str, base: Path | None) -> dict:
     if clean == "<unparsable URL>":
         raise ValueError("cannot pin a URL whose host part cannot be told from a password")
     with materialize(target) as (root, _):
-        fp = fingerprint_path(root)
+        fp = fingerprint_path(root, lockfile)
     rc = {"type": "target", "value": clean}
     if not is_git_url(target):
         rc.update(_relative(target, base))
@@ -120,15 +138,16 @@ def _where(rc: dict, key: str, base: Path | None) -> str:
 
 
 def build_lock(targets: list[str], configs: list[str], base: Path | None = None,
-               notes: list[str] | None = None) -> dict:
+               notes: list[str] | None = None, lockfile: Path | None = None) -> dict:
     """The lockfile for `targets` and `configs`; each local path inside `base` (the
     lockfile's directory) is also stored relative to it, as the entry's 'relative'. Each
     package server whose code is not pinned (not in the local cache) and each whose package
-    is not pinned to an exact version adds a line to `notes`."""
+    is not pinned to an exact version adds a line to `notes`. `lockfile`, the path the lock
+    is written to, is left out of every tree pinned (fingerprint_path)."""
     entries: dict[str, dict] = {}
     targets, configs = split_configs(targets, configs)
     for t in targets:
-        entries[display_target(t)] = _entry_for_target(t, base)
+        entries[display_target(t)] = _entry_for_target(t, base, lockfile)
     for cfg in configs:
         servers = parse_mcp_config(cfg)
         where = {"config": cfg, **_relative(cfg, base)}
@@ -137,7 +156,7 @@ def build_lock(targets: list[str], configs: list[str], base: Path | None = None,
         for s in servers:
             # re-found through the live config on verify: a changed launch, changed code, a
             # new cached version or a server that is gone is drift.
-            entry = {"kind": s.kind, "launch": s.launch, **_server_fingerprint(s),
+            entry = {"kind": s.kind, "launch": s.launch, **_server_fingerprint(s, lockfile),
                      "recompute": {"type": "server", **where, "name": s.name}}
             if s.kind == "package-cached":
                 entry["version"] = s.version
@@ -154,13 +173,13 @@ def _server_names(servers: list[ServerRef]) -> dict:
     return {"digest": _sha("\0".join(sorted(names)).encode("utf-8", "surrogatepass")), "files": names}
 
 
-def _server_fingerprint(s: ServerRef) -> dict:
+def _server_fingerprint(s: ServerRef, lockfile: Path | None = None) -> dict:
     """How the server starts, the values of its code-loading env variables (as hashes) and
     the code frisk scans for it (none when it scans none)."""
     if s.kind == "package-cached":
-        code = _cached_fingerprint(s)
+        code = _cached_fingerprint(s, lockfile)
     elif s.scannable or s.kind == "wrapper":  # the audit reads a wrapper, so its own bytes are pinned too
-        code = fingerprint_path(Path(os.path.realpath(s.ref)))  # the code that runs, as the audit reads it
+        code = fingerprint_path(Path(os.path.realpath(s.ref)), lockfile)  # the code that runs, as the audit reads it
     else:
         code = {"digest": "", "files": {}}
     parts = [s.launch, code["digest"]]
@@ -170,8 +189,8 @@ def _server_fingerprint(s: ServerRef) -> dict:
     return {"digest": _sha("\0".join(parts).encode()), "files": code["files"], "code_env": s.code_env}
 
 
-def _cached_fingerprint(s: ServerRef) -> dict:
-    fp = fingerprint_path(Path(s.ref))
+def _cached_fingerprint(s: ServerRef, lockfile: Path | None = None) -> dict:
+    fp = fingerprint_path(Path(s.ref), lockfile)
     fp["digest"] = _sha(f"{s.version}\0{fp['digest']}".encode())
     return fp
 
@@ -199,38 +218,39 @@ def _config(config: str, parsed: dict) -> dict[str, ServerRef]:
     return result
 
 
-def _recompute(entry: dict, parsed: dict, base: Path | None) -> dict:
+def _recompute(entry: dict, parsed: dict, base: Path | None, lockfile: Path | None) -> dict:
     rc = entry["recompute"]
     if rc["type"] == "server":
         s = _config(_where(rc, "config", base), parsed).get(rc["name"])
         if s is None:
             return {"digest": "<missing>", "files": {}}
-        return {**_server_fingerprint(s), "launch": s.launch}
+        return {**_server_fingerprint(s, lockfile), "launch": s.launch}
     if rc["type"] == "config_servers":
         return _server_names(list(_config(_where(rc, "config", base), parsed).values()))
     if rc["type"] == "target":
         with materialize(_where(rc, "value", base)) as (root, _):
-            return fingerprint_path(root)
+            return fingerprint_path(root, lockfile)
     # The types below are written only by older frisk versions; they still verify.
     if rc["type"] == "path":
         p = Path(rc["value"])
         if not p.exists():
             return {"digest": "<missing>", "files": {}}
-        return fingerprint_path(p)
+        return fingerprint_path(p, lockfile)
     if rc["type"] == "config_ref":
         s = _config(rc["config"], parsed).get(rc["name"])
         return {"digest": _ref_digest(s) if s is not None else "<missing>", "files": {}}
     return {"digest": _sha(rc["value"].encode()), "files": {}}
 
 
-def verify_lock(lock: dict, base: Path | None = None) -> list[dict]:
+def verify_lock(lock: dict, base: Path | None = None, lockfile: Path | None = None) -> list[dict]:
     """Return a drift report: one record per locked entry with status ("ok", "DRIFT" or
     "error": it could not be verified) and changed files. Each entry is verified on its own:
     one that cannot be (a target that is gone, a malformed entry) is an error and the others
     are still checked. Entries are named without credentials, also those an older frisk
     pinned with a token in a git URL (that stored URL is still what gets cloned, so they
     keep verifying). An entry's 'relative' path is taken from `base`, the lockfile's
-    directory; without a base, or for an entry without one, its path is used as stored."""
+    directory; without a base, or for an entry without one, its path is used as stored.
+    `lockfile`, the path the lock was read from, is left out of every tree (fingerprint_path)."""
     out = []
     parsed: dict = {}  # each MCP config is read once, however many entries pin it
     for stored, old in lock["entries"].items():
@@ -240,14 +260,14 @@ def verify_lock(lock: dict, base: Path | None = None) -> list[dict]:
             out.append({"entry": key, "status": "error", "detail": "not a valid lockfile entry"})
             continue
         try:
-            out.append(_verify_entry(key, old, parsed, base))
+            out.append(_verify_entry(key, old, parsed, base, lockfile))
         except Exception as e:  # noqa: BLE001 - this entry is reported as unverified, the rest still are
             out.append({"entry": key, "status": "error", "detail": str(e)[:120] or type(e).__name__})
     return out
 
 
-def _verify_entry(key: str, old: dict, parsed: dict, base: Path | None) -> dict:
-    new = _recompute(old, parsed, base)
+def _verify_entry(key: str, old: dict, parsed: dict, base: Path | None, lockfile: Path | None) -> dict:
+    new = _recompute(old, parsed, base, lockfile)
     if new["digest"] == old["digest"]:
         return {"entry": key, "status": "ok"}
     if _whole_config(old, base):

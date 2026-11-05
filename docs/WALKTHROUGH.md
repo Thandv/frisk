@@ -161,10 +161,9 @@ verify: no drift  (0 of 4 entries changed)
 exit 0
 ```
 
-Keep `.frisk-lock.json` outside every directory it pins, as here (it sits beside
-`my-server/`, not in it). A lockfile inside a pinned directory is part of what it pins, so
-`frisk verify` reports it as drift straight after `frisk lock`; that is a known gap
-([STATUS.md](../STATUS.md#what-is-not-tested)).
+Here `.frisk-lock.json` sits beside `my-server/`. It can also sit inside a directory it
+pins (`frisk lock .`, as [examples/continuous-verify.yml](../examples/continuous-verify.yml)
+does): frisk leaves that one file out of what it pins, so it is never drift.
 
 ## Next
 

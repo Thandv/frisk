@@ -36,7 +36,8 @@ Each line names the tests that pin the behaviour. They run offline with a temp H
   `tests/test_fs.py`. Every rule and scan surface runs in linear time on 1 MiB of its worst
   input: `tests/test_perf.py`.
 - **`frisk lock` / `frisk verify`** pin content and report drift: `tests/test_pin.py`,
-  `tests/test_pin_spec.py`, `tests/test_pin_atomic.py`, `tests/test_pin_links.py`.
+  `tests/test_pin_spec.py`, `tests/test_pin_atomic.py`, `tests/test_pin_links.py`. A
+  lockfile inside a directory it pins is not pinned with it: `tests/test_pin_lockfile.py`.
 - **`frisk proxy`** drops poisoned, malformed or batched tool lists, survives bytes that are not
   UTF-8 and always stops its server: `tests/test_proxy.py`, `tests/test_proxy_fail_closed.py`,
   `tests/test_proxy_shapes.py`, `tests/test_proxy_pins.py`, and `tests/test_proxy_e2e.py`
@@ -67,16 +68,7 @@ Each line names the tests that pin the behaviour. They run offline with a temp H
 - **Publishing.** `.github/workflows/publish.yml` has never run.
 - **Windows.** CI has no Windows job.
 
-Known gaps:
-
-- **A lockfile inside a directory it pins** is part of what it pins, so `frisk verify`
-  reports DRIFT straight after `frisk lock` (`frisk lock .` then `frisk verify` shows
-  `+ added: .frisk-lock.json`). `examples/continuous-verify.yml` tells users to run
-  `frisk lock .`, so its scheduled check would fail at once. Found by the walkthrough
-  ([docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)) on 2026-11-05; not fixed. Until it is, keep
-  the lockfile outside the directories it pins.
-
-Two more, each from an independent review and each severity 2:
+Known gaps, each from an independent review and each severity 2:
 
 - Text that spells a phrase with HTML character references (`&#…;`) is matched undecoded,
   so such a spelling passes. This is one case of the threat model's first limitation (the

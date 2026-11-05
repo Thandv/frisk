@@ -513,7 +513,11 @@ directory, and `frisk verify` reads it from there, so a lock verifies from any w
 directory and in any checkout of the tree (CI included). A local path outside the
 lockfile's directory (an absolute `~/.claude.json`, a server's script elsewhere on the
 machine) is stored as given and cannot be verified on another machine, such as a CI
-runner. `frisk lock` prints `unpinned: upstream changes cannot be detected; pin
+runner. The lockfile itself is not pinned: in a directory it pins (`frisk lock .`), the
+regular file at the lockfile's own path is left out, so writing the lock is never drift,
+while a file of the same name anywhere else in the tree, or a link at that path, still is.
+A lock written before this with the lockfile inside a pinned directory reports DRIFT once
+(`- removed: .frisk-lock.json`): run `frisk lock` again. `frisk lock` prints `unpinned: upstream changes cannot be detected; pin
 <pkg>@x.y.z` (to stderr; the lock is still written) for each npx, uvx or pipx server whose
 package is not pinned to an exact version (`acme-tool`, `acme-tool@latest`,
 `acme-tool@^1.2`): what such a server runs can change upstream with no change frisk could
