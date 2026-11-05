@@ -21,6 +21,7 @@ jobs:
       - name: scripts/verify.sh
         env:
           FRISK_MIN_PYTHONS: "1"
+          FRISK_VERIFY_LINT: skip
         run: FRISK_VERIFY_PYTHONS="$(command -v python)" bash scripts/verify.sh
 
   build:

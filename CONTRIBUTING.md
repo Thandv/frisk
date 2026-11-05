@@ -31,9 +31,12 @@ it finds (the macOS Command Line Tools `python3` and Homebrew's `python3.12` to
 `python3.14`, deduplicated by real path, or exactly the paths in `FRISK_VERIFY_PYTHONS`) it
 runs the stdlib unittest suite, and pytest too when pytest imports for that interpreter,
 printing one PASS/FAIL line per run with the runner's name. It then runs `ruff check` and
-`mypy src` when each is on PATH, and prints `skipped: <tool> not on PATH` otherwise. It
-fails if any run fails, or if fewer than `FRISK_MIN_PYTHONS` (default 2) interpreters ran.
-It installs nothing and uses no network.
+`mypy src`, as CI's lint job does: each from PATH, else as `python -m <tool>` under the
+first interpreter that ran and can import it. A linter found neither way is a FAIL, not a
+skip, so install the `dev` extra (or ruff and mypy as tools) before you run it;
+`FRISK_VERIFY_LINT=skip` skips both, as CI's test legs do (the lint job runs them there). It
+fails if any run or linter fails, or if fewer than `FRISK_MIN_PYTHONS` (default 2)
+interpreters ran. It installs nothing and uses no network.
 
 What CI runs that verify.sh does not: Linux, the Python versions you do not have locally
 (CI covers 3.9 to 3.14), the coverage report, and the `action-selftest` job, which runs the

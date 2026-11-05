@@ -10,7 +10,8 @@ permissions:
 jobs:
   # Every supported Python on Linux, plus one macOS job. scripts/verify.sh runs the stdlib
   # unittest suite (on the job's python only, through FRISK_VERIFY_PYTHONS); pytest runs it again
-  # with pytest's collection, as the local pre-commit gate does.
+  # with pytest's collection, as the local pre-commit gate does. The linters are the lint job's,
+  # so verify.sh skips them here (FRISK_VERIFY_LINT=skip).
   test:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -30,6 +31,7 @@ jobs:
       - name: scripts/verify.sh
         env:
           FRISK_MIN_PYTHONS: "1"
+          FRISK_VERIFY_LINT: skip
         run: FRISK_VERIFY_PYTHONS="$(command -v python)" bash scripts/verify.sh
       - run: python -m pytest -q
 

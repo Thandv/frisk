@@ -52,7 +52,8 @@ Each line names the tests that pin the behaviour. They run offline with a temp H
   on GitHub, not here.
 - **Local check, 2026-11-05**: `scripts/verify.sh` passed with the macOS Command Line Tools
   Python 3.9.6 and Homebrew Python 3.12, 3.13 and 3.14 (unittest on each, pytest on 3.14),
-  ruff and mypy.
+  ruff and mypy. mypy came from a scratch virtual environment put on PATH: without one,
+  verify.sh now fails (`FAIL  mypy src`) instead of skipping it.
 
 ## What is not tested
 

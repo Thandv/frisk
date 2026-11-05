@@ -729,8 +729,9 @@ bash scripts/verify.sh        # the local CI: every interpreter found (CLT 3.9, 
 ```
 
 `scripts/verify.sh` runs the unittest suite under each interpreter, and pytest too where it
-imports, with one PASS/FAIL line per run; then `ruff check` and `mypy src` when they are on
-PATH (else a `skipped: <tool> not on PATH` line). It fails if any run fails or if fewer than
+imports, with one PASS/FAIL line per run; then `ruff check` and `mypy src`, from PATH or as
+`python -m <tool>` under an interpreter that ran (a linter it cannot find is a FAIL;
+`FRISK_VERIFY_LINT=skip` skips both). It fails if any run or linter fails or if fewer than
 `FRISK_MIN_PYTHONS` (default 2) interpreters were found. `FRISK_VERIFY_PYTHONS`
 (space-separated paths) replaces the list of interpreters it tries; it installs nothing and
 uses no network. How to add a rule, the test-payload policy and the rest:

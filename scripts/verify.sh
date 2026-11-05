@@ -8,9 +8,11 @@
 # Interpreters are deduplicated by resolved path. Each runs the stdlib unittest suite, and
 # pytest too when pytest imports for it (CI's test jobs run both); one PASS/FAIL line per
 # run, naming the runner, and a 'skip' line when pytest is not importable.
-# Then `ruff check` and `mypy src` (CI's lint job), each only when it is on PATH, else a
-# 'skipped: <tool> not on PATH' line.
-# Exits non-zero if any run fails, or if fewer than FRISK_MIN_PYTHONS (default 2)
+# Then `ruff check` and `mypy src`, as CI's lint job runs them: each from PATH, else as
+# `python -m <tool>` under the first interpreter that ran and can import it. A linter found
+# neither way FAILS, so mypy is never skipped silently; FRISK_VERIFY_LINT=skip (CI's test
+# legs, whose lint job runs separately) skips both with one line.
+# Exits non-zero if any run or linter fails, or if fewer than FRISK_MIN_PYTHONS (default 2)
 # interpreters ran, so it can never pass vacuously.
 # It makes no network access and installs nothing (no pip, no venv).
 set -u -o pipefail
@@ -18,6 +20,12 @@ set -u -o pipefail
 min="${FRISK_MIN_PYTHONS:-2}"
 case "$min" in
   ''|*[!0-9]*) echo "verify: FRISK_MIN_PYTHONS must be a non-negative integer, got '$min'" >&2; exit 2 ;;
+esac
+
+lint_mode="${FRISK_VERIFY_LINT:-require}"
+case "$lint_mode" in
+  require|skip) ;;
+  *) echo "verify: FRISK_VERIFY_LINT must be 'require' or 'skip', got '$lint_mode'" >&2; exit 2 ;;
 esac
 
 cd "$(dirname "$0")/.." || exit 2
@@ -35,6 +43,7 @@ fi
 
 seen=" "
 ran=0
+pythons=()
 failed=0
 log="$(mktemp "${TMPDIR:-/tmp}/frisk-verify.XXXXXX")" || exit 2
 trap 'rm -f "$log"' EXIT
@@ -49,6 +58,7 @@ for py in "${candidates[@]}"; do
   seen="$seen$real "
   version="$("$py" -c 'import platform; print(platform.python_version())')"
   ran=$((ran + 1))
+  pythons+=("$py")
   if PYTHONPATH=src "$py" -B -m unittest discover -s tests >"$log" 2>&1; then
     printf 'PASS  %-8s %s  unittest  (%s)\n' "$version" "$py" "$(tail -n 3 "$log" | grep -m1 '^Ran ')"
   else
@@ -72,19 +82,41 @@ if [ "$ran" -lt "$min" ]; then
   exit 1
 fi
 
-lint_failed=0
-for tool in "ruff check" "mypy src"; do
-  name="${tool%% *}"
-  if ! command -v "$name" >/dev/null 2>&1; then
-    echo "skipped: $name not on PATH"
-  elif $tool >"$log" 2>&1; then
-    echo "PASS  $tool"
-  else
-    lint_failed=$((lint_failed + 1))
-    echo "FAIL  $tool"
-    sed 's/^/    /' "$log" | tail -n 30
+# Sets tool_cmd to the command that runs linter $1: on PATH, else `python -m $1` under the
+# first interpreter that ran and imports it. Returns 1 when neither has it.
+find_tool() {
+  local py
+  if command -v "$1" >/dev/null 2>&1; then
+    tool_cmd=("$1")
+    return 0
   fi
-done
+  for py in ${pythons[@]+"${pythons[@]}"}; do
+    if "$py" -c "import $1" >/dev/null 2>&1; then
+      tool_cmd=("$py" -m "$1")
+      return 0
+    fi
+  done
+  return 1
+}
+
+lint_failed=0
+if [ "$lint_mode" = skip ]; then
+  echo "skipped: ruff check and mypy src (FRISK_VERIFY_LINT=skip)"
+else
+  for tool in "ruff check" "mypy src"; do
+    name="${tool%% *}"
+    if ! find_tool "$name"; then
+      lint_failed=$((lint_failed + 1))
+      echo "FAIL  $tool  ($name not on PATH and not importable by an interpreter that ran: install the dev extra, see CONTRIBUTING.md)"
+    elif "${tool_cmd[@]}" "${tool#* }" >"$log" 2>&1; then
+      echo "PASS  $tool  (${tool_cmd[*]})"
+    else
+      lint_failed=$((lint_failed + 1))
+      echo "FAIL  $tool  (${tool_cmd[*]})"
+      sed 's/^/    /' "$log" | tail -n 30
+    fi
+  done
+fi
 
 if [ "$failed" -ne 0 ]; then
   echo "verify: $failed test run(s) failed on $ran interpreter(s)" >&2

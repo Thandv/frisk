@@ -159,7 +159,8 @@ on a usage error or a server it cannot start.
 """
 
 
-def _cmd_scan(argv: list[str]) -> int:
+def _scan_parser() -> argparse.ArgumentParser:
+    """The scan's argument parser (`frisk [options] TARGET ...`)."""
     p = argparse.ArgumentParser(
         prog="frisk",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -186,38 +187,77 @@ def _cmd_scan(argv: list[str]) -> int:
                    help="exit non-zero when the worst finding reaches this level (default: block)")
     p.add_argument("-q", "--quiet", action="store_true", help="print only the verdict line")
     p.add_argument("-V", "--version", action="version", version=f"frisk {__version__}")
-    args = p.parse_args(argv)
+    return p
 
+
+def _scan_label(args: argparse.Namespace) -> str:
+    """The report's label: the targets and configs as shown, else <stdin> or <text>."""
+    return ", ".join(display_target(t) for t in args.targets + args.mcp_config) or (
+        "<stdin>" if args.stdin and args.text is None else "<text>")
+
+
+def _audit_configs(configs: list[str], limits: ScanLimits, result: ScanResult,
+                   servers: list[AuditRecord]) -> list[str]:
+    """Audit each config into `result` and `servers`; the audit text of each, in order."""
+    audits: list[str] = []
+    for cfg in configs:
+        records = _audit_config(cfg, limits)
+        if not records:  # nothing was audited: never PASS
+            where = home_label(cfg)
+            note = coverage_warning(where, "coverage.no_servers", f"no MCP servers found in {where} (frisk reads "
+                                    f"{SERVER_KEYS})")
+            result.extend(reroot(note, "", "mcp"))
+        for rec in records:
+            result.extend(rec.result)
+        servers.extend(records)
+        audits.append(audit_text(cfg, records))
+    return audits
+
+
+def _scan_all(args: argparse.Namespace, limits: ScanLimits, result: ScanResult,
+              servers: list[AuditRecord]) -> tuple[list[str], list[str]]:
+    """Scan --text, --stdin, the targets and the configs into `result`: (configs, audit texts).
+
+    Raises OSError, RuntimeError or ValueError for an input frisk cannot read."""
+    if args.text is not None:
+        result.extend(scan_text(args.text, "<text>", max_chars=args.max_file_bytes))
+    if args.stdin:
+        result.extend(_scan_stdin(args.max_file_bytes))
+    # A config named as a target is audited, never text-scanned: its env values must not show.
+    targets, configs = split_configs(args.targets, args.mcp_config)
+    for t in _distinct(targets):
+        result.extend(_shown(t, scan_target(t, limits)))
+    return configs, _audit_configs(configs, limits, result, servers)
+
+
+def _print_report(args: argparse.Namespace, result: ScanResult, label: str, servers: list[AuditRecord] | None,
+                  audits: list[str]) -> None:
+    """Print the report in the format the flags ask for: JSON, SARIF, the verdict line or text."""
+    if args.json:
+        print(to_json(result, label, servers))
+    elif args.sarif:
+        print(to_sarif(result, __version__))
+    elif args.quiet:
+        print(f"frisk: {verdict(result.findings)}  ({printable(label)})")
+    else:
+        if audits:
+            print("\n".join(audits))
+            print()
+        print(to_text(result, label, show_coverage=bool(args.targets or args.mcp_config)))
+
+
+def _cmd_scan(argv: list[str]) -> int:
+    p = _scan_parser()
+    args = p.parse_args(argv)
     if not args.targets and not args.mcp_config and args.text is None and not args.stdin:
         p.print_help()
         return 2
 
     result = ScanResult()
-    limits = ScanLimits(max_file_bytes=args.max_file_bytes)
-    audits: list[str] = []
     servers: list[AuditRecord] = []
-    label = ", ".join(display_target(t) for t in args.targets + args.mcp_config) or (
-        "<stdin>" if args.stdin and args.text is None else "<text>")
+    label = _scan_label(args)
     try:
-        if args.text is not None:
-            result.extend(scan_text(args.text, "<text>", max_chars=args.max_file_bytes))
-        if args.stdin:
-            result.extend(_scan_stdin(args.max_file_bytes))
-        # A config named as a target is audited, never text-scanned: its env values must not show.
-        targets, configs = split_configs(args.targets, args.mcp_config)
-        for t in _distinct(targets):
-            result.extend(_shown(t, scan_target(t, limits)))
-        for cfg in configs:
-            records = _audit_config(cfg, limits)
-            if not records:  # nothing was audited: never PASS
-                where = home_label(cfg)
-                note = coverage_warning(where, "coverage.no_servers", f"no MCP servers found in {where} (frisk reads "
-                                        f"{SERVER_KEYS})")
-                result.extend(reroot(note, "", "mcp"))
-            for rec in records:
-                result.extend(rec.result)
-            servers.extend(records)
-            audits.append(audit_text(cfg, records))
+        configs, audits = _scan_all(args, ScanLimits(max_file_bytes=args.max_file_bytes), result, servers)
     except (OSError, RuntimeError, ValueError) as e:  # an input frisk cannot read: exit 2
         print(f"frisk: {printable(str(e))}", file=sys.stderr)
         return 2
@@ -228,19 +268,7 @@ def _cmd_scan(argv: list[str]) -> int:
         except OSError as e:
             print(f"frisk: cannot write the SARIF file: {printable(str(e))}", file=sys.stderr)
             return 2
-
-    if args.json:
-        print(to_json(result, label, servers if configs else None))
-    elif args.sarif:
-        print(to_sarif(result, __version__))
-    elif args.quiet:
-        print(f"frisk: {verdict(findings)}  ({printable(label)})")
-    else:
-        if audits:
-            print("\n".join(audits))
-            print()
-        print(to_text(result, label, show_coverage=bool(args.targets or args.mcp_config)))
-
+    _print_report(args, result, label, servers if configs else None, audits)
     if args.fail_on == "never":
         return 0
     return 1 if fails(findings, args.fail_on) else 0
