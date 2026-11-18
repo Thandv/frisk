@@ -15,8 +15,8 @@ Files are scanned by these lists, whatever a rule's contexts.
 Every pattern scans in linear time: each window between a rule's start and what it must
 find is bounded, and where a window could hold another start of the same rule (so that a
 run of starts would rescan it from each), the window stops there and the later start, which
-sees the same rest of the line, matches instead. tests/test_perf.py times each rule on
-1 MiB of adversarial text.
+sees the same rest of the line, matches instead. tests/test_perf.py checks that each rule
+scans adversarial text in linear time: 4x the text must cost under 10x the CPU time.
 
 Severities:
   block -> must not be installed; fails CI / scan verdict is BLOCK

@@ -230,6 +230,13 @@ class TestGrowthCheckCatchesQuadratic(unittest.TestCase):
         self.assertTrue(self.run_growth_test_over("a+").wasSuccessful())
 
 
+class TestTheRulesDocstring(unittest.TestCase):
+    def test_it_describes_the_growth_check_this_file_makes(self) -> None:
+        doc = " ".join((rules.__doc__ or "").split())
+        self.assertIn("tests/test_perf.py checks that each rule scans adversarial text in linear time: "
+                      f"4x the text must cost under {MAX_RATIO:g}x the CPU time.", doc)
+
+
 class TestBoundsKeepDetection(unittest.TestCase):
     """The bounded windows still catch what they are for."""
 
