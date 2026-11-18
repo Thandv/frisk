@@ -11,8 +11,9 @@ scan has no entry, and when an entry names nothing.
   its seeds (and of CLASS_RUNS), and the agent-instruction rule and the Python loops (each
   surface's extract(), hidden_unicode). Scanning 4x the text must take less than MAX_RATIO
   times as long: about 4 for a linear scan, 16 for a quadratic one. No absolute time is
-  asserted, so machine load cannot fail it: the small side is the best of RUNS runs, the large side stops at its first run clearly over the limit, and a
-  small side under FLOOR_S counts as FLOOR_S, so timer noise on tiny runs cannot make a ratio.
+  asserted, so machine load cannot fail it: the small side is the best of RUNS runs, the large
+  side stops at its first run clearly over the limit, and a small side under FLOOR_S counts as
+  FLOOR_S, so timer noise on tiny runs cannot make a ratio.
   The unbounded rce.shell_true gap, for one, took 1.4 s on 64 KiB.
 
 Payloads are assembled at runtime. Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
@@ -30,10 +31,10 @@ from unittest import mock
 from frisk import redact, rules, surfaces
 from frisk.rules import PerCommand, hidden_unicode
 
-# The growth check: SMALL then 4 * SMALL characters, best of RUNS on the small side. WIDE is the same pair for the
-# rules and surface regexes, where a quadratic scan costs the most.
+# The growth check: SMALL then 4 * SMALL characters, best of RUNS on the small side. WIDE is the same
+# pair for the rules and surface regexes, where a quadratic scan costs the most.
 CLEARLY_OVER = 1.25  # a quadratic scan is 1.6x the limit; load puts a linear one a few percent over
-SMALL, RUNS, MAX_RATIO, FLOOR_S =32 * 1024, 3, 10.0, 0.005
+SMALL, RUNS, MAX_RATIO, FLOOR_S = 32 * 1024, 3, 10.0, 0.005
 WIDE, LOWEST = 1 << 17, 8 * 1024
 
 RM, CURL, EVAL, EXEC = "r" + "m", "cu" + "rl", "ev" + "al", "ex" + "ec"
@@ -132,9 +133,9 @@ def cpu_seconds(scan: Callable[[str], object], text: str) -> float:
 
 def assert_grows_slowly(scan: Callable[[str], object], seed: str, small: int) -> None:
     """Fails unless 4x the text costs less than MAX_RATIO times as much, at `small` and at every size
-    4x below it down to LOWEST (small side best of RUNS and floored; the large side stops at its first run clearly over the limit), naming the sizes, their
-    times and the limit. The smaller pairs come first, so a quadratic scan fails on a cheap pair, in
-    seconds, before the large one is ever run."""
+    4x below it down to LOWEST (the small side best of RUNS and floored; the large side stops at its
+    first run clearly over the limit), naming the sizes, their times and the limit. The smaller pairs
+    come first, so a quadratic scan fails on a cheap pair, in seconds, before the large one is ever run."""
     sizes = [small]
     while sizes[0] // 4 >= LOWEST:
         sizes.insert(0, sizes[0] // 4)

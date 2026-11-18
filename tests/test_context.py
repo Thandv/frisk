@@ -263,10 +263,11 @@ def timed(path: str, text: str) -> tuple[float, int]:
 
 
 # No absolute time is asserted, so machine load cannot fail these. The small side of a ratio is the best
-# of RUNS runs, and the large side stops at its first run clearly over the limit; 4x the text must cost less than MAX_RATIO times as much (about 4 if linear, 16 if quadratic);
-# a small side under FLOOR_S counts as FLOOR_S, so timer noise on tiny runs cannot make a ratio.
+# of RUNS runs, and the large side stops at its first run clearly over the limit; 4x the text must cost
+# less than MAX_RATIO times as much (about 4 if linear, 16 if quadratic); a small side under FLOOR_S
+# counts as FLOOR_S, so timer noise on tiny runs cannot make a ratio.
 CLEARLY_OVER = 1.25  # a quadratic lexer is 1.6x the limit; load puts a linear one a few percent over
-RUNS, MAX_RATIO, FLOOR_S, LOWEST =3, 10.0, 0.005, 8 * 1024
+RUNS, MAX_RATIO, FLOOR_S, LOWEST = 3, 10.0, 0.005, 8 * 1024
 
 
 def assert_grows_slowly(path: str, seed: str, small: int, lowest: int = LOWEST,
