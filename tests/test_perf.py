@@ -239,17 +239,17 @@ class TestGrowthCheckCatchesQuadratic(unittest.TestCase):
         self.assertRegex(result.failures[0][1], r"\d+ chars: [\d.]+ s, \d+ chars: [\d.]+ s .*limit [\d.]+ s")
 
     def test_a_quadratic_scan_stops_after_one_run_of_the_large_text(self) -> None:
+        # Made-up times, so load cannot decide it: the small side costs 0.01 s (a 0.1 s limit) and the
+        # large run 0.16 s, the 1.6x a quadratic scan costs, well past CLEARLY_OVER.
         sizes: list[int] = []
-        quadratic = finditer_scan(re.compile("a*b"))
 
-        def scan(text: str) -> object:
+        def quadratic(scan: Callable[[str], object], text: str) -> float:
             sizes.append(len(text))
-            return quadratic(text)
+            return 0.01 if len(text) == 8 * 1024 else 0.16
 
-        with self.assertRaises(AssertionError):
-            assert_grows_slowly(scan, "a", 8 * 1024)
-        # One pair, 8 KiB then 32 KiB: RUNS runs of the small text, then one of the large. (At 8 KiB the
-        # small side is several times FLOOR_S, so the floor cannot pull the large run under CLEARLY_OVER.)
+        with mock.patch(f"{__name__}.cpu_seconds", quadratic), self.assertRaises(AssertionError):
+            assert_grows_slowly(len, "a", 8 * 1024)
+        # One pair, 8 KiB then 32 KiB: RUNS runs of the small text, then one of the large.
         self.assertEqual(sizes, [8 * 1024] * RUNS + [32 * 1024])
 
     def test_a_scan_just_over_the_limit_is_timed_again(self) -> None:
