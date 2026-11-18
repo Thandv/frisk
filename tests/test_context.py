@@ -262,10 +262,11 @@ def timed(path: str, text: str) -> tuple[float, int]:
         return time.process_time() - t0, len(calls)
 
 
-# No absolute time is asserted, so machine load cannot fail these. Each side of a ratio is the best of
-# RUNS runs; 4x the text must cost less than MAX_RATIO times as much (about 4 if linear, 16 if quadratic);
+# No absolute time is asserted, so machine load cannot fail these. The small side of a ratio is the best
+# of RUNS runs, and the large side stops at its first run clearly over the limit; 4x the text must cost less than MAX_RATIO times as much (about 4 if linear, 16 if quadratic);
 # a small side under FLOOR_S counts as FLOOR_S, so timer noise on tiny runs cannot make a ratio.
-RUNS, MAX_RATIO, FLOOR_S, LOWEST = 3, 10.0, 0.005, 8 * 1024
+CLEARLY_OVER = 1.25  # a quadratic lexer is 1.6x the limit; load puts a linear one a few percent over
+RUNS, MAX_RATIO, FLOOR_S, LOWEST =3, 10.0, 0.005, 8 * 1024
 
 
 def assert_grows_slowly(path: str, seed: str, small: int, lowest: int = LOWEST,
@@ -283,16 +284,17 @@ def assert_grows_slowly(path: str, seed: str, small: int, lowest: int = LOWEST,
         run_small, run_large = time_on(small_text), time_on(large_text)
         t_small = min(run_small() for _ in range(RUNS))
         limit = MAX_RATIO * max(t_small, FLOOR_S)
-        # Best of RUNS, stopping at the first run under the limit: a loaded machine gets more tries.
+        # Best of RUNS, but a run CLEARLY_OVER the limit (a quadratic lexer costs minutes per run on the
+        # large text) ends the timing at once; a run only just over it, as load makes of a linear one, is retried.
         t_large = run_large()
         for _ in range(RUNS - 1):
-            if t_large < limit:
+            if t_large < limit or t_large >= CLEARLY_OVER * limit:
                 break
             t_large = min(t_large, run_large())
         if t_large >= limit:
-            raise AssertionError(f"{len(small_text)} chars: {t_small:.4f} s, {len(large_text)} chars: {t_large:.4f} s "
-                                 f"(best of {RUNS} each); limit {limit:.4f} s, {MAX_RATIO:g}x the small side "
-                                 f"floored at {FLOOR_S:g} s")
+            raise AssertionError(f"{len(small_text)} chars: {t_small:.4f} s, {len(large_text)} chars: "
+                                 f"{t_large:.4f} s (small side best of {RUNS}); limit {limit:.4f} s, "
+                                 f"{MAX_RATIO:g}x the small side floored at {FLOOR_S:g} s")
 
 
 # Python text is counted, and only frisk's own work on it is timed. CPython 3.12+'s tokenizer is
@@ -422,6 +424,20 @@ class TestGrowthCheck(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, r"^8192 chars: 0\.0100 s, 32768 chars: 0\.1600 s .*"
                                                     r"limit 0\.1000 s, 10x the small side floored at 0\.005 s$"):
             assert_grows_slowly("a.py", "a\n", 32 * 1024, runner=quadratic)
+
+    def test_a_quadratic_cost_stops_after_one_run_of_the_large_text(self) -> None:
+        runs: dict[int, int] = {}
+
+        def quadratic(text: str) -> Callable[[], float]:
+            def run() -> float:
+                runs[len(text)] = runs.get(len(text), 0) + 1
+                return (len(text) / 8192) ** 2 * 0.01
+            return run
+
+        with self.assertRaises(AssertionError):
+            assert_grows_slowly("a.py", "a\n", 32 * 1024, runner=quadratic)
+        self.assertEqual(runs[8192], RUNS)  # the small side is still best of RUNS
+        self.assertEqual(runs[32768], 1)  # the large side is not run again once it is over the limit
 
     def test_a_linear_cost_passes_at_every_pair(self) -> None:
         def linear(text: str) -> Callable[[], float]:

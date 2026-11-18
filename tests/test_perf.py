@@ -11,7 +11,7 @@ scan has no entry, and when an entry names nothing.
   its seeds (and of CLASS_RUNS), and the agent-instruction rule and the Python loops (each
   surface's extract(), hidden_unicode). Scanning 4x the text must take less than MAX_RATIO
   times as long: about 4 for a linear scan, 16 for a quadratic one. No absolute time is
-  asserted, so machine load cannot fail it: each side is the best of RUNS runs, and a
+  asserted, so machine load cannot fail it: the small side is the best of RUNS runs, the large side stops at its first run clearly over the limit, and a
   small side under FLOOR_S counts as FLOOR_S, so timer noise on tiny runs cannot make a ratio.
   The unbounded rce.shell_true gap, for one, took 1.4 s on 64 KiB.
 
@@ -30,9 +30,10 @@ from unittest import mock
 from frisk import redact, rules, surfaces
 from frisk.rules import PerCommand, hidden_unicode
 
-# The growth check: SMALL then 4 * SMALL characters, best of RUNS each. WIDE is the same pair for the
+# The growth check: SMALL then 4 * SMALL characters, best of RUNS on the small side. WIDE is the same pair for the
 # rules and surface regexes, where a quadratic scan costs the most.
-SMALL, RUNS, MAX_RATIO, FLOOR_S = 32 * 1024, 3, 10.0, 0.005
+CLEARLY_OVER = 1.25  # a quadratic scan is 1.6x the limit; load puts a linear one a few percent over
+SMALL, RUNS, MAX_RATIO, FLOOR_S =32 * 1024, 3, 10.0, 0.005
 WIDE, LOWEST = 1 << 17, 8 * 1024
 
 RM, CURL, EVAL, EXEC = "r" + "m", "cu" + "rl", "ev" + "al", "ex" + "ec"
@@ -131,7 +132,7 @@ def cpu_seconds(scan: Callable[[str], object], text: str) -> float:
 
 def assert_grows_slowly(scan: Callable[[str], object], seed: str, small: int) -> None:
     """Fails unless 4x the text costs less than MAX_RATIO times as much, at `small` and at every size
-    4x below it down to LOWEST (best of RUNS; a tiny small side is floored), naming the sizes, their
+    4x below it down to LOWEST (small side best of RUNS and floored; the large side stops at its first run clearly over the limit), naming the sizes, their
     times and the limit. The smaller pairs come first, so a quadratic scan fails on a cheap pair, in
     seconds, before the large one is ever run."""
     sizes = [small]
@@ -141,16 +142,17 @@ def assert_grows_slowly(scan: Callable[[str], object], seed: str, small: int) ->
         small_text, large_text = repeat(seed, size), repeat(seed, 4 * size)
         t_small = min(cpu_seconds(scan, small_text) for _ in range(RUNS))
         limit = MAX_RATIO * max(t_small, FLOOR_S)
-        # Best of RUNS, stopping at the first run under the limit: a loaded machine gets more tries.
+        # Best of RUNS, but a run CLEARLY_OVER the limit (a quadratic scan costs minutes per run on the
+        # large text) ends the timing at once; a run only just over it, as load makes of a linear scan, is retried.
         t_large = cpu_seconds(scan, large_text)
         for _ in range(RUNS - 1):
-            if t_large < limit:
+            if t_large < limit or t_large >= CLEARLY_OVER * limit:
                 break
             t_large = min(t_large, cpu_seconds(scan, large_text))
         if t_large >= limit:
-            raise AssertionError(f"{len(small_text)} chars: {t_small:.4f} s, {len(large_text)} chars: {t_large:.4f} s "
-                                 f"(best of {RUNS} each); limit {limit:.4f} s, {MAX_RATIO:g}x the small side "
-                                 f"floored at {FLOOR_S:g} s")
+            raise AssertionError(f"{len(small_text)} chars: {t_small:.4f} s, {len(large_text)} chars: "
+                                 f"{t_large:.4f} s (small side best of {RUNS}); limit {limit:.4f} s, "
+                                 f"{MAX_RATIO:g}x the small side floored at {FLOOR_S:g} s")
 
 
 def finditer_scan(pattern: re.Pattern[str] | PerCommand) -> Callable[[str], object]:
@@ -234,6 +236,19 @@ class TestGrowthCheckCatchesQuadratic(unittest.TestCase):
         self.assertEqual(len(result.failures), 1)
         # It says by how much: both sizes, their times and the limit, not just that a check was false.
         self.assertRegex(result.failures[0][1], r"\d+ chars: [\d.]+ s, \d+ chars: [\d.]+ s .*limit [\d.]+ s")
+
+    def test_a_quadratic_scan_stops_after_one_run_of_the_large_text(self) -> None:
+        sizes: list[int] = []
+        quadratic = finditer_scan(re.compile("a*b"))
+
+        def scan(text: str) -> object:
+            sizes.append(len(text))
+            return quadratic(text)
+
+        with self.assertRaises(AssertionError):
+            assert_grows_slowly(scan, "a", 4 * 1024)
+        # One pair, 4 KiB then 16 KiB: RUNS runs of the small text, then one of the large.
+        self.assertEqual(sizes, [4 * 1024] * RUNS + [16 * 1024])
 
     def test_the_growth_test_passes_for_a_linear_pattern_in_the_same_place(self) -> None:
         self.assertTrue(self.run_growth_test_over("a+").wasSuccessful())
