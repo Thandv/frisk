@@ -131,6 +131,60 @@ class TestRoots(ScopeCase):
         self.assertEqual([c.args[0] for c in scan.call_args_list], [Path(s) for s in ["/", *system]])
 
 
+def _case_insensitive(path: Path) -> bool:
+    swapped = path.parent / path.name.swapcase()
+    return swapped != path and swapped.exists() and os.path.samefile(swapped, path)
+
+
+class TestCaseAndSpelling(ScopeCase):
+    def test_recased_home_is_refused_as_too_broad(self) -> None:
+        if not _case_insensitive(self.home):
+            self.skipTest("temp filesystem is case-sensitive; a re-cased path names another file")
+        recased = self.home.parent / self.home.name.swapcase()
+        self.assertIn("is too broad to scan", refusal(str(recased)))
+
+    def test_system_in_any_case_is_refused(self) -> None:
+        if not Path("/System").is_dir() or not Path("/system").exists():
+            self.skipTest("no case-insensitive /System on this filesystem")
+        for source in ("/SYSTEM", "/system", "/sYsTeM"):
+            with self.subTest(source=source):
+                self.assertIn("is too broad to scan", refusal(source))
+
+    def test_a_recased_root_is_the_same_root(self) -> None:
+        if not _case_insensitive(self.tree):
+            self.skipTest("temp filesystem is case-sensitive; a re-cased path names another file")
+        os.environ["FRISK_MCP_ROOTS"] = str(self.tree)
+        recased = self.tree.parent / self.tree.name.swapcase()
+        self.assertEqual(summary(str(recased / "d1"))["verdict"], "BLOCK")
+        other = self.tmp / "other"
+        other.mkdir()
+        self.assertIn("is outside FRISK_MCP_ROOTS", refusal(str(other)))
+
+    def test_spelling_variants_stay_inside_or_outside_the_root(self) -> None:
+        (self.tmp / "tree-evil").mkdir()
+        os.environ["FRISK_MCP_ROOTS"] = str(self.tree)
+        for source in (f"{self.tree}/", f"{self.tree}//d1", f"{self.tree}/d1/../d2"):
+            with self.subTest(inside=source):
+                self.assertEqual(summary(source)["verdict"], "BLOCK")
+        for source in (str(self.tmp / "tree-evil"), f"{self.tmp}//tree-evil/", f"{self.tmp}/tree/../tree-evil"):
+            with self.subTest(outside=source):
+                self.assertIn("is outside FRISK_MCP_ROOTS", refusal(source))
+
+    def test_tmp_and_private_tmp_are_the_same_root(self) -> None:
+        try:
+            aliased = os.path.samefile("/tmp", "/private/tmp")
+        except OSError:  # absent, or not readable in a sandbox
+            aliased = False
+        if not aliased:
+            self.skipTest("/tmp is not a readable alias of /private/tmp here")
+        os.environ["FRISK_MCP_ROOTS"] = "/private/tmp"
+        with mock.patch("frisk.engine.scan_path", return_value=mcp_server.ScanResult()):
+            for source in ("/tmp", "/tmp/", "/private/tmp"):
+                with self.subTest(source=source):
+                    self.assertEqual(summary(source)["verdict"], "PASS")
+        self.assertIn("is outside FRISK_MCP_ROOTS", refusal("/private/tmp-sibling"))
+
+
 class TestNoNetwork(ScopeCase):
     def test_git_urls_are_refused_without_running_git(self) -> None:
         os.environ["FRISK_MCP_NO_NETWORK"] = "1"

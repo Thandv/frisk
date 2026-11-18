@@ -89,6 +89,14 @@ def _scan_source(source: str) -> str:
     return _summary(scan_target(source, MCP_LIMITS), display_target(source))
 
 
+def _same(a: Path, b: Path) -> bool:
+    """a and b are the same file: by identity where both exist, else by exact path."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return a == b
+
+
 def _check_scope(source: str) -> None:
     """Refuse (ValueError: an isError result) a source this server may not scan: a git URL
     under FRISK_MCP_NO_NETWORK=1, before git runs; a path outside FRISK_MCP_ROOTS (an
@@ -100,11 +108,12 @@ def _check_scope(source: str) -> None:
         return
     real = Path(os.path.realpath(source))
     roots = [Path(os.path.realpath(r)) for r in os.environ.get("FRISK_MCP_ROOTS", "").split(os.pathsep) if r]
-    if real in roots:
+    # Identity, not spelling, decides: on case-insensitive APFS '/system' is /System.
+    if any(_same(real, root) for root in roots):
         return
-    if roots and not any(root in real.parents for root in roots):
+    if roots and not any(_same(parent, root) for root in roots for parent in real.parents):
         raise ValueError(f"refused: {source} is outside FRISK_MCP_ROOTS")
-    if real in (Path("/"), Path(os.path.realpath(Path.home())), Path("/System")):
+    if any(_same(real, broad) for broad in (Path("/"), Path(os.path.realpath(Path.home())), Path("/System"))):
         raise ValueError(f"refused: {source} is too broad to scan; name it in FRISK_MCP_ROOTS to allow it")
 
 

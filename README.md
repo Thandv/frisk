@@ -87,7 +87,7 @@ and still owner-held is in [STATUS.md](STATUS.md); a recorded first run, from a 
 pinned MCP config, is in [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
 Zero third-party dependencies — stdlib only, by design (a security tool you can audit in one sitting).
-The code to audit is `src/frisk`: about 4,400 lines of Python, counting every non-blank line
+The code to audit is `src/frisk`: about 4,500 lines of Python, counting every non-blank line
 of its `.py` files.
 
 ## Usage
