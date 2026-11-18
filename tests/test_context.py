@@ -380,11 +380,13 @@ class TestBoundedTime(ContextCase):
             bound = context.MAX_PYTHON_CHARS if path.endswith(".py") else context.MAX_LEX_CHARS
             for seed in seeds:
                 with self.subTest(path=path, seed=seed):
+                    if not path.endswith(".py"):  # Python is timed without its tokenizer, below
+                        # The size ladder first: a quadratic lexer fails on a cheap pair in seconds,
+                        # before the full-bound text below is lexed at all.
+                        assert_grows_slowly(path, seed, (bound - 16) // 4)
                     text = adversarial(path, seed, bound - len(seed) - 8)
                     self.assertLessEqual(len(text), bound)
                     self.assertEqual(timed(path, text)[1], 1)  # lexed
-                    if not path.endswith(".py"):  # Python is timed without its tokenizer, below
-                        assert_grows_slowly(path, seed, (bound - 16) // 4)
 
     def test_lexing_grows_linearly(self) -> None:
         small = 16 * 1024
