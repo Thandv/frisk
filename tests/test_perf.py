@@ -129,21 +129,28 @@ def cpu_seconds(scan: Callable[[str], object], text: str) -> float:
     return time.process_time() - t0
 
 
-def growth_ratio_ok(scan: Callable[[str], object], seed: str, small: int) -> bool:
-    """4x the text costs less than MAX_RATIO times as much, at `small` and at every size 4x below it
-    down to LOWEST (best of RUNS; a tiny small side is floored). The smaller pairs come first, so a
-    quadratic scan fails on a cheap pair, in seconds, before the large one is ever run."""
+def assert_grows_slowly(scan: Callable[[str], object], seed: str, small: int) -> None:
+    """Fails unless 4x the text costs less than MAX_RATIO times as much, at `small` and at every size
+    4x below it down to LOWEST (best of RUNS; a tiny small side is floored), naming the sizes, their
+    times and the limit. The smaller pairs come first, so a quadratic scan fails on a cheap pair, in
+    seconds, before the large one is ever run."""
     sizes = [small]
     while sizes[0] // 4 >= LOWEST:
         sizes.insert(0, sizes[0] // 4)
     for size in sizes:
-        t_small = min(cpu_seconds(scan, repeat(seed, size)) for _ in range(RUNS))
+        small_text, large_text = repeat(seed, size), repeat(seed, 4 * size)
+        t_small = min(cpu_seconds(scan, small_text) for _ in range(RUNS))
         limit = MAX_RATIO * max(t_small, FLOOR_S)
-        large = repeat(seed, 4 * size)
         # Best of RUNS, stopping at the first run under the limit: a loaded machine gets more tries.
-        if not any(cpu_seconds(scan, large) < limit for _ in range(RUNS)):
-            return False
-    return True
+        t_large = cpu_seconds(scan, large_text)
+        for _ in range(RUNS - 1):
+            if t_large < limit:
+                break
+            t_large = min(t_large, cpu_seconds(scan, large_text))
+        if t_large >= limit:
+            raise AssertionError(f"{len(small_text)} chars: {t_small:.4f} s, {len(large_text)} chars: {t_large:.4f} s "
+                                 f"(best of {RUNS} each); limit {limit:.4f} s, {MAX_RATIO:g}x the small side "
+                                 f"floored at {FLOOR_S:g} s")
 
 
 def finditer_scan(pattern: re.Pattern[str] | PerCommand) -> Callable[[str], object]:
@@ -199,13 +206,13 @@ class TestLinearTime(unittest.TestCase):
         for key, scan in sorted(budgeted().items()):
             for seed in SEEDS[key] + CLASS_RUNS:
                 with self.subTest(key=key, seed=seed[:24]):
-                    self.assertTrue(growth_ratio_ok(scan, seed, WIDE))
+                    assert_grows_slowly(scan, seed, WIDE)
 
     def test_the_instruction_rule_and_the_scan_loops_grow_linearly(self) -> None:
         for key, scan in sorted(linear().items()):
             for seed in SEEDS[key]:
                 with self.subTest(key=key, seed=seed[:24]):
-                    self.assertTrue(growth_ratio_ok(scan, seed, SMALL))
+                    assert_grows_slowly(scan, seed, SMALL)
 
 
 class TestGrowthCheckCatchesQuadratic(unittest.TestCase):
@@ -225,6 +232,8 @@ class TestGrowthCheckCatchesQuadratic(unittest.TestCase):
         result = self.run_growth_test_over("a*b")
         self.assertFalse(result.wasSuccessful())
         self.assertEqual(len(result.failures), 1)
+        # It says by how much: both sizes, their times and the limit, not just that a check was false.
+        self.assertRegex(result.failures[0][1], r"\d+ chars: [\d.]+ s, \d+ chars: [\d.]+ s .*limit [\d.]+ s")
 
     def test_the_growth_test_passes_for_a_linear_pattern_in_the_same_place(self) -> None:
         self.assertTrue(self.run_growth_test_over("a+").wasSuccessful())

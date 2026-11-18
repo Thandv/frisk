@@ -268,24 +268,31 @@ def timed(path: str, text: str) -> tuple[float, int]:
 RUNS, MAX_RATIO, FLOOR_S, LOWEST = 3, 10.0, 0.005, 8 * 1024
 
 
-def grows_slowly(path: str, seed: str, small: int, lowest: int = LOWEST,
-                 runner: Callable[[str], Callable[[], float]] | None = None) -> bool:
-    """4x the text costs less than MAX_RATIO times as much, at `small` and at every size 4x below it
-    down to `lowest`. The smaller pairs come first, so a quadratic lexer fails on a cheap pair, not
-    after the large one has run. `runner(text)` gives what times one run on `text` (by default,
-    classifying a span in it)."""
+def assert_grows_slowly(path: str, seed: str, small: int, lowest: int = LOWEST,
+                        runner: Callable[[str], Callable[[], float]] | None = None) -> None:
+    """Fails unless 4x the text costs less than MAX_RATIO times as much, at `small` and at every size
+    4x below it down to `lowest`, naming the sizes, their times and the limit. The smaller pairs come
+    first, so a quadratic lexer fails on a cheap pair, not after the large one has run. `runner(text)`
+    gives what times one run on `text` (by default, classifying a span in it)."""
     time_on = runner or (lambda text: lambda: timed(path, text)[0])
     sizes = [small]
     while sizes[0] // 4 >= lowest:
         sizes.insert(0, sizes[0] // 4)
     for size in sizes:
-        run_small, run_large = time_on(adversarial(path, seed, size)), time_on(adversarial(path, seed, 4 * size))
+        small_text, large_text = adversarial(path, seed, size), adversarial(path, seed, 4 * size)
+        run_small, run_large = time_on(small_text), time_on(large_text)
         t_small = min(run_small() for _ in range(RUNS))
         limit = MAX_RATIO * max(t_small, FLOOR_S)
         # Best of RUNS, stopping at the first run under the limit: a loaded machine gets more tries.
-        if not any(run_large() < limit for _ in range(RUNS)):
-            return False
-    return True
+        t_large = run_large()
+        for _ in range(RUNS - 1):
+            if t_large < limit:
+                break
+            t_large = min(t_large, run_large())
+        if t_large >= limit:
+            raise AssertionError(f"{len(small_text)} chars: {t_small:.4f} s, {len(large_text)} chars: {t_large:.4f} s "
+                                 f"(best of {RUNS} each); limit {limit:.4f} s, {MAX_RATIO:g}x the small side "
+                                 f"floored at {FLOOR_S:g} s")
 
 
 # Python text is counted, and only frisk's own work on it is timed. CPython 3.12+'s tokenizer is
@@ -363,7 +370,7 @@ class TestBoundedTime(ContextCase):
                 with self.subTest(path=path, seed=seed):
                     text = adversarial(path, seed, 1 << 20)
                     self.assertEqual(timed(path, text)[1], 0)  # over the bound: FALLBACK, not lexed
-                    self.assertTrue(grows_slowly(path, seed, 1 << 20, lowest=1 << 20))
+                    assert_grows_slowly(path, seed, 1 << 20, lowest=1 << 20)
 
     def test_text_up_to_the_bound_is_lexed_once_and_grows_linearly(self) -> None:
         for path, seeds in ADVERSARIAL.items():
@@ -374,7 +381,7 @@ class TestBoundedTime(ContextCase):
                     self.assertLessEqual(len(text), bound)
                     self.assertEqual(timed(path, text)[1], 1)  # lexed
                     if not path.endswith(".py"):  # Python is timed without its tokenizer, below
-                        self.assertTrue(grows_slowly(path, seed, (bound - 16) // 4))
+                        assert_grows_slowly(path, seed, (bound - 16) // 4)
 
     def test_lexing_grows_linearly(self) -> None:
         small = 16 * 1024
@@ -383,7 +390,7 @@ class TestBoundedTime(ContextCase):
                 continue  # timed without the tokenizer: test_frisks_own_python_work_grows_linearly
             for seed in seeds:
                 with self.subTest(path=path, seed=seed):
-                    self.assertTrue(grows_slowly(path, seed, small))
+                    assert_grows_slowly(path, seed, small)
 
     def test_frisks_own_python_work_is_linear_in_the_tokens(self) -> None:
         large = context.MAX_PYTHON_CHARS - 16
@@ -402,7 +409,25 @@ class TestBoundedTime(ContextCase):
         # From 8 KiB up to the bound, timing only context._python: the tokens are made beforehand.
         for seed in ADVERSARIAL["a.py"]:
             with self.subTest(seed=seed):
-                self.assertTrue(grows_slowly("a.py", seed, context.MAX_PYTHON_CHARS // 4, runner=python_alone))
+                assert_grows_slowly("a.py", seed, context.MAX_PYTHON_CHARS // 4, runner=python_alone)
+
+
+class TestGrowthCheck(unittest.TestCase):
+    """assert_grows_slowly on made-up times, so these cannot depend on the machine."""
+
+    def test_a_quadratic_cost_fails_naming_both_times_and_the_limit(self) -> None:
+        def quadratic(text: str) -> Callable[[], float]:
+            return lambda: (len(text) / 8192) ** 2 * 0.01
+
+        with self.assertRaisesRegex(AssertionError, r"^8192 chars: 0\.0100 s, 32768 chars: 0\.1600 s .*"
+                                                    r"limit 0\.1000 s, 10x the small side floored at 0\.005 s$"):
+            assert_grows_slowly("a.py", "a\n", 32 * 1024, runner=quadratic)
+
+    def test_a_linear_cost_passes_at_every_pair(self) -> None:
+        def linear(text: str) -> Callable[[], float]:
+            return lambda: len(text) * 1e-6
+
+        assert_grows_slowly("a.py", "a\n", 32 * 1024, runner=linear)
 
 
 class TestNeverRunsContent(unittest.TestCase):
