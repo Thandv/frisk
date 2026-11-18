@@ -88,7 +88,7 @@ frisk is pointed at hostile content by design, so it treats everything it reads 
   standard library only (`pyproject.toml:21`).
 - **Linear-time patterns.** Every window is bounded and stops at another start of the same
   rule, so crafted input cannot make a rule backtrack for long (`src/frisk/rules.py:15-19`;
-  `tests/test_perf.py` times each rule on 1 MiB of adversarial text).
+  `tests/test_perf.py` checks that each rule's CPU time grows linearly on adversarial text).
 - **Bounded input.** File size, file count, bytes read and time are capped (limitation 3);
   JSON integer literals are bounded (`src/frisk/jsonread.py`), and JSON nested too deep to
   read is an error, not a crash (`src/frisk/proxy.py`, `_parse`; `src/frisk/mcp_server.py`,

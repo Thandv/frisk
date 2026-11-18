@@ -49,7 +49,7 @@ composite Action on the examples (`.github/workflows/ci.yml`).
    the description frisk reports, and the `engine.scan_text` contexts it runs in. Every
    window in the pattern must be bounded, and stop at another start of the same rule, so
    the scan stays linear; `tests/test_perf.py` fails until the rule has seeds in its
-   `SEEDS` table and scans 1 MiB of them within budget.
+   `SEEDS` table and its CPU time on them grows linearly (4x the text, under 10x the time).
 2. **Its documentation.** Add a `RuleDoc` to `scripts/rule_docs.py`: what it matches, why a
    hit matters, an example described in words, the likely false positive and what to do on
    a hit. `tests/test_rule_metadata.py` fails while a rule has no entry, and when the

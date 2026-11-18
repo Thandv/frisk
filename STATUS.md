@@ -33,8 +33,8 @@ Each line names the tests that pin the behaviour. They run offline with a temp H
   symlinks): `tests/test_sources_git.py`, against a local bare repository.
 - **Scan limits** (file count, file size, total bytes, deadline) and out-of-tree symlinks
   give visible findings instead of a hang or a leak: `tests/test_scan_bounds.py`,
-  `tests/test_fs.py`. Every rule and scan surface runs in linear time on 1 MiB of its worst
-  input: `tests/test_perf.py`.
+  `tests/test_fs.py`. Every rule and scan surface runs in linear time on its worst input
+  (4x the text must cost under 10x the CPU time, from 8 KiB up): `tests/test_perf.py`.
 - **`frisk lock` / `frisk verify`** pin content and report drift: `tests/test_pin.py`,
   `tests/test_pin_spec.py`, `tests/test_pin_atomic.py`, `tests/test_pin_links.py`. A
   lockfile inside a directory it pins is not pinned with it: `tests/test_pin_lockfile.py`.
