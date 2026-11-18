@@ -146,15 +146,18 @@ class TestCaseAndSpelling(ScopeCase):
     def test_system_in_any_case_is_refused(self) -> None:
         if not Path("/System").is_dir() or not Path("/system").exists():
             self.skipTest("no case-insensitive /System on this filesystem")
-        for source in ("/SYSTEM", "/system", "/sYsTeM"):
-            with self.subTest(source=source):
-                self.assertIn("is too broad to scan", refusal(source))
+        # A regression would scan the real /System, so the scan is stubbed: the refusal must come first.
+        with mock.patch("frisk.engine.scan_path", return_value=mcp_server.ScanResult()):
+            for source in ("/SYSTEM", "/system", "/sYsTeM"):
+                with self.subTest(source=source):
+                    self.assertIn("is too broad to scan", refusal(source))
 
     def test_a_recased_root_is_the_same_root(self) -> None:
         if not _case_insensitive(self.tree):
             self.skipTest("temp filesystem is case-sensitive; a re-cased path names another file")
         os.environ["FRISK_MCP_ROOTS"] = str(self.tree)
         recased = self.tree.parent / self.tree.name.swapcase()
+        self.assertEqual(summary(str(recased))["verdict"], "BLOCK")
         self.assertEqual(summary(str(recased / "d1"))["verdict"], "BLOCK")
         other = self.tmp / "other"
         other.mkdir()
