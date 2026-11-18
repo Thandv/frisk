@@ -247,9 +247,24 @@ class TestGrowthCheckCatchesQuadratic(unittest.TestCase):
             return quadratic(text)
 
         with self.assertRaises(AssertionError):
-            assert_grows_slowly(scan, "a", 4 * 1024)
-        # One pair, 4 KiB then 16 KiB: RUNS runs of the small text, then one of the large.
-        self.assertEqual(sizes, [4 * 1024] * RUNS + [16 * 1024])
+            assert_grows_slowly(scan, "a", 8 * 1024)
+        # One pair, 8 KiB then 32 KiB: RUNS runs of the small text, then one of the large. (At 8 KiB the
+        # small side is several times FLOOR_S, so the floor cannot pull the large run under CLEARLY_OVER.)
+        self.assertEqual(sizes, [8 * 1024] * RUNS + [32 * 1024])
+
+    def test_a_scan_just_over_the_limit_is_timed_again(self) -> None:
+        # Load can put one run of a linear scan just over the limit; the next run decides.
+        large_runs: list[float] = []
+
+        def noisy(scan: Callable[[str], object], text: str) -> float:
+            if len(text) == 8 * 1024:
+                return 0.01
+            large_runs.append(0.11 if not large_runs else 0.04)  # 1.1x the 0.1 s limit, then under it
+            return large_runs[-1]
+
+        with mock.patch(f"{__name__}.cpu_seconds", noisy):
+            assert_grows_slowly(len, "a", 8 * 1024)
+        self.assertEqual(large_runs, [0.11, 0.04])
 
     def test_the_growth_test_passes_for_a_linear_pattern_in_the_same_place(self) -> None:
         self.assertTrue(self.run_growth_test_over("a+").wasSuccessful())

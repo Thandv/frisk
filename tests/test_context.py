@@ -442,6 +442,36 @@ class TestGrowthCheck(unittest.TestCase):
         self.assertEqual(runs[8192], RUNS)  # the small side is still best of RUNS
         self.assertEqual(runs[32768], 1)  # the large side is not run again once it is over the limit
 
+    def test_a_run_just_over_the_limit_is_run_again(self) -> None:
+        # Load can put one run of a linear lexer just over the limit; the next run decides.
+        large_runs: list[float] = []
+
+        def noisy(text: str) -> Callable[[], float]:
+            def run() -> float:
+                if len(text) == 8192:
+                    return 0.01
+                large_runs.append(0.11 if not large_runs else 0.04)  # 1.1x the 0.1 s limit, then under it
+                return large_runs[-1]
+            return run
+
+        assert_grows_slowly("a.py", "a\n", 8 * 1024, runner=noisy)
+        self.assertEqual(large_runs, [0.11, 0.04])
+
+    def test_a_cost_that_stays_just_over_the_limit_fails_after_runs_tries(self) -> None:
+        large_runs: list[int] = []
+
+        def over(text: str) -> Callable[[], float]:
+            def run() -> float:
+                if len(text) == 8192:
+                    return 0.01
+                large_runs.append(len(text))
+                return 0.11
+            return run
+
+        with self.assertRaisesRegex(AssertionError, r"32768 chars: 0\.1100 s .*limit 0\.1000 s"):
+            assert_grows_slowly("a.py", "a\n", 8 * 1024, runner=over)
+        self.assertEqual(large_runs, [32768] * RUNS)
+
     def test_a_linear_cost_passes_at_every_pair(self) -> None:
         def linear(text: str) -> Callable[[], float]:
             return lambda: len(text) * 1e-6
