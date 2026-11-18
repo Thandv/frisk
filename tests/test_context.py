@@ -6,6 +6,7 @@ does not use it. Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
 """
 from __future__ import annotations
 
+import io
 import os
 import re
 import tempfile
@@ -14,7 +15,7 @@ import tokenize
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from unittest import mock
 
 from _home import fake_home
@@ -267,27 +268,57 @@ def timed(path: str, text: str) -> tuple[float, int]:
 RUNS, MAX_RATIO, FLOOR_S, LOWEST = 3, 10.0, 0.005, 8 * 1024
 
 
-def grows_slowly(path: str, seed: str, small: int, lowest: int = LOWEST) -> bool:
+def grows_slowly(path: str, seed: str, small: int, lowest: int = LOWEST,
+                 runner: Callable[[str], Callable[[], float]] | None = None) -> bool:
     """4x the text costs less than MAX_RATIO times as much, at `small` and at every size 4x below it
     down to `lowest`. The smaller pairs come first, so a quadratic lexer fails on a cheap pair, not
-    after the large one has run."""
+    after the large one has run. `runner(text)` gives what times one run on `text` (by default,
+    classifying a span in it)."""
+    time_on = runner or (lambda text: lambda: timed(path, text)[0])
     sizes = [small]
     while sizes[0] // 4 >= lowest:
         sizes.insert(0, sizes[0] // 4)
     for size in sizes:
-        large = adversarial(path, seed, 4 * size)
-        t_small = min(timed(path, adversarial(path, seed, size))[0] for _ in range(RUNS))
+        run_small, run_large = time_on(adversarial(path, seed, size)), time_on(adversarial(path, seed, 4 * size))
+        t_small = min(run_small() for _ in range(RUNS))
         limit = MAX_RATIO * max(t_small, FLOOR_S)
         # Best of RUNS, stopping at the first run under the limit: a loaded machine gets more tries.
-        if not any(timed(path, large)[0] < limit for _ in range(RUNS)):
+        if not any(run_large() < limit for _ in range(RUNS)):
             return False
     return True
 
 
-# Python text is counted, not timed. CPython 3.12+'s tokenizer is super-linear on dense f-strings, so
-# no growth check on its time can pass on every machine; MAX_PYTHON_CHARS is what bounds that cost.
-# What is pinned instead cannot depend on load: over the bound nothing is lexed, up to it the text is
-# lexed once, and frisk's own work (the steps below) is the same per token at two sizes.
+# Python text is counted, and only frisk's own work on it is timed. CPython 3.12+'s tokenizer is
+# super-linear on dense f-strings, so no growth check on its time can pass on every machine;
+# MAX_PYTHON_CHARS is what bounds that cost. So over the bound nothing is lexed, up to it the text is
+# lexed once, frisk's own steps (python_work) are the same per token at two sizes, and frisk's own
+# time (python_alone, with the tokenizer's tokens made beforehand) grows linearly. The time also
+# catches what the steps cannot see, such as a copy of the token list for each token.
+
+
+def python_alone(text: str) -> Callable[[], float]:
+    """What times context._python on `text` without the stdlib tokenizer: its tokens are made here,
+    once and untimed, and each timed run replays them, ending as it did (a tokenizer error included)."""
+    tokens: list[tokenize.TokenInfo] = []
+    error: Exception | None = None
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            tokens.append(tok)
+    except (tokenize.TokenError, SyntaxError, ValueError) as e:  # what _python makes FALLBACK
+        error = e
+
+    def replay(readline: Any) -> Iterator[tokenize.TokenInfo]:
+        yield from tokens
+        if error is not None:
+            raise error.with_traceback(None)
+
+    def run() -> float:
+        with mock.patch.object(tokenize, "generate_tokens", replay):
+            t0 = time.process_time()
+            context._python(text)
+            return time.process_time() - t0
+
+    return run
 
 
 def python_work(text: str) -> tuple[int, int]:
@@ -342,14 +373,14 @@ class TestBoundedTime(ContextCase):
                     text = adversarial(path, seed, bound - len(seed) - 8)
                     self.assertLessEqual(len(text), bound)
                     self.assertEqual(timed(path, text)[1], 1)  # lexed
-                    if not path.endswith(".py"):  # Python is counted, below
+                    if not path.endswith(".py"):  # Python is timed without its tokenizer, below
                         self.assertTrue(grows_slowly(path, seed, (bound - 16) // 4))
 
     def test_lexing_grows_linearly(self) -> None:
         small = 16 * 1024
         for path, seeds in ADVERSARIAL.items():
             if path.endswith(".py"):
-                continue  # counted, not timed: test_frisks_own_python_work_is_linear_in_the_tokens
+                continue  # timed without the tokenizer: test_frisks_own_python_work_grows_linearly
             for seed in seeds:
                 with self.subTest(path=path, seed=seed):
                     self.assertTrue(grows_slowly(path, seed, small))
@@ -366,6 +397,12 @@ class TestBoundedTime(ContextCase):
                 self.assertLessEqual(work_large, 2 * large)  # a step or two per character at most
                 # The same work per token at 4x the text; a quadratic step would make it about 4x more.
                 self.assertLessEqual(work_large / tokens_large, 1.25 * work_small / tokens_small + 0.1)
+
+    def test_frisks_own_python_work_grows_linearly(self) -> None:
+        # From 8 KiB up to the bound, timing only context._python: the tokens are made beforehand.
+        for seed in ADVERSARIAL["a.py"]:
+            with self.subTest(seed=seed):
+                self.assertTrue(grows_slowly("a.py", seed, context.MAX_PYTHON_CHARS // 4, runner=python_alone))
 
 
 class TestNeverRunsContent(unittest.TestCase):
