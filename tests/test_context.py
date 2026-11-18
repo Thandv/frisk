@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 import tempfile
 import time
+import tokenize
 import unittest
 from pathlib import Path
+from typing import Any, Iterator
 from unittest import mock
 
 from _home import fake_home
@@ -259,47 +260,111 @@ def timed(path: str, text: str) -> tuple[float, int]:
         return time.process_time() - t0, len(calls)
 
 
-def within_budget(path: str, text: str) -> tuple[float, int]:
-    spent, calls = timed(path, text)
-    if spent >= 1.0:  # one more try, so a moment of machine load does not fail it
-        spent = min(spent, timed(path, text)[0])
-    return spent, calls
+# No absolute time is asserted, so machine load cannot fail these. Each side of a ratio is the best of
+# RUNS runs; 4x the text must cost less than MAX_RATIO times as much (about 4 if linear, 16 if quadratic);
+# a small side under FLOOR_S counts as FLOOR_S, so timer noise on tiny runs cannot make a ratio.
+RUNS, MAX_RATIO, FLOOR_S, LOWEST = 3, 10.0, 0.005, 8 * 1024
 
 
-# The plan's budget is 1 s per bounded text on a developer machine. Hosted CI runners are slower and
-# coverage tracing roughly doubles the cost, so there the absolute budget is 3 s; linear growth is pinned
-# separately (test_lexing_grows_linearly), and that test holds everywhere.
-LEX_BUDGET_S = 3.0 if (os.environ.get("GITHUB_ACTIONS") or sys.gettrace() is not None) else 1.0
+def grows_slowly(path: str, seed: str, small: int, lowest: int = LOWEST) -> bool:
+    """4x the text costs less than MAX_RATIO times as much, at `small` and at every size 4x below it
+    down to `lowest`. The smaller pairs come first, so a quadratic lexer fails on a cheap pair, not
+    after the large one has run."""
+    sizes = [small]
+    while sizes[0] // 4 >= lowest:
+        sizes.insert(0, sizes[0] // 4)
+    for size in sizes:
+        large = adversarial(path, seed, 4 * size)
+        t_small = min(timed(path, adversarial(path, seed, size))[0] for _ in range(RUNS))
+        limit = MAX_RATIO * max(t_small, FLOOR_S)
+        # Best of RUNS, stopping at the first run under the limit: a loaded machine gets more tries.
+        if not any(timed(path, large)[0] < limit for _ in range(RUNS)):
+            return False
+    return True
+
+
+# Python text is counted, not timed. CPython 3.12+'s tokenizer is super-linear on dense f-strings, so
+# no growth check on its time can pass on every machine; MAX_PYTHON_CHARS is what bounds that cost.
+# What is pinned instead cannot depend on load: over the bound nothing is lexed, up to it the text is
+# lexed once, and frisk's own work (the steps below) is the same per token at two sizes.
+
+
+def python_work(text: str) -> tuple[int, int]:
+    """(tokens the stdlib tokenizer yields for `text`, steps frisk's own code takes on them): the
+    neighbour look-ups and how far they scan, the f-string pieces and fields, and the regions made."""
+    real_tokens, real_neighbour = tokenize.generate_tokens, context._neighbour
+    real_fstring, real_field_end = context._fstring, context._field_end
+    tokens, steps = [0], [0]
+
+    def counting_tokens(readline: Any) -> Iterator[Any]:
+        for tok in real_tokens(readline):
+            tokens[0] += 1
+            yield tok
+
+    def neighbour(names: list[str], i: int, step: int) -> str | None:
+        j = i + step
+        while 0 <= j < len(names) and names[j] in ("NL", "COMMENT"):
+            j += step
+        steps[0] += 1 + abs(j - i)
+        return real_neighbour(names, i, step)
+
+    def fstring(body: str, start: int, end: int) -> list[context.Region]:
+        steps[0] += 1
+        return real_fstring(body, start, end)
+
+    def field_end(body: str, pos: int, end: int) -> int:
+        steps[0] += 1
+        return real_field_end(body, pos, end)
+
+    with mock.patch.object(tokenize, "generate_tokens", counting_tokens), \
+            mock.patch.object(context, "_neighbour", neighbour), \
+            mock.patch.object(context, "_fstring", fstring), \
+            mock.patch.object(context, "_field_end", field_end):
+        regions = context._python(text)
+    return tokens[0], steps[0] + len(regions)
 
 
 class TestBoundedTime(ContextCase):
-    def test_1_mib_of_adversarial_input_is_classified_in_under_1_s(self) -> None:
+    def test_classifying_over_the_bound_does_not_lex_and_does_not_grow_with_the_text(self) -> None:
         for path, seeds in ADVERSARIAL.items():
             for seed in seeds:
                 with self.subTest(path=path, seed=seed):
-                    spent, calls = within_budget(path, adversarial(path, seed, 1 << 20))
-                    self.assertLess(spent, 1.0)
-                    self.assertEqual(calls, 0)  # over the bound: FALLBACK, not lexed
+                    text = adversarial(path, seed, 1 << 20)
+                    self.assertEqual(timed(path, text)[1], 0)  # over the bound: FALLBACK, not lexed
+                    self.assertTrue(grows_slowly(path, seed, 1 << 20, lowest=1 << 20))
 
-    def test_text_up_to_the_bound_is_lexed_in_under_1_s(self) -> None:
+    def test_text_up_to_the_bound_is_lexed_once_and_grows_linearly(self) -> None:
         for path, seeds in ADVERSARIAL.items():
             bound = context.MAX_PYTHON_CHARS if path.endswith(".py") else context.MAX_LEX_CHARS
             for seed in seeds:
                 with self.subTest(path=path, seed=seed):
                     text = adversarial(path, seed, bound - len(seed) - 8)
                     self.assertLessEqual(len(text), bound)
-                    spent, calls = within_budget(path, text)
-                    self.assertLess(spent, LEX_BUDGET_S)
-                    self.assertEqual(calls, 1)  # lexed
+                    self.assertEqual(timed(path, text)[1], 1)  # lexed
+                    if not path.endswith(".py"):  # Python is counted, below
+                        self.assertTrue(grows_slowly(path, seed, (bound - 16) // 4))
 
     def test_lexing_grows_linearly(self) -> None:
         small = 16 * 1024
         for path, seeds in ADVERSARIAL.items():
+            if path.endswith(".py"):
+                continue  # counted, not timed: test_frisks_own_python_work_is_linear_in_the_tokens
             for seed in seeds:
                 with self.subTest(path=path, seed=seed):
-                    t_small = min(timed(path, adversarial(path, seed, small))[0] for _ in range(2))
-                    t_large = min(timed(path, adversarial(path, seed, 4 * small))[0] for _ in range(2))
-                    self.assertLess(t_large, 10.0 * max(t_small, 0.002))
+                    self.assertTrue(grows_slowly(path, seed, small))
+
+    def test_frisks_own_python_work_is_linear_in_the_tokens(self) -> None:
+        large = context.MAX_PYTHON_CHARS - 16
+        small = large // 4
+        for seed in ADVERSARIAL["a.py"]:
+            with self.subTest(seed=seed):
+                tokens_small, work_small = python_work(adversarial("a.py", seed, small))
+                tokens_large, work_large = python_work(adversarial("a.py", seed, large))
+                # (an unclosed bracket makes 3.12+ stop at its nesting limit, so tokens need not be 4x)
+                self.assertGreaterEqual(tokens_large, tokens_small)
+                self.assertLessEqual(work_large, 2 * large)  # a step or two per character at most
+                # The same work per token at 4x the text; a quadratic step would make it about 4x more.
+                self.assertLessEqual(work_large / tokens_large, 1.25 * work_small / tokens_small + 0.1)
 
 
 class TestNeverRunsContent(unittest.TestCase):

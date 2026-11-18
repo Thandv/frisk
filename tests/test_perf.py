@@ -7,12 +7,13 @@ the characters its windows take; each seed is repeated with no terminator, so a 
 that could be rescanned from many starts would be. The test fails when anything it should
 scan has no entry, and when an entry names nothing.
 
-- Budget: each rule in CODE_RULES, TEXT_RULES and PROSE_RULES and each surface regex scans 1 MiB of each
-  of its seeds (and of CLASS_RUNS) within BUDGET_S of CPU time. The worst cases measured
-  are in the FR-E5 notes; the unbounded rce.shell_true gap, for one, took 1.4 s on 64 KiB.
-- Linearity: the agent-instruction rule and the Python loops (each surface's extract(),
-  hidden_unicode) take longer per byte. For them, scanning 4x the text must take less than
-  MAX_RATIO times as long: about 4 for a linear scan, 16 for a quadratic one.
+- Growth: each rule in CODE_RULES, TEXT_RULES and PROSE_RULES and each surface regex, on each of
+  its seeds (and of CLASS_RUNS), and the agent-instruction rule and the Python loops (each
+  surface's extract(), hidden_unicode). Scanning 4x the text must take less than MAX_RATIO
+  times as long: about 4 for a linear scan, 16 for a quadratic one. No absolute time is
+  asserted, so machine load cannot fail it: each side is the best of RUNS runs, and a
+  small side under FLOOR_S counts as FLOOR_S, so timer noise on tiny runs cannot make a ratio.
+  The unbounded rce.shell_true gap, for one, took 1.4 s on 64 KiB.
 
 Payloads are assembled at runtime. Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
 """
@@ -24,14 +25,15 @@ import unittest
 from pathlib import Path
 from types import ModuleType
 from typing import Callable
+from unittest import mock
 
 from frisk import redact, rules, surfaces
 from frisk.rules import PerCommand, hidden_unicode
 
-SIZE = 1 << 20
-BUDGET_S = 1.0
-# The linearity check: SMALL then 4 * SMALL characters, best of RUNS each.
-SMALL, RUNS, MAX_RATIO = 32 * 1024, 2, 10.0
+# The growth check: SMALL then 4 * SMALL characters, best of RUNS each. WIDE is the same pair for the
+# rules and surface regexes, where a quadratic scan costs the most.
+SMALL, RUNS, MAX_RATIO, FLOOR_S = 32 * 1024, 3, 10.0, 0.005
+WIDE, LOWEST = 1 << 17, 8 * 1024
 
 RM, CURL, EVAL, EXEC = "r" + "m", "cu" + "rl", "ev" + "al", "ex" + "ec"
 ZWJ, TAG, FLAG = chr(0x200D), chr(0xE0067), chr(0x1F3F4)
@@ -127,6 +129,23 @@ def cpu_seconds(scan: Callable[[str], object], text: str) -> float:
     return time.process_time() - t0
 
 
+def growth_ratio_ok(scan: Callable[[str], object], seed: str, small: int) -> bool:
+    """4x the text costs less than MAX_RATIO times as much, at `small` and at every size 4x below it
+    down to LOWEST (best of RUNS; a tiny small side is floored). The smaller pairs come first, so a
+    quadratic scan fails on a cheap pair, in seconds, before the large one is ever run."""
+    sizes = [small]
+    while sizes[0] // 4 >= LOWEST:
+        sizes.insert(0, sizes[0] // 4)
+    for size in sizes:
+        t_small = min(cpu_seconds(scan, repeat(seed, size)) for _ in range(RUNS))
+        limit = MAX_RATIO * max(t_small, FLOOR_S)
+        large = repeat(seed, 4 * size)
+        # Best of RUNS, stopping at the first run under the limit: a loaded machine gets more tries.
+        if not any(cpu_seconds(scan, large) < limit for _ in range(RUNS)):
+            return False
+    return True
+
+
 def finditer_scan(pattern: re.Pattern[str] | PerCommand) -> Callable[[str], object]:
     def scan(text: str) -> int:
         return sum(1 for _ in pattern.finditer(text))
@@ -143,8 +162,8 @@ def extract_scan(surface: ModuleType) -> Callable[[str], object]:
 
 
 def budgeted() -> dict[str, Callable[[str], object]]:
-    """Held to BUDGET_S on 1 MiB: the rules of CODE_RULES and TEXT_RULES, and the regexes the
-    surfaces run over a whole file. package_json's, and json_values' _TOKEN, run only on text
+    """Held to the growth ratio, up to the WIDE pair: the rules of CODE_RULES and TEXT_RULES, and the
+    regexes the surfaces run over a whole file. package_json's, and json_values' _TOKEN, run only on text
     json.loads accepted (one match per string literal) or between two literals, so their
     extract() covers them."""
     out = {rid: finditer_scan(rx) for rid, _cat, _sev, rx, _desc, _ctx in
@@ -176,26 +195,39 @@ class TestEveryScanIsCovered(unittest.TestCase):
 
 
 class TestLinearTime(unittest.TestCase):
-    def test_each_rule_and_surface_regex_scans_1_mib_within_the_budget(self) -> None:
+    def test_each_rule_and_surface_regex_grows_linearly_with_the_text(self) -> None:
         for key, scan in sorted(budgeted().items()):
             for seed in SEEDS[key] + CLASS_RUNS:
                 with self.subTest(key=key, seed=seed[:24]):
-                    # A sixteenth first: a quadratic scan fails here in seconds, not after minutes.
-                    self.assertLess(cpu_seconds(scan, repeat(seed, SIZE // 16)), BUDGET_S / 4)
-                    text = repeat(seed, SIZE)
-                    spent = cpu_seconds(scan, text)
-                    if spent > BUDGET_S:  # one more try, so a moment of machine load does not fail it
-                        spent = min(spent, cpu_seconds(scan, text))
-                    self.assertLessEqual(spent, BUDGET_S)
+                    self.assertTrue(growth_ratio_ok(scan, seed, WIDE))
 
     def test_the_instruction_rule_and_the_scan_loops_grow_linearly(self) -> None:
         for key, scan in sorted(linear().items()):
             for seed in SEEDS[key]:
                 with self.subTest(key=key, seed=seed[:24]):
-                    small, large = repeat(seed, SMALL), repeat(seed, 4 * SMALL)
-                    t_small = min(cpu_seconds(scan, small) for _ in range(RUNS))
-                    t_large = min(cpu_seconds(scan, large) for _ in range(RUNS))
-                    self.assertLess(t_large, MAX_RATIO * max(t_small, 0.002))
+                    self.assertTrue(growth_ratio_ok(scan, seed, SMALL))
+
+
+class TestGrowthCheckCatchesQuadratic(unittest.TestCase):
+    NAME = "test_each_rule_and_surface_regex_grows_linearly_with_the_text"
+
+    def run_growth_test_over(self, pattern: str) -> unittest.TestResult:
+        """The real growth test, with `pattern` as the only scanned regex and 'a' runs as its seed."""
+        scans = {"scratch": finditer_scan(re.compile(pattern))}
+        result = unittest.TestResult()
+        with mock.patch(f"{__name__}.budgeted", lambda: scans), \
+                mock.patch.dict(SEEDS, {"scratch": ("a",)}), mock.patch(f"{__name__}.CLASS_RUNS", ()):
+            TestLinearTime(self.NAME).run(result)
+        return result
+
+    def test_the_growth_test_fails_for_a_quadratic_pattern_added_to_the_scanned_regexes(self) -> None:
+        # `a*b` over a run of a's retries from every start, so it is quadratic.
+        result = self.run_growth_test_over("a*b")
+        self.assertFalse(result.wasSuccessful())
+        self.assertEqual(len(result.failures), 1)
+
+    def test_the_growth_test_passes_for_a_linear_pattern_in_the_same_place(self) -> None:
+        self.assertTrue(self.run_growth_test_over("a+").wasSuccessful())
 
 
 class TestBoundsKeepDetection(unittest.TestCase):

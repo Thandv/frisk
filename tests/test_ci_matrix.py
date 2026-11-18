@@ -97,7 +97,8 @@ def run_verify(env: dict[str, str]) -> tuple[subprocess.CompletedProcess[str], s
         (Path(tmp) / "bin").mkdir()
         copy = Path(tmp) / "scripts" / "verify.sh"
         shutil.copy(VERIFY, copy)
-        full = {key: value.replace("{tmp}", tmp) for key, value in env.items()}
+        # TMPDIR inside the test's own directory: verify.sh's mktemp then never touches /tmp.
+        full = {"TMPDIR": tmp, **{key: value.replace("{tmp}", tmp) for key, value in env.items()}}
         for name, status in (("ruff", 0), ("mypy", 0), ("ruff-fails", 1), ("mypy-fails", 1)):
             fake_tool(Path(tmp) / "bin", name, status)
         python = Path(tmp) / "bin" / "python3"
