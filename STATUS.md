@@ -45,12 +45,13 @@ Each line names the tests that pin the behaviour. They run offline with a temp H
   `tests/test_proxy_shapes.py`, `tests/test_proxy_pins.py`, and `tests/test_proxy_e2e.py`
   against a misbehaving fake server (`tests/fixtures/fake_mcp_server.py`). The server is
   stopped when it exits, when the client closes the proxy's input (it gets end of input and
-  5 s to exit, then SIGTERM, then SIGKILL after 5 s more), when the client closes its output
-  (`client gone`: the same stop) and on SIGTERM or SIGINT. A child of the server that keeps
-  the server's output open is not waited for: relaying stops 5 s (`STOP_GRACE_S`) after the
-  server exits, once the replies the server had written are relayed. The exit status is the
-  server's (128 + the signal number if a signal ended it), also when the client went away;
-  2 when the usage is wrong, the command cannot start or the `--log` file cannot be opened.
+  5 s to exit, then SIGTERM, then SIGKILL after 5 s more), when the client has closed its
+  output (`client gone`, noticed at the next line relayed to it: the same stop) and on SIGTERM
+  or SIGINT. A child of the server that keeps the server's output open is not waited for:
+  relaying stops 5 s (`STOP_GRACE_S`) after the output the server wrote before it exited is
+  relayed. The proxy runs on POSIX systems only ([docs/proxy.md](docs/proxy.md)). The exit
+  status is the server's (128 + the signal number if a signal ended it), also when the client
+  went away; 2 when the usage is wrong, the command cannot start or the `--log` file cannot be opened.
 - **`frisk-mcp`** answers every malformed JSON-RPC request with an error and keeps serving:
   `tests/test_mcp_stdio.py`, `tests/test_mcp_server_characterization.py`, `tests/test_mcp_scope.py`.
 - **The GitHub Action** runs no input as shell code (`tests/test_action.py`), and CI's
@@ -97,6 +98,11 @@ Known gaps, all still open:
   some plugins, mostly security plugins that quote attack strings: frisk matches the string,
   not whether it is an instruction or an example. No test or run in this repository measures
   that.
+- **Python's own tokenizer is not timed.** On CPython 3.12 and later the stdlib tokenizer is
+  super-linear on dense f-strings, so `tests/test_perf.py` and `tests/test_context.py` time
+  frisk's work around it, not the tokenizer. What bounds that cost is the size limit: Python
+  text longer than `frisk.context.MAX_PYTHON_CHARS` (128 Ki characters) is not lexed and is
+  read as code throughout.
 
 ## Owner-held items
 

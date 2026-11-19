@@ -97,7 +97,7 @@ never the text of a description, result or request.
 | `dropped a server line that is not JSON (<n> characters)` | A server line was not JSON (or not UTF-8) and was dropped. |
 | `pins file unreadable ...`, `pins file is not a map ...`, `pins not persisted ...` | See [Where the pins live](#where-the-pins-live). |
 | other `dropped a ...` lines | An entry, content item or message frisk could not inspect (the wrong shape, or a request with no id) was dropped. |
-| `client gone`, `stopped by a signal` | The client stopped reading, or SIGTERM/SIGINT arrived; the server is stopped. |
+| `client gone`, `stopped by a signal` | The client closed the proxy's output (seen at the next line relayed to it), or SIGTERM/SIGINT arrived; the server is stopped. |
 | `server exited (<status>); dropped=<n> flagged=<n>` | The session's totals. |
 
 `FRISK_DEBUG=1` adds `[frisk debug]` lines (the server's start and exit, durations) to
@@ -108,7 +108,8 @@ stderr.
 The proxy exits with the server's status (128 + the signal number when a signal ended
 it), or 2 when the usage is wrong, the server command cannot be started, or the `--log`
 file cannot be opened. When the client closes the proxy's input (end of input), or closes its
-output (`client gone`; the proxy then writes nothing more to it), the server gets end of
+output (`client gone`, noticed when the proxy next relays a line to it; the proxy then writes
+nothing more to it), the server gets end of
 input and 5 s to exit, then SIGTERM, then SIGKILL after 5 s more; the status is still the
 server's: its own exit status if it exits within those 5 s, 128 + 15 if SIGTERM stopped it,
 128 + 9 if SIGKILL did. The proxy stops relaying 5 s after the server

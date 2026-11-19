@@ -132,8 +132,9 @@ From `frisk --help`:
 - `frisk proxy`: the server's status (128 + the signal number if a signal ended it), however
   the proxy ends: the server exits; the client closes its input (the server gets end of input
   and 5 s to exit, then SIGTERM, then SIGKILL after 5 s more) or its output (`client gone`,
-  the same stop); a child of the server holds the server's output open (relaying stops 5 s
-  after the server exits); or SIGTERM or SIGINT arrives. It is 2 on a usage error, a server it
+  noticed at the next line relayed to it; the same stop); a child of the server holds the
+  server's output open (relaying stops 5 s after what the server wrote before it exited is
+  relayed); or SIGTERM or SIGINT arrives. It is 2 on a usage error, a server it
   cannot start or a `--log` file it cannot open.
 
 `frisk-mcp` runs until its input ends; it answers errors as JSON-RPC errors or `isError`
@@ -620,10 +621,11 @@ it is checked for hidden Unicode. Bytes from the server that are not UTF-8 never
 relay (that line is dropped). The real server is stopped and reaped however the proxy
 ends: when the server exits, when the client closes the proxy's input (the server gets
 end of input and 5 s to exit, then SIGTERM, then SIGKILL after 5 s more), when the client
-stops reading (`client gone`: the server gets end of input and the same 5 s, then the same
-stop), or on SIGTERM or SIGINT. The proxy stops relaying 5 s after the server exits, even if
-a child of the server still holds its output open. The 5 s start once the proxy has relayed
-all the output that existed when the server exited, however slowly the client reads it, so a
+has closed the proxy's output (`client gone`, noticed when the proxy next relays a line to it:
+the server gets end of input and the same 5 s, then the same stop), or on SIGTERM or SIGINT. A
+client that stops reading but keeps its output open is waited for, not treated as gone. The
+proxy stops relaying 5 s after the server exits, even if a child of the server still holds
+its output open. The 5 s start once the proxy has relayed all the output that existed when the server exited, however slowly the client reads it, so a
 slow reader still gets every reply the server wrote before it exited; only output that arrives
 after that point is cut off, and a line being written when the limit is reached is finished
 first. A signal ends the proxy
