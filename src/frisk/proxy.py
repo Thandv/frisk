@@ -713,8 +713,9 @@ class Proxy:
     def _write_client(text: str) -> None:
         """Write one line to the client's output. It goes straight to the file descriptor, not
         through sys.stdout's buffer: a thread blocked writing to a client that is not reading
-        would hold that buffer's lock, and Python aborts at exit when it cannot take it. (A
-        stand-in for stdout with no descriptor, a test's, gets an ordinary write.)"""
+        would hold that buffer's lock, and Python aborts at exit when it cannot take it. An
+        output the client left non-blocking is waited on until it can take more. (A stand-in
+        for stdout with no descriptor, a test's, gets an ordinary write.)"""
         try:
             fd = sys.stdout.fileno()
         except (OSError, ValueError):  # no descriptor behind it, or closed
@@ -723,7 +724,12 @@ class Proxy:
             return
         data = memoryview(text.encode("utf-8"))
         while data:
-            data = data[os.write(fd, data):]
+            try:
+                data = data[os.write(fd, data):]
+            except BlockingIOError:  # a full pipe, not a client gone
+                with selectors.DefaultSelector() as sel:
+                    sel.register(fd, selectors.EVENT_WRITE)
+                    sel.select()
 
     def _parse(self, line: str) -> object:
         try:

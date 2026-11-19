@@ -5,7 +5,7 @@ way the proxy ends (its input closing, SIGTERM, SIGINT, its output closing); a s
 cannot be launched or a --log that cannot be opened is one line and exit 2; a 5 MB tool result
 is delivered, marked partially scanned. Each wait is on a pipe or a process, under a deadline
 that kills the proxy if it hangs; the only sleeps are the slow-reader stalls, which outlast the
-proxy's STOP_GRACE_S bound on purpose.
+proxy's STOP_GRACE_S bound on purpose, and a late reader's 2 s stall.
 Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
 """
 from __future__ import annotations
@@ -53,14 +53,15 @@ class ProxyCase(unittest.TestCase):
         self.grandchild_file = self.tmp / "grandchild.pid"
 
     def start(self, *proxy_args: str, linger: bool = False,
-              server_env: dict[str, str] | None = None, pass_fds: tuple[int, ...] = ()) -> subprocess.Popen[bytes]:
+              server_env: dict[str, str] | None = None, pass_fds: tuple[int, ...] = (),
+              stdout: int = subprocess.PIPE) -> subprocess.Popen[bytes]:
         env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
                "FAKE_MCP_EXTRAS": "1", "FAKE_MCP_LINGER": "1" if linger else "0", "FRISK_DEBUG": "0",
                "HOME": str(self.tmp), "XDG_STATE_HOME": str(self.tmp),  # pins never in the real state dir
                **(server_env or {})}
         argv = proxy_args or ("--", sys.executable, str(FAKE_SERVER))
         proc = subprocess.Popen([sys.executable, "-m", "frisk.cli", "proxy", *argv], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.tmp),
+                                stdout=stdout, stderr=subprocess.PIPE, env=env, cwd=str(self.tmp),
                                 pass_fds=pass_fds)
         guard = threading.Timer(DEADLINE_S, proc.kill)  # a hung proxy fails the test, never hangs it
         guard.start()
@@ -269,6 +270,33 @@ class TestLifecycle(ProxyCase):
         self.assertGreater(len(lines), 0)
         for line in lines:  # the line being written when relaying stopped arrives whole
             self.assertEqual(json.loads(line)["method"], "notifications/message")
+
+
+class TestNonBlockingClientOutput(ProxyCase):
+    def test_a_client_output_left_non_blocking_gets_every_reply_whole(self) -> None:
+        r, w = os.pipe()
+        self.addCleanup(os.close, r)
+        os.set_blocking(w, False)  # as a client may leave it: a full pipe is EAGAIN, not a client gone
+        try:
+            proc = self.start(stdout=w)
+        finally:
+            os.close(w)
+        self.send(proc, INIT, BIG, LIST)
+        assert proc.stdin is not None
+        proc.stdin.close()
+        time.sleep(2)  # the client reads late: the proxy's writes find the pipe full
+        chunks = []
+        while True:
+            chunk = os.read(r, 1 << 20)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        self.assertEqual(proc.wait(timeout=DEADLINE_S), 0)
+        replies = [json.loads(line) for line in b"".join(chunks).splitlines()]
+        self.assertEqual([reply["id"] for reply in replies], [1, 3, 2])
+        self.assertGreater(len(replies[1]["result"]["content"][0]["text"]), 5_000_000)
+        assert proc.stderr is not None
+        self.assertNotIn(b"client gone", proc.stderr.read())
 
 
 class TestManyDescriptors(ProxyCase):
