@@ -46,7 +46,6 @@ Stdlib only.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import io
 import json
@@ -57,7 +56,6 @@ import struct
 import subprocess
 import sys
 import tempfile
-import termios
 import threading
 import time
 from collections.abc import Iterator
@@ -67,6 +65,13 @@ from typing import IO, Callable, TextIO
 from . import jsonread
 from .debug import log as _root_log, ms_since, redact
 from .engine import Finding, scan_text, worst_severity
+
+try:  # POSIX only (not on Windows); cli imports this module for every command, so never required
+    import fcntl
+    import termios
+    HAS_FIONREAD = True
+except ImportError:
+    HAS_FIONREAD = False
 
 log = _root_log.getChild("proxy")
 
@@ -638,10 +643,11 @@ class Proxy:
         relayed, and whatever arrives after (from a child still writing) is what it cuts off."""
         assert proc.stdout is not None
         with self._read_lock:
-            try:
-                queued = struct.unpack("i", fcntl.ioctl(proc.stdout.fileno(), termios.FIONREAD, b"\0\0\0\0"))[0]
-            except (OSError, ValueError):
-                queued = 0
+            queued = 0  # without FIONREAD, the bound counts from the server's exit
+            if HAS_FIONREAD:
+                with contextlib.suppress(OSError, ValueError):
+                    queued = struct.unpack("i", fcntl.ioctl(proc.stdout.fileno(), termios.FIONREAD,
+                                                            b"\0\0\0\0"))[0]
             self._backlog_end = self._read_total + queued
             if self._reading and queued == 0:  # the relay is already waiting for new output
                 self._waiting.set()

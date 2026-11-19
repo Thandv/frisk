@@ -282,6 +282,32 @@ class TestServerIgnoringEndOfInput(ProxyCase):
         self.assertTrue(gone(self.server_pid()))
 
 
+class TestWithoutPosixOnlyModules(ProxyCase):
+    """fcntl and termios do not exist on Windows; no frisk command may need them to start."""
+
+    def test_the_cli_imports_and_its_help_runs_without_fcntl_and_termios(self) -> None:
+        code = ("import sys; sys.modules['fcntl'] = None; sys.modules['termios'] = None\n"
+                "from frisk import cli\n"
+                "sys.exit(cli.main(['--help']))")
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=DEADLINE_S,
+                              env={**os.environ, "PYTHONPATH": str(REPO / "src")}, cwd=str(self.tmp))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(b"frisk proxy", done.stdout)
+
+    def test_the_proxy_relays_and_exits_with_the_server_without_fcntl_and_termios(self) -> None:
+        code = ("import sys; sys.modules['fcntl'] = None; sys.modules['termios'] = None\n"
+                "from frisk import cli\n"
+                "sys.exit(cli.main(sys.argv[1:]))")
+        env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
+               "FRISK_DEBUG": "0", "HOME": str(self.tmp), "XDG_STATE_HOME": str(self.tmp)}
+        done = subprocess.run([sys.executable, "-c", code, "proxy", "--", sys.executable, str(FAKE_SERVER)],
+                              input=json.dumps(INIT).encode() + b"\n", capture_output=True, timeout=DEADLINE_S,
+                              env=env, cwd=str(self.tmp))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["id"], 1)
+        self.assertTrue(gone(self.server_pid()))
+
+
 class TestCannotStart(ProxyCase):
     def test_a_server_command_that_is_not_executable_exits_2_with_one_line(self) -> None:
         script = self.tmp / "server.sh"
