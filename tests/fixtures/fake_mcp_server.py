@@ -10,14 +10,20 @@ server may: before its tools/list reply it writes a line that is not UTF-8, the 
 holds an entry that is not a tool and a tool described in non-ASCII text, and tools/call of
 "big" returns a 5 MB text whose last line is a hidden directive. With FAKE_MCP_LINGER=1 it
 does not exit when stdin closes but waits for a signal, as a server that ignores the end
-of its input does, so only a proxy that stops it gets rid of it.
+of its input does, so only a proxy that stops it gets rid of it. With FAKE_MCP_GRANDCHILD=<file>
+it starts a sleeping child that inherits its stdout (and writes the child's pid to <file>), so
+the pipe stays open after the server itself has exited. With FAKE_MCP_REPLY_DELAY_S=<seconds>
+it waits that long before each reply, as a slow tool call does. With FAKE_MCP_GRANDCHILD_LINES=1 that
+child, once the server has exited, writes 200 kB notification lines to the inherited stdout without end.
 """
 from __future__ import annotations
 
 import json
 import os
 import signal
+import subprocess
 import sys
+import time
 
 CLEAN_TOOL = {
     "name": "echo-text",
@@ -66,16 +72,41 @@ def respond(req: dict) -> dict | None:
 
 EXTRAS = os.environ.get("FAKE_MCP_EXTRAS") == "1"
 
+# The grandchild that never stops writing: it waits for its parent (argv[1]) to exit, then writes
+# whole lines until its output is closed.
+GRANDCHILD_LINES = """
+import json, os, sys, time
+while os.getppid() == int(sys.argv[1]):
+    time.sleep(0.02)
+line = json.dumps({"jsonrpc": "2.0", "method": "notifications/message", "params": {"data": "x" * 200000}}) + "\\n"
+try:
+    while True:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+except OSError:
+    pass
+"""
+
 
 def main() -> None:
     pidfile = os.environ.get("FAKE_MCP_PIDFILE")
     if pidfile:
         with open(pidfile, "w", encoding="utf-8") as fh:
             fh.write(str(os.getpid()))
+    grandchild_file = os.environ.get("FAKE_MCP_GRANDCHILD")
+    if grandchild_file:  # inherits our stdout; its stdin and stderr are not the proxy's
+        code = GRANDCHILD_LINES if os.environ.get("FAKE_MCP_GRANDCHILD_LINES") == "1" else "import time; time.sleep(60)"
+        child = subprocess.Popen([sys.executable, "-c", code, str(os.getpid())],
+                                 stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(grandchild_file, "w", encoding="utf-8") as fh:
+            fh.write(str(child.pid))
+    delay = float(os.environ.get("FAKE_MCP_REPLY_DELAY_S", "0"))
     for line in sys.stdin:
         if not line.strip():
             continue
         resp = respond(json.loads(line))
+        if resp is not None and delay:
+            time.sleep(delay)
         if resp is not None:  # with EXTRAS, non-ASCII text goes out as raw UTF-8
             sys.stdout.buffer.write((json.dumps(resp, ensure_ascii=not EXTRAS) + "\n").encode("utf-8"))
             sys.stdout.flush()

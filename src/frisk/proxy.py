@@ -46,18 +46,22 @@ Stdlib only.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import hashlib
 import io
 import json
 import os
+import select
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import threading
 import time
 from pathlib import Path
-from typing import IO, Callable, TextIO
+from typing import IO, Callable, Iterator, TextIO
 
 from . import jsonread
 from .debug import log as _root_log, ms_since, redact
@@ -203,6 +207,16 @@ class Proxy:
         # relays (shared with the client->server thread, so writes take the lock).
         self.server_in: IO[str] | None = None
         self._server_lock = threading.Lock()
+        # Held while a line is written to the client; once relaying is stopped, no line is begun.
+        self._relay_lock = threading.Lock()
+        self._relay_stopped = threading.Event()
+        # What the relay has read from the server's pipe, and the end of the output that existed
+        # when the server exited (None until then); _waiting is set once the relay has passed it.
+        self._read_lock = threading.Lock()
+        self._read_total = 0
+        self._reading = False
+        self._backlog_end: int | None = None
+        self._waiting = threading.Event()
 
     def _log(self, msg: str) -> None:
         print(f"[frisk-proxy] {msg}", file=self.log, flush=True)
@@ -515,8 +529,12 @@ class Proxy:
     def run(self) -> int:
         """Relay until the server exits, the client goes away (end of its input, or its
         output closed) or a SIGTERM/SIGINT arrives; on every path the server is stopped
-        (terminate, STOP_GRACE_S, kill) and reaped. Returns the server's exit status (128 +
-        the signal number for one ended by a signal). Raises LaunchError if it cannot start."""
+        (terminate, STOP_GRACE_S, kill) and reaped. After the server exits, relaying goes on
+        for STOP_GRACE_S at most (a child of the server may hold its output open), counted from
+        when the relay has relayed everything that existed when the server exited, however slowly
+        the client reads: only output that arrives after that point is cut off.
+        Returns the server's exit status (128 + the signal number for one ended by a signal).
+        Raises LaunchError if it cannot start."""
         # Redacted as debug lines are, so a key passed as an argument never reaches the log.
         self._log("started; wrapping: " + redact(" ".join(self.server_cmd)))
         t0 = time.monotonic()
@@ -532,10 +550,24 @@ class Proxy:
         restore = _stop_on_signals()
         try:
             threading.Thread(target=self._client_to_server, args=(proc,), daemon=True).start()
-            self._server_to_client(proc)
+            relay = threading.Thread(target=self._server_to_client, args=(proc,), daemon=True)
+            relay.start()
             code = proc.wait()
+            # A grandchild holding the server's stdout keeps it open: stop relaying a grace
+            # period after the server is gone. The period starts once the relay has relayed
+            # all the output that existed at the exit, however slowly the client reads it, so
+            # only output that arrives after that (a child still writing) is cut off.
+            self._note_server_exit(proc)
+            self._waiting.wait()
+            relay.join(STOP_GRACE_S)
+            # No new line is begun after this; one being written is finished first, so the
+            # proxy never exits with the relay thread inside a write.
+            self._relay_stopped.set()
+            with self._relay_lock:
+                pass
         except SystemExit:  # SIGTERM or SIGINT: stop the server, then exit with its status
             self._log("stopped by a signal")
+            self._relay_stopped.set()  # a write blocked on a client that is not reading is left (see _write_client)
             _stop(proc)
             code = proc.wait()
         finally:
@@ -559,20 +591,93 @@ class Proxy:
         except (BrokenPipeError, ValueError) as e:
             log.debug("client->server relay stopped error=%s", type(e).__name__)
         finally:
-            try:
-                with self._server_lock:
-                    proc.stdin.close()
-            except OSError as e:
-                log.debug("server stdin close failed error=%s", type(e).__name__)
+            self._close_server_input(proc)
         try:
             proc.wait(timeout=STOP_GRACE_S)
         except subprocess.TimeoutExpired:
             self._log("client input ended and the server did not exit; stopping it")
             _stop(proc)
 
+    def _close_server_input(self, proc: subprocess.Popen[str]) -> None:
+        assert proc.stdin is not None
+        try:
+            with self._server_lock:
+                proc.stdin.close()
+        except OSError as e:
+            log.debug("server stdin close failed error=%s", type(e).__name__)
+
+    def _client_gone(self, proc: subprocess.Popen[str]) -> None:
+        """The client stopped reading: point our output at /dev/null (so the flush at exit
+        cannot fail and change the exit status), give the server end of input and
+        STOP_GRACE_S to exit, then stop it."""
+        self._log("client gone")
+        with contextlib.suppress(OSError, ValueError):  # no file descriptor behind sys.stdout (a test's)
+            out_fd = sys.stdout.fileno()
+            null_fd = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(null_fd, out_fd)
+            finally:
+                os.close(null_fd)
+        self._close_server_input(proc)
+        try:
+            proc.wait(timeout=STOP_GRACE_S)
+        except subprocess.TimeoutExpired:
+            _stop(proc)
+
     def _server_to_client(self, proc: subprocess.Popen[str]) -> None:
         assert proc.stdout is not None
-        for line in proc.stdout:
+        try:
+            self._relay_lines(proc)
+        finally:
+            self._waiting.set()  # run() never waits for a relay that has ended
+
+    def _note_server_exit(self, proc: subprocess.Popen[str]) -> None:
+        """The server has exited: record how much of its output already exists (what its pipe
+        holds, plus what the relay has read), so the relay's bound starts only once that is
+        relayed, and whatever arrives after (from a child still writing) is what it cuts off."""
+        assert proc.stdout is not None
+        with self._read_lock:
+            try:
+                queued = struct.unpack("i", fcntl.ioctl(proc.stdout.fileno(), termios.FIONREAD, b"\0\0\0\0"))[0]
+            except (OSError, ValueError):
+                queued = 0
+            self._backlog_end = self._read_total + queued
+            if self._reading and queued == 0:  # the relay is already waiting for new output
+                self._waiting.set()
+
+    def _read_lines(self, proc: subprocess.Popen[str]) -> Iterator[str]:
+        """The server's output line by line, read from its pipe directly so that what has
+        been read, and what is still queued, are known exactly (see _note_server_exit)."""
+        assert proc.stdout is not None
+        fd =proc.stdout.fileno()
+        buf = bytearray()
+        scanned = 0
+        while True:
+            end = buf.find(b"\n", scanned)
+            if end >= 0:
+                line = bytes(buf[:end + 1])
+                del buf[:end + 1]
+                scanned = 0
+                yield line.decode("utf-8", errors="surrogateescape")
+                continue
+            scanned = len(buf)
+            with self._read_lock:
+                self._reading = True
+                if self._backlog_end is not None and self._read_total >= self._backlog_end:
+                    self._waiting.set()  # everything that existed at the exit is relayed
+            select.select([fd], [], [])
+            with self._read_lock:
+                self._reading = False
+                data = os.read(fd, 65536)
+                self._read_total += len(data)
+            if not data:
+                if buf:
+                    yield buf.decode("utf-8", errors="surrogateescape")
+                return
+            buf += data
+
+    def _relay_lines(self, proc: subprocess.Popen[str]) -> None:
+        for line in self._read_lines(proc):
             line = line.rstrip("\n")
             if not line:
                 continue
@@ -580,12 +685,33 @@ class Proxy:
             out = None if msg is _UNPARSED else self.inspect(msg)
             if out is None:
                 continue
-            try:
-                sys.stdout.write(json.dumps(out) + "\n")
-                sys.stdout.flush()
-            except BrokenPipeError:
-                self._log("client gone")
-                return
+            with self._relay_lock:
+                if self._relay_stopped.is_set():
+                    self._log("relaying stopped after the server exited; dropped a line from it")
+                    return
+                try:
+                    self._write_client(json.dumps(out) + "\n")
+                    continue
+                except (OSError, ValueError):  # BrokenPipeError, or the output closed
+                    pass
+            self._client_gone(proc)
+            return
+
+    @staticmethod
+    def _write_client(text: str) -> None:
+        """Write one line to the client's output. It goes straight to the file descriptor, not
+        through sys.stdout's buffer: a thread blocked writing to a client that is not reading
+        would hold that buffer's lock, and Python aborts at exit when it cannot take it. (A
+        stand-in for stdout with no descriptor, a test's, gets an ordinary write.)"""
+        try:
+            fd = sys.stdout.fileno()
+        except (OSError, ValueError):  # no descriptor behind it, or closed
+            sys.stdout.write(text)
+            sys.stdout.flush()
+            return
+        data = memoryview(text.encode("utf-8"))
+        while data:
+            data = data[os.write(fd, data):]
 
     def _parse(self, line: str) -> object:
         try:

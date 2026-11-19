@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from typing import IO
@@ -27,7 +28,7 @@ from frisk import proxy
 
 REPO = Path(__file__).resolve().parent.parent
 FAKE_SERVER = REPO / "tests" / "fixtures" / "fake_mcp_server.py"
-DEADLINE_S = 10  # a hang guard per test; each finishes in about a second
+DEADLINE_S = 60  # a hang guard per test (scanning a 5 MB reply is slow on a loaded machine)
 INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
 LIST = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
 BIG = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "big", "arguments": {}}}
@@ -47,11 +48,14 @@ class ProxyCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
         self.pidfile = self.tmp / "server.pid"
+        self.grandchild_file = self.tmp / "grandchild.pid"
 
-    def start(self, *proxy_args: str, linger: bool = False) -> subprocess.Popen[bytes]:
+    def start(self, *proxy_args: str, linger: bool = False,
+              server_env: dict[str, str] | None = None) -> subprocess.Popen[bytes]:
         env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
                "FAKE_MCP_EXTRAS": "1", "FAKE_MCP_LINGER": "1" if linger else "0", "FRISK_DEBUG": "0",
-               "HOME": str(self.tmp), "XDG_STATE_HOME": str(self.tmp)}  # FR-E6: pins never in the real state dir
+               "HOME": str(self.tmp), "XDG_STATE_HOME": str(self.tmp),  # pins never in the real state dir
+               **(server_env or {})}
         argv = proxy_args or ("--", sys.executable, str(FAKE_SERVER))
         proc = subprocess.Popen([sys.executable, "-m", "frisk.cli", "proxy", *argv], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.tmp))
@@ -71,9 +75,14 @@ class ProxyCase(unittest.TestCase):
                     pipe.close()
         if self.pidfile.exists() and not gone(self.server_pid()):
             os.kill(self.server_pid(), signal.SIGKILL)
+        if self.grandchild_file.exists() and not gone(self.grandchild_pid()):
+            os.kill(self.grandchild_pid(), signal.SIGKILL)
 
     def server_pid(self) -> int:
         return int(self.pidfile.read_text(encoding="utf-8"))
+
+    def grandchild_pid(self) -> int:
+        return int(self.grandchild_file.read_text(encoding="utf-8"))
 
     @staticmethod
     def send(proc: subprocess.Popen[bytes], *msgs: dict) -> None:
@@ -116,8 +125,8 @@ class TestRelay(ProxyCase):
 
 
 class TestLifecycle(ProxyCase):
-    def started(self, linger: bool = False) -> subprocess.Popen[bytes]:
-        proc = self.start(linger=linger)
+    def started(self, linger: bool = False, server_env: dict[str, str] | None = None) -> subprocess.Popen[bytes]:
+        proc = self.start(linger=linger, server_env=server_env)
         self.send(proc, INIT)
         self.assertEqual(self.reply(proc.stdout)["id"], 1)  # the server is up and its pid written
         return proc
@@ -149,6 +158,102 @@ class TestLifecycle(ProxyCase):
         assert proc.stderr is not None
         self.assertIn(b"client gone", proc.stderr.read())
         self.assertTrue(gone(self.server_pid()))
+
+    def test_a_client_that_closes_only_its_output_ends_proxy_and_server(self) -> None:
+        proc = self.started()
+        assert proc.stdout is not None
+        proc.stdout.close()  # stdin stays open: the server never sees end of input from the client
+        self.send(proc, LIST)  # a small reply hits the closed pipe
+        t0 = time.monotonic()
+        status = proc.wait(timeout=DEADLINE_S)
+        self.assertLess(time.monotonic() - t0, 10)
+        self.assertEqual(status, 0)  # the server's status, never the 120 of a failed flush at exit
+        assert proc.stderr is not None
+        self.assertIn(b"client gone", proc.stderr.read())
+        self.assertTrue(gone(self.server_pid()))
+
+    def test_the_proxy_stops_relaying_when_a_grandchild_holds_the_server_output(self) -> None:
+        proc = self.started(server_env={"FAKE_MCP_GRANDCHILD": str(self.grandchild_file)})
+        assert proc.stdin is not None
+        proc.stdin.close()  # the server exits; its sleeping child still holds the pipe to the proxy
+        t0 = time.monotonic()
+        status = proc.wait(timeout=DEADLINE_S)
+        self.assertLess(time.monotonic() - t0, proxy.STOP_GRACE_S + 5)
+        self.assertEqual(status, 0)
+        self.assertTrue(gone(self.server_pid()))
+        self.assertFalse(gone(self.grandchild_pid()))  # it did hold the pipe the whole time
+
+    def test_a_reply_in_flight_when_the_client_closes_its_input_is_still_delivered(self) -> None:
+        proc = self.start(server_env={"FAKE_MCP_REPLY_DELAY_S": str(proxy.STOP_GRACE_S / 2)})
+        self.send(proc, INIT)
+        assert proc.stdin is not None
+        proc.stdin.close()  # the reply comes after half the grace period, with input already at its end
+        self.assertEqual(self.reply(proc.stdout)["id"], 1)
+        self.assertEqual(proc.wait(timeout=DEADLINE_S), 0)
+
+    def test_a_slow_reader_still_gets_the_whole_large_reply_after_its_input_closed(self) -> None:
+        proc = self.start()
+        self.send(proc, INIT, BIG)
+        assert proc.stdin is not None
+        proc.stdin.close()  # the server replies, then exits on end of input, while the client is not reading
+        time.sleep(proxy.STOP_GRACE_S + 2)  # a slow reader: longer than the proxy's bound
+        self.assertEqual(self.reply(proc.stdout)["id"], 1)
+        text = self.reply(proc.stdout)["result"]["content"][0]["text"]
+        self.assertGreater(len(text), 5_000_000)
+        self.assertEqual(proc.wait(timeout=DEADLINE_S), 0)
+
+    def test_replies_queued_behind_a_slow_reader_are_all_delivered_after_its_input_closed(self) -> None:
+        proc = self.start()
+        self.send(proc, INIT, BIG, LIST)
+        assert proc.stdin is not None
+        proc.stdin.close()  # the server writes all three replies and exits; the client is not reading
+        time.sleep(proxy.STOP_GRACE_S + 2)  # longer than the proxy's bound after the server exits
+        ids = [self.reply(proc.stdout)["id"] for _ in range(3)]
+        self.assertEqual(ids, [1, 3, 2])
+        self.assertEqual(proc.wait(timeout=DEADLINE_S), 0)
+
+    def test_pipelined_replies_written_before_the_server_exited_all_arrive_to_a_slow_reader(self) -> None:
+        proc = self.start()
+        count = 200  # about 0.7 KB each: more than the client's pipe holds (the relay blocks writing), less than
+        #              the pipes and the relay's buffer hold together (the server still writes it all and exits)
+        self.send(proc, *({**LIST, "id": 100 + n} for n in range(count)))
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.close()  # the server answers every request and exits on end of input
+        data = os.read(proc.stdout.fileno(), 8192)  # one chunk, then the client stalls
+        time.sleep(proxy.STOP_GRACE_S + 2)  # longer than the bound; the replies are all still queued
+        data += proc.stdout.read()
+        ids = [json.loads(line)["id"] for line in data.splitlines()]
+        self.assertEqual(ids, list(range(100, 100 + count)))
+        self.assertEqual(proc.wait(timeout=DEADLINE_S), 0)
+
+    def test_sigterm_while_a_large_reply_is_relayed_exits_143(self) -> None:
+        proc = self.started()
+        self.send(proc, BIG)
+        assert proc.stdout is not None and proc.stderr is not None
+        self.assertEqual(len(proc.stdout.read(1000)), 1000)  # the proxy is mid-write; the client stops reading
+        proc.send_signal(signal.SIGTERM)
+        self.assertEqual(proc.wait(timeout=DEADLINE_S), 143)
+        self.assertNotIn(b"Fatal Python error", proc.stderr.read())
+        self.assertTrue(gone(self.server_pid()))
+
+    def test_the_proxy_stops_relaying_a_grandchild_that_keeps_writing_and_cuts_no_line(self) -> None:
+        proc = self.started(server_env={"FAKE_MCP_GRANDCHILD": str(self.grandchild_file),
+                                        "FAKE_MCP_GRANDCHILD_LINES": "1"})
+        assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+        lines: list[bytes] = []
+        stdout = proc.stdout
+        reader = threading.Thread(target=lambda: lines.extend(stdout), daemon=True)
+        reader.start()
+        proc.stdin.close()  # the server exits; its child then writes large lines without end
+        t0 = time.monotonic()
+        status = proc.wait(timeout=DEADLINE_S)
+        self.assertLess(time.monotonic() - t0, proxy.STOP_GRACE_S + 5)
+        reader.join(DEADLINE_S)
+        self.assertEqual(status, 0)
+        self.assertNotIn(b"Fatal Python error", proc.stderr.read())
+        self.assertGreater(len(lines), 0)  # the child's output was relayed
+        for line in lines:  # every line that reached the client is whole
+            self.assertEqual(json.loads(line)["method"], "notifications/message")
 
 
 class TestServerIgnoringEndOfInput(ProxyCase):

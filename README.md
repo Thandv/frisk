@@ -87,7 +87,7 @@ and still owner-held is in [STATUS.md](STATUS.md); a recorded first run, from a 
 pinned MCP config, is in [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
 Zero third-party dependencies — stdlib only, by design (a security tool you can audit in one sitting).
-The code to audit is `src/frisk`: about 4,500 lines of Python, counting every non-blank line
+The code to audit is `src/frisk`: about 4,600 lines of Python, counting every non-blank line
 of its `.py` files.
 
 ## Usage
@@ -129,7 +129,8 @@ From `frisk --help`:
 - `frisk lock`: 0, or 2 on an error;
 - `frisk verify`: 0, 1 on drift or an entry it could not verify, 2 on a lockfile it
   cannot read;
-- `frisk proxy`: the server's status (128 + the signal number if a signal ended it), or 2
+- `frisk proxy`: the server's status (128 + the signal number if a signal ended it), also
+  when the client went away (closed its input or stopped reading), or 2
   on a usage error, a server it cannot start or a `--log` file it cannot open.
 
 `frisk-mcp` runs until its input ends; it answers errors as JSON-RPC errors or `isError`
@@ -616,8 +617,15 @@ it is checked for hidden Unicode. Bytes from the server that are not UTF-8 never
 relay (that line is dropped). The real server is stopped and reaped however the proxy
 ends: when the server exits, when the client closes the proxy's input (the server gets
 end of input and 5 s to exit, then SIGTERM, then SIGKILL after 5 s more), when the client
-stops reading (`client gone`), or on SIGTERM or SIGINT. The proxy exits with the server's
-status (128 + the signal number if a signal ended it). A server command that cannot be
+stops reading (`client gone`: the server gets end of input and the same 5 s, then the same
+stop), or on SIGTERM or SIGINT. The proxy stops relaying 5 s after the server exits, even if
+a child of the server still holds its output open. The 5 s start once the proxy has relayed
+all the output that existed when the server exited, however slowly the client reads it, so a
+slow reader still gets every reply the server wrote before it exited; only output that arrives
+after that point is cut off (a line dropped at the limit is logged). A signal ends the proxy
+at once, even partway through a line. However the client goes away, the proxy
+exits with the server's status (128 + the signal number if a signal ended it), never a
+status of its own. A server command that cannot be
 started, or a `--log` file that cannot be opened, is one line on stderr and exit code 2.
 
 Events are logged to stderr (add `--log frisk-proxy.log` to keep a file). A log line names

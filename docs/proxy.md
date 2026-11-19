@@ -105,8 +105,14 @@ stderr.
 
 The proxy exits with the server's status (128 + the signal number when a signal ended
 it), or 2 when the usage is wrong, the server command cannot be started, or the `--log`
-file cannot be opened. When the client closes the proxy's input, the server gets end of
-input and 5 s to exit, then SIGTERM, then SIGKILL after 5 s more.
+file cannot be opened. When the client closes the proxy's input, or stops reading its
+output, the server gets end of input and 5 s to exit, then SIGTERM, then SIGKILL after 5 s
+more; the status is still the server's. The proxy stops relaying 5 s after the server
+exits, even if a child of the server still holds its output open. The 5 s start once the
+proxy has relayed all the output that existed when the server exited, however slowly the
+client reads it, so a slow reader still gets every reply the server wrote before it exited;
+only output that arrives after that point is cut off (a line dropped at the limit is
+logged). A signal ends the proxy at once, even partway through a line.
 
 ## What it does not do
 
