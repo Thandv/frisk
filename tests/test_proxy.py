@@ -1,6 +1,7 @@
 """Tests for the runtime enforcement proxy. PYTHONPATH=src python3 -m unittest discover -s tests"""
 import unittest
 
+from _leakguard import NoResourceWarnings
 from frisk.proxy import Proxy
 
 
@@ -8,7 +9,7 @@ def toolmsg(tools):
     return {"jsonrpc": "2.0", "id": 1, "result": {"tools": tools}}
 
 
-class TestProxy(unittest.TestCase):
+class TestProxy(NoResourceWarnings):
     def test_drops_poisoned_tool(self):
         p = Proxy(["dummy"])
         out = p.inspect(toolmsg([

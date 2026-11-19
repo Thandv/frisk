@@ -6,6 +6,7 @@ Run: PYTHONPATH=src python3 -m unittest discover -s tests
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -14,6 +15,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+from _leakguard import CHILD_WARNINGS, NoResourceWarnings, check_child_stderr
 
 REPO = Path(__file__).resolve().parent.parent
 FAKE_SERVER = REPO / "tests" / "fixtures" / "fake_mcp_server.py"
@@ -31,8 +34,9 @@ def _alive(pid: int) -> bool:
     return True
 
 
-class TestProxyRun(unittest.TestCase):
+class TestProxyRun(NoResourceWarnings):
     def setUp(self) -> None:
+        super().setUp()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.pidfile = Path(tmp.name) / "fake.pid"
@@ -51,13 +55,18 @@ class TestProxyRun(unittest.TestCase):
         pid = self._server_pid()
         if pid is not None and _alive(pid):
             os.kill(pid, signal.SIGKILL)
+        check_child_stderr(self, proc.stderr)  # a ResourceWarning the proxy printed as it exited
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe is not None:
+                with contextlib.suppress(BrokenPipeError):  # unread input of a proxy that is gone
+                    pipe.close()
 
     def _start(self, proxy_args: list[str], **extra_env: str) -> subprocess.Popen[str]:
         # pytest's `pythonpath` setting only affects this process, so the child gets
         # PYTHONPATH explicitly.
         # FR-E6: frisk proxy keeps tool pins under XDG_STATE_HOME; never the real one.
         env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
-               "FRISK_DEBUG": "0", "XDG_STATE_HOME": str(self.pidfile.parent), **extra_env}
+               "FRISK_DEBUG": "0", "XDG_STATE_HOME": str(self.pidfile.parent), **CHILD_WARNINGS, **extra_env}
         proc = subprocess.Popen(
             [sys.executable, "-m", "frisk.cli", "proxy", *proxy_args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

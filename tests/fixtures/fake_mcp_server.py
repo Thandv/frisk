@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import time
+import warnings
 
 CLEAN_TOOL = {
     "name": "echo-text",
@@ -96,6 +97,9 @@ def main() -> None:
     grandchild_file = os.environ.get("FAKE_MCP_GRANDCHILD")
     if grandchild_file:  # inherits our stdout; its stdin and stderr are not the proxy's
         code = GRANDCHILD_LINES if os.environ.get("FAKE_MCP_GRANDCHILD_LINES") == "1" else "import time; time.sleep(60)"
+        # The grandchild outlives this server on purpose and is never waited for: that is the
+        # situation under test, so the "subprocess is still running" warning is not a leak.
+        warnings.simplefilter("ignore", ResourceWarning)
         child = subprocess.Popen([sys.executable, "-c", code, str(os.getpid())],
                                  stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with open(grandchild_file, "w", encoding="utf-8") as fh:

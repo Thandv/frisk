@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest import mock
 
 from _home import fake_home
+from _leakguard import NoResourceWarnings
 from frisk import cli, proxy
 from frisk.proxy import Proxy, default_pins_file, tool_pin
 
@@ -36,8 +37,9 @@ def tool(description: str = SECRET_DESC, **extra: object) -> dict:
             "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}, **extra}
 
 
-class PinsCase(unittest.TestCase):
+class PinsCase(NoResourceWarnings):
     def setUp(self) -> None:
+        super().setUp()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.state = Path(tmp.name) / "state"

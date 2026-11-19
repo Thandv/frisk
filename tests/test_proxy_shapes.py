@@ -20,6 +20,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from _leakguard import NoResourceWarnings
 from frisk.proxy import INSPECTION_FAILED, REQUEST_REFUSED, Proxy
 
 # A directive to hide an action from the user (inject.hide_from_user, block).
@@ -35,8 +36,9 @@ def result(rid: object, **fields: object) -> dict:
     return {"jsonrpc": "2.0", "id": rid, "result": fields}
 
 
-class ShapeCase(unittest.TestCase):
+class ShapeCase(NoResourceWarnings):
     def setUp(self) -> None:
+        super().setUp()
         self.log = io.StringIO()
         self.server = io.StringIO()
         self.proxy = Proxy(["unused"], log=self.log)
@@ -226,7 +228,7 @@ class TestMalformed(ShapeCase):
         self.assertIn("dropped a resource content item", self.log.getvalue())
 
 
-class TestRelay(unittest.TestCase):
+class TestRelay(NoResourceWarnings):
     def test_the_running_relay_answers_a_refused_request_to_the_server(self) -> None:
         request = {"jsonrpc": "2.0", "id": 11, "method": "sampling/createMessage",
                    "params": {"messages": [{"role": "user", "content": {"type": "text", "text": POISON}}]}}

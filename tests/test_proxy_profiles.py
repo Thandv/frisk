@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from _home import fake_home
+from _leakguard import NoResourceWarnings
 from frisk.engine import scan_path, verdict
 from frisk.proxy import Proxy
 
@@ -37,8 +38,9 @@ def text_result(text: str, rid: int = 2) -> dict:
     return {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": text}]}}
 
 
-class ProxyCase(unittest.TestCase):
+class ProxyCase(NoResourceWarnings):
     def setUp(self) -> None:
+        super().setUp()
         fake_home(self)
         state = tempfile.TemporaryDirectory()
         self.addCleanup(state.cleanup)

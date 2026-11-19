@@ -579,6 +579,7 @@ class Proxy:
         finally:
             _stop(proc)
             restore()
+            self._release_server_input(proc)
         status = code if code >= 0 else 128 - code
         log.debug("server end status=exit rc=%s ms=%d", code, ms_since(t0))
         self._log(f"server exited ({status}); dropped={self.stats['dropped']} "
@@ -612,6 +613,18 @@ class Proxy:
         except OSError as e:
             log.debug("server stdin close failed error=%s", type(e).__name__)
 
+    def _release_server_input(self, proc: subprocess.Popen[str]) -> None:
+        """Close the server's input if the client thread has not (the server ended first, or a
+        signal came), so no pipe is left open. Skipped while that thread holds the lock in a write:
+        waiting for it could block, and the process is about to end."""
+        assert proc.stdin is not None
+        if self._server_lock.acquire(blocking=False):
+            try:
+                with contextlib.suppress(OSError, ValueError):
+                    proc.stdin.close()
+            finally:
+                self._server_lock.release()
+
     def _client_gone(self, proc: subprocess.Popen[str]) -> None:
         """The client stopped reading: point our output at /dev/null (so the flush at exit
         cannot fail and change the exit status), give the server end of input and
@@ -635,7 +648,12 @@ class Proxy:
         try:
             self._relay_lines(proc)
         finally:
-            self._waiting.set()  # run() never waits for a relay that has ended
+            try:
+                proc.stdout.close()  # this thread is the only reader: nothing else closes the pipe
+            except OSError as e:
+                log.debug("server stdout close failed error=%s", type(e).__name__)
+            finally:
+                self._waiting.set()  # run() never waits for a relay that has ended
 
     def _note_server_exit(self, proc: subprocess.Popen[str]) -> None:
         """The server has exited: record how much of its output already exists (what its pipe

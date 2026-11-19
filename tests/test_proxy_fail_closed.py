@@ -18,6 +18,7 @@ from functools import partial
 from pathlib import Path
 from unittest import mock
 
+from _leakguard import NoResourceWarnings
 from frisk.engine import scan_text
 from frisk.proxy import Proxy
 
@@ -39,8 +40,9 @@ def names(msg: object) -> list[str]:
     return [t["name"] for t in msg["result"]["tools"]]
 
 
-class TestInspect(unittest.TestCase):
+class TestInspect(NoResourceWarnings):
     def setUp(self) -> None:
+        super().setUp()
         self.log = io.StringIO()
         self.proxy = Proxy(["unused"], log=self.log)
 
@@ -125,7 +127,7 @@ class TestInspect(unittest.TestCase):
         self.assertEqual(self.proxy.stats, {"dropped": 0, "flagged": 0})
 
 
-class TestRelay(unittest.TestCase):
+class TestRelay(NoResourceWarnings):
     """Proxy.run end to end: the 'server' prints prepared lines; stdout is what the client gets."""
 
     def relay(self, lines: list[str]) -> tuple[str, str]:

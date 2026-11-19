@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import IO
 from unittest import mock
 
+from _leakguard import CHILD_WARNINGS, NoResourceWarnings, check_child_stderr
 from frisk import proxy
 
 REPO = Path(__file__).resolve().parent.parent
@@ -44,8 +45,9 @@ def gone(pid: int) -> bool:
     return False
 
 
-class ProxyCase(unittest.TestCase):
+class ProxyCase(NoResourceWarnings):
     def setUp(self) -> None:
+        super().setUp()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
@@ -58,7 +60,7 @@ class ProxyCase(unittest.TestCase):
         env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
                "FAKE_MCP_EXTRAS": "1", "FAKE_MCP_LINGER": "1" if linger else "0", "FRISK_DEBUG": "0",
                "HOME": str(self.tmp), "XDG_STATE_HOME": str(self.tmp),  # pins never in the real state dir
-               **(server_env or {})}
+               **CHILD_WARNINGS, **(server_env or {})}
         argv = proxy_args or ("--", sys.executable, str(FAKE_SERVER))
         proc = subprocess.Popen([sys.executable, "-m", "frisk.cli", "proxy", *argv], stdin=subprocess.PIPE,
                                 stdout=stdout, stderr=subprocess.PIPE, env=env, cwd=str(self.tmp),
@@ -73,14 +75,17 @@ class ProxyCase(unittest.TestCase):
         if proc.poll() is None:
             proc.kill()
         proc.wait()
-        for pipe in (proc.stdin, proc.stdout, proc.stderr):
-            if pipe is not None:
-                with contextlib.suppress(BrokenPipeError):  # unread input of a proxy that is gone
-                    pipe.close()
-        if self.pidfile.exists() and not gone(self.server_pid()):
-            os.kill(self.server_pid(), signal.SIGKILL)
-        if self.grandchild_file.exists() and not gone(self.grandchild_pid()):
-            os.kill(self.grandchild_pid(), signal.SIGKILL)
+        try:
+            check_child_stderr(self, proc.stderr)  # a ResourceWarning the proxy printed as it exited
+        finally:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    with contextlib.suppress(BrokenPipeError):  # unread input of a proxy that is gone
+                        pipe.close()
+            if self.pidfile.exists() and not gone(self.server_pid()):
+                os.kill(self.server_pid(), signal.SIGKILL)
+            if self.grandchild_file.exists() and not gone(self.grandchild_pid()):
+                os.kill(self.grandchild_pid(), signal.SIGKILL)
 
     def server_pid(self) -> int:
         return int(self.pidfile.read_text(encoding="utf-8"))
