@@ -6,7 +6,8 @@ a garbage collection at the end of the test (so the leak surfaces in the test th
 not in a later one) and fails on what it recorded. The recording is scoped to a test that
 inherits NoResourceWarnings, never global. The proxy under test often runs as a child process,
 which no filter here reaches: such a test starts the child with CHILD_WARNINGS in its
-environment and passes the child's stderr to check_child_stderr.
+environment and passes the child's stderr to check_child_stderr, or, when the test reads that
+stderr itself (communicate() does), passes what it read to check_child_output.
 """
 from __future__ import annotations
 
@@ -34,6 +35,12 @@ def check_child_stderr(test: unittest.TestCase, stream: IO | None) -> None:
             if not chunk:
                 break
             seen += chunk
+    check_child_output(test, seen)
+
+
+def check_child_output(test: unittest.TestCase, text: str | bytes) -> None:
+    """Fail `test` if a child's stderr, as the test already read it, holds a ResourceWarning."""
+    seen = text.encode("utf-8", "replace") if isinstance(text, str) else text
     test.assertNotIn(b"ResourceWarning", seen, seen.decode("utf-8", "replace"))
 
 

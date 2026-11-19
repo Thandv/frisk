@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from _leakguard import CHILD_WARNINGS, NoResourceWarnings, check_child_stderr
+from _leakguard import CHILD_WARNINGS, NoResourceWarnings, check_child_output, check_child_stderr
 
 REPO = Path(__file__).resolve().parent.parent
 FAKE_SERVER = REPO / "tests" / "fixtures" / "fake_mcp_server.py"
@@ -75,6 +75,12 @@ class TestProxyRun(NoResourceWarnings):
         self.addCleanup(self._reap, proc)
         return proc
 
+    def _communicate(self, proc: subprocess.Popen[str], stdin: str) -> tuple[str, str]:
+        """communicate() reads and closes the proxy's stderr, so _reap cannot check it: check it here."""
+        out, err = proc.communicate(stdin, timeout=TIMEOUT_S)
+        check_child_output(self, err)  # a ResourceWarning the proxy printed as it exited
+        return out, err
+
     def test_relay_drops_poisoned_tool_and_exits(self) -> None:
         proc = self._start(["--", sys.executable, str(FAKE_SERVER)])
         requests = [
@@ -86,7 +92,7 @@ class TestProxyRun(NoResourceWarnings):
 
         # communicate() closes stdin after writing; the proxy forwards EOF, the fake
         # server exits, and the proxy returns its exit code.
-        out, err = proc.communicate(stdin, timeout=TIMEOUT_S)
+        out, err = self._communicate(proc, stdin)
 
         self.assertIsNotNone(proc.poll())
         self.assertEqual(proc.returncode, 0, err)
@@ -108,7 +114,7 @@ class TestProxyRun(NoResourceWarnings):
 
     def test_exit_status_is_the_server_status(self) -> None:
         proc = self._start(["--", sys.executable, str(FAKE_SERVER)], FAKE_MCP_EXIT="3")
-        out, err = proc.communicate("", timeout=TIMEOUT_S)
+        out, err = self._communicate(proc, "")
         self.assertEqual(proc.returncode, 3, err)
         self.assertEqual(out, "")
         self.assertIn("[frisk-proxy] server exited (3); dropped=0 flagged=0", err)
@@ -117,7 +123,7 @@ class TestProxyRun(NoResourceWarnings):
         log = self.pidfile.parent / "proxy.log"
         missing = "/nonexistent.invalid/bin/server"
         proc = self._start(["--log", str(log), "--", missing])
-        out, err = proc.communicate("", timeout=TIMEOUT_S)
+        out, err = self._communicate(proc, "")
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(out, "")
         self.assertEqual(err, f"frisk proxy: cannot launch server: [Errno 2] No such file or directory: '{missing}'\n")

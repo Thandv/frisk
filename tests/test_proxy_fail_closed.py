@@ -13,7 +13,9 @@ import io
 import json
 import sys
 import tempfile
+import threading
 import unittest
+from collections.abc import Iterator
 from functools import partial
 from pathlib import Path
 from unittest import mock
@@ -164,6 +166,28 @@ class TestRelay(NoResourceWarnings):
         self.assertEqual([json.loads(line) for line in out.splitlines()], [
             {"jsonrpc": "2.0", "id": 11, "error": {"code": -32603, "message": "frisk: inspection failed"}},
             {"jsonrpc": "2.0", "id": 12, "result": {}}])
+
+    def test_the_server_input_is_closed_when_the_server_ends_before_the_client(self) -> None:
+        started, release, ended = threading.Event(), threading.Event(), threading.Event()
+
+        class OpenClient:  # a client whose input has not ended when the server exits
+            def __iter__(self) -> Iterator[str]:
+                started.set()
+                release.wait(10)
+                ended.set()
+                return iter(())
+
+        # Cleanups run last to first: let the client thread finish before the leak check.
+        self.addCleanup(ended.wait, 10)
+        self.addCleanup(release.set)
+        log = io.StringIO()
+        proxy = Proxy([sys.executable, "-c", "pass"], log=log)
+        with mock.patch("sys.stdin", OpenClient()), mock.patch("sys.stdout", io.StringIO()):
+            code = proxy.run()
+            self.assertTrue(started.wait(10))  # the client thread took the stand-in, not the real stdin
+        self.assertEqual(code, 0, log.getvalue())
+        assert proxy.server_in is not None
+        self.assertTrue(proxy.server_in.closed)
 
     def test_clean_traffic_is_relayed_as_sent(self) -> None:
         msgs = [tools_msg([dict(CLEAN)], 1), {"jsonrpc": "2.0", "method": "notifications/message",
