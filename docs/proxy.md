@@ -12,7 +12,9 @@ walkthrough.
 frisk proxy [--log FILE] [--pins FILE | --no-pins] [--on-change flag|drop] -- <server command>
 ```
 
-Everything after `--` is the server command, run as given (no shell).
+Everything after `--` is the server command, run as given (no shell). The proxy runs on
+POSIX systems (Linux, macOS): it waits on the server's pipes with `selectors`, which Windows
+supports only for sockets. The rest of `frisk` does not depend on this.
 
 ## Walkthrough: Claude Code
 

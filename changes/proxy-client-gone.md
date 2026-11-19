@@ -16,9 +16,8 @@ through a line.
 A small reply written to a closed output used to end the proxy with exit code 120 (the flush
 at interpreter exit failed). The proxy now always exits with the server's status.
 
-A client that leaves the proxy's output non-blocking now gets every reply whole (a full pipe
-used to count as the client being gone), a proxy started with more than 1024 descriptors open
-relays again, and `frisk` no longer needs the POSIX-only `fcntl` and `termios` modules to start.
+A client that leaves the proxy's output non-blocking now gets every reply whole (the proxy used
+to stop with a `BlockingIOError` traceback and exit code 120).
 
 Worth knowing: a client that sends its requests and then closes the proxy's input still gets
 the replies that arrive within 5 s; a tool call still running 5 s after the input closed is
