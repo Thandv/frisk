@@ -16,10 +16,16 @@ backend (hatchling) from PyPI. You need git and Python 3.9 or later.
 PyPI has frisk 0.1.0 only until 0.3.0 is released ([STATUS.md](../STATUS.md)), so install the
 code on `main` from a clone, into a virtual environment:
 
+<!-- doc-test: network -->
 ```console
 $ git clone https://github.com/Thandv/frisk && cd frisk
 $ python3 -m venv .venv && . .venv/bin/activate
 $ pip install -q .
+```
+
+Check the install:
+
+```console
 $ frisk --version
 frisk 0.2.0
 ```

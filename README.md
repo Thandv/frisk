@@ -129,9 +129,12 @@ From `frisk --help`:
 - `frisk lock`: 0, or 2 on an error;
 - `frisk verify`: 0, 1 on drift or an entry it could not verify, 2 on a lockfile it
   cannot read;
-- `frisk proxy`: the server's status (128 + the signal number if a signal ended it), also
-  when the client went away (closed its input or stopped reading), or 2
-  on a usage error, a server it cannot start or a `--log` file it cannot open.
+- `frisk proxy`: the server's status (128 + the signal number if a signal ended it), however
+  the proxy ends: the server exits; the client closes its input (the server gets end of input
+  and 5 s to exit, then SIGTERM, then SIGKILL after 5 s more) or its output (`client gone`,
+  the same stop); a child of the server holds the server's output open (relaying stops 5 s
+  after the server exits); or SIGTERM or SIGINT arrives. It is 2 on a usage error, a server it
+  cannot start or a `--log` file it cannot open.
 
 `frisk-mcp` runs until its input ends; it answers errors as JSON-RPC errors or `isError`
 results ([below](#use-it-as-an-mcp-server-let-your-agent-vet-before-it-installs)).
@@ -719,9 +722,9 @@ map to files in your repository. The full contract per target kind is in
 ## How it fits together (open-core)
 
 - **Free (this repo, MIT):** the CLI, the GitHub Action, and the local MCP server.
-- **Pro (hosted):** an always-fresh rule feed, a hosted scanning API/MCP endpoint,
-  and CI/org reporting — so agents and registries can vet at scale.
-- **Registry "verified safe" badge:** bulk scanning + a trust score for marketplaces.
+- **Pro (hosted): not built.** A hosted tier (a rule feed, a scanning API/MCP endpoint,
+  CI/org reporting) is a plan, not a product: no such service exists.
+- **Registry "verified safe" badge: not built.** Nothing scores or badges a marketplace.
 
 ## Caveats
 

@@ -33,15 +33,24 @@ Each line names the tests that pin the behaviour. They run offline with a temp H
   symlinks): `tests/test_sources_git.py`, against a local bare repository.
 - **Scan limits** (file count, file size, total bytes, deadline) and out-of-tree symlinks
   give visible findings instead of a hang or a leak: `tests/test_scan_bounds.py`,
-  `tests/test_fs.py`. Every rule and scan surface runs in linear time on its worst input
-  (4x the text must cost under 10x the CPU time, from 8 KiB up): `tests/test_perf.py`.
+  `tests/test_fs.py`. Every rule, surface regex and scan loop is timed on adversarial text of growing
+  size: 4x the text must cost under 10x the CPU time of the smaller run, from 8 KiB up. No
+  absolute time is asserted, so machine load cannot fail it, and the seeds are hand-written, so
+  this is a growth check, not a proof for every input: `tests/test_perf.py`.
 - **`frisk lock` / `frisk verify`** pin content and report drift: `tests/test_pin.py`,
   `tests/test_pin_spec.py`, `tests/test_pin_atomic.py`, `tests/test_pin_links.py`. A
   lockfile inside a directory it pins is not pinned with it: `tests/test_pin_lockfile.py`.
 - **`frisk proxy`** drops poisoned, malformed or batched tool lists, survives bytes that are not
-  UTF-8 and always stops its server: `tests/test_proxy.py`, `tests/test_proxy_fail_closed.py`,
+  UTF-8: `tests/test_proxy.py`, `tests/test_proxy_fail_closed.py`,
   `tests/test_proxy_shapes.py`, `tests/test_proxy_pins.py`, and `tests/test_proxy_e2e.py`
-  against a misbehaving fake server (`tests/fixtures/fake_mcp_server.py`).
+  against a misbehaving fake server (`tests/fixtures/fake_mcp_server.py`). The server is
+  stopped when it exits, when the client closes the proxy's input (it gets end of input and
+  5 s to exit, then SIGTERM, then SIGKILL after 5 s more), when the client closes its output
+  (`client gone`: the same stop) and on SIGTERM or SIGINT. A child of the server that keeps
+  the server's output open is not waited for: relaying stops 5 s (`STOP_GRACE_S`) after the
+  server exits, once the replies the server had written are relayed. The exit status is the
+  server's (128 + the signal number if a signal ended it), also when the client went away;
+  2 when the usage is wrong, the command cannot start or the `--log` file cannot be opened.
 - **`frisk-mcp`** answers every malformed JSON-RPC request with an error and keeps serving:
   `tests/test_mcp_stdio.py`, `tests/test_mcp_server_characterization.py`, `tests/test_mcp_scope.py`.
 - **The GitHub Action** runs no input as shell code (`tests/test_action.py`), and CI's
@@ -68,13 +77,26 @@ Each line names the tests that pin the behaviour. They run offline with a temp H
 - **Publishing.** `.github/workflows/publish.yml` has never run.
 - **Windows.** CI has no Windows job.
 
-Known gaps, each from an independent review and each severity 2:
+Known gaps, all still open:
 
-- Text that spells a phrase with HTML character references (`&#…;`) is matched undecoded,
-  so such a spelling passes. This is one case of the threat model's first limitation (the
-  pattern core can be evaded); see [docs/threat-model.md](docs/threat-model.md).
-- A file is checked with `lstat` and then read, so a local process racing in that window
-  could swap it for a link.
+- **A file is checked with `lstat` and then read**, so a local process racing in that
+  window could swap it for a link.
+- **`tests/test_doc_truth.py` has blind spots.** It checks that a command, flag, environment
+  variable, file, module or version a doc names exists. It does not check that the sentence
+  around the name is true; that a flag belongs to the subcommand it is shown with (an option
+  of any of the CLI's parsers passes); that a `:N` line reference points at what the text
+  says (it only has to be inside the file); or a number, a status or a behaviour stated in
+  prose. The commands and output blocks that `tests/test_readme_commands.py`,
+  `tests/test_docs.py` and `tests/test_walkthrough_drift.py` run are compared separately.
+- **Documented evasions still PASS** (the threat model's first limitation, that the patterns
+  can be evaded; see [docs/threat-model.md](docs/threat-model.md)): a phrase spelled with
+  HTML character references (`&#…;`), which is matched undecoded; a Cyrillic homoglyph in
+  place of a Latin letter; a paraphrased override (a synonym for an instruction-override
+  phrase); and a base64 decode piped to a shell.
+- **Marketplace precision.** A scan of the official plugin marketplace came out BLOCK for
+  some plugins, mostly security plugins that quote attack strings: frisk matches the string,
+  not whether it is an instruction or an example. No test or run in this repository measures
+  that.
 
 ## Owner-held items
 
