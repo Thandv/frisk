@@ -117,7 +117,10 @@ exits, even if a child of the server still holds its output open. The 5 s start 
 proxy has relayed all the output that existed when the server exited, however slowly the
 client reads it, so a slow reader still gets every reply the server wrote before it exited;
 only output that arrives after that point is cut off, and a line being written when the limit
-is reached is finished first. A signal ends the proxy at once, even partway through a line.
+is reached is finished first. On SIGTERM or SIGINT the proxy stops the server at once, even partway
+through a line (a server that ignores SIGTERM is killed after 5 s). A second signal while the
+proxy is already stopping the server ends the proxy at once with 128 + that signal, and a
+server that ignores SIGTERM can then be left running.
 
 ## What it does not do
 

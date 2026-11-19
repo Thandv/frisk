@@ -549,6 +549,9 @@ e.g. prompt-injection → `LLM01`, secret exfiltration → `LLM02`, malicious co
 
 ### Enforce at runtime (proxy)
 
+The proxy runs on POSIX systems (Linux, macOS); the rest of `frisk` does not need it.
+See [docs/proxy.md](docs/proxy.md).
+
 `verify` only helps when you remember to run it. The **proxy** closes that gap:
 point your MCP client at frisk instead of the server, and every tool description
 is re-checked on *every* load — so a clean-at-approval, malicious-later swap
@@ -628,10 +631,12 @@ proxy stops relaying 5 s after the server exits, even if a child of the server s
 its output open. The 5 s start once the proxy has relayed all the output that existed when the server exited, however slowly the client reads it, so a
 slow reader still gets every reply the server wrote before it exited; only output that arrives
 after that point is cut off, and a line being written when the limit is reached is finished
-first. A signal ends the proxy
-at once, even partway through a line. However the client goes away, the proxy
+first. On SIGTERM or SIGINT the proxy stops the server at once, even partway through a line
+(a server that ignores SIGTERM is killed after 5 s). However the client goes away, the proxy
 exits with the server's status (128 + the signal number if a signal ended it), never a
-status of its own. A server command that cannot be
+status of its own, with one exception: a second SIGTERM or SIGINT while the proxy is already
+stopping the server ends the proxy at once with 128 + that signal, and a server that ignores
+SIGTERM can then be left running. A server command that cannot be
 started, or a `--log` file that cannot be opened, is one line on stderr and exit code 2.
 
 Events are logged to stderr (add `--log frisk-proxy.log` to keep a file). A log line names
