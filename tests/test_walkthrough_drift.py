@@ -9,8 +9,9 @@ working directory holding a copy of examples/, a temp HOME, no network, and a `f
 that is `python -m frisk.cli` from this checkout. Each command's output (stdout and stderr
 together) is compared with the pasted text after the temp directories, and timings
 are normalised (the version number is not: a stale one fails). A command whose marker is
-missing from the shell's output (the shell died first) fails too. A `frisk` command with no pasted output, or an unmarked
-fence with no command at all, fails: that block would check nothing.
+missing from the shell's output (the shell died first) fails too. A `frisk` command with no
+pasted output, or an unmarked fence with no command at all, fails: that block would check
+nothing.
 Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
 """
 from __future__ import annotations
