@@ -14,6 +14,7 @@ import contextlib
 import io
 import json
 import os
+import resource
 import signal
 import subprocess
 import sys
@@ -52,14 +53,15 @@ class ProxyCase(unittest.TestCase):
         self.grandchild_file = self.tmp / "grandchild.pid"
 
     def start(self, *proxy_args: str, linger: bool = False,
-              server_env: dict[str, str] | None = None) -> subprocess.Popen[bytes]:
+              server_env: dict[str, str] | None = None, pass_fds: tuple[int, ...] = ()) -> subprocess.Popen[bytes]:
         env = {**os.environ, "PYTHONPATH": str(REPO / "src"), "FAKE_MCP_PIDFILE": str(self.pidfile),
                "FAKE_MCP_EXTRAS": "1", "FAKE_MCP_LINGER": "1" if linger else "0", "FRISK_DEBUG": "0",
                "HOME": str(self.tmp), "XDG_STATE_HOME": str(self.tmp),  # pins never in the real state dir
                **(server_env or {})}
         argv = proxy_args or ("--", sys.executable, str(FAKE_SERVER))
         proc = subprocess.Popen([sys.executable, "-m", "frisk.cli", "proxy", *argv], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.tmp))
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.tmp),
+                                pass_fds=pass_fds)
         guard = threading.Timer(DEADLINE_S, proc.kill)  # a hung proxy fails the test, never hangs it
         guard.start()
         self.addCleanup(guard.cancel)
@@ -267,6 +269,37 @@ class TestLifecycle(ProxyCase):
         self.assertGreater(len(lines), 0)
         for line in lines:  # the line being written when relaying stopped arrives whole
             self.assertEqual(json.loads(line)["method"], "notifications/message")
+
+
+class TestManyDescriptors(ProxyCase):
+    def test_replies_are_relayed_when_the_server_pipe_is_numbered_above_1024(self) -> None:
+        # The proxy inherits about 1100 open descriptors, every number from 3 up, so the pipe it
+        # opens to the server gets a number past 1024, which select.select cannot wait on.
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        wanted = 2048 if hard == resource.RLIM_INFINITY else min(hard, 2048)
+        if wanted < 1200:
+            self.skipTest(f"the descriptor limit ({hard}) is too low")
+        if soft < wanted:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (wanted, hard))
+            self.addCleanup(resource.setrlimit, resource.RLIMIT_NOFILE, (soft, hard))
+        held = [os.open(os.devnull, os.O_RDONLY) for _ in range(1100)]
+        self.addCleanup(lambda: [os.close(fd) for fd in held])
+        self.assertGreater(max(held), 1024)
+        passed = tuple(fd for fd in range(3, max(held) + 1) if self.is_open(fd))  # the parent's own too: no gaps
+        self.assertEqual(len(passed), max(held) - 2)
+        proc = self.start(pass_fds=passed)
+        self.send(proc, INIT, LIST)
+        out, err = proc.communicate(b"")  # input ends at once: a relay that failed leaves nothing
+        self.assertEqual([json.loads(line)["id"] for line in out.splitlines()], [1, 2], err)
+        self.assertEqual(proc.returncode, 0, err)
+
+    @staticmethod
+    def is_open(fd: int) -> bool:
+        try:
+            os.fstat(fd)
+        except OSError:
+            return False
+        return True
 
 
 class TestServerIgnoringEndOfInput(ProxyCase):

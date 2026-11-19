@@ -50,7 +50,7 @@ import hashlib
 import io
 import json
 import os
-import select
+import selectors
 import signal
 import struct
 import subprocess
@@ -659,29 +659,34 @@ class Proxy:
         fd = proc.stdout.fileno()
         buf = bytearray()
         scanned = 0
-        while True:
-            end = buf.find(b"\n", scanned)
-            if end >= 0:
-                line = bytes(buf[:end + 1])
-                del buf[:end + 1]
-                scanned = 0
-                yield line.decode("utf-8", errors="surrogateescape")
-                continue
-            scanned = len(buf)
-            with self._read_lock:
-                self._reading = True
-                if self._backlog_end is not None and self._read_total >= self._backlog_end:
-                    self._waiting.set()  # everything that existed at the exit is relayed
-            select.select([fd], [], [])
-            with self._read_lock:
-                self._reading = False
-                data = os.read(fd, 65536)
-                self._read_total += len(data)
-            if not data:
-                if buf:
-                    yield buf.decode("utf-8", errors="surrogateescape")
-                return
-            buf += data
+        sel = selectors.DefaultSelector()  # not select.select, which fails on a descriptor >= 1024
+        sel.register(fd, selectors.EVENT_READ)
+        try:
+            while True:
+                end = buf.find(b"\n", scanned)
+                if end >= 0:
+                    line = bytes(buf[:end + 1])
+                    del buf[:end + 1]
+                    scanned = 0
+                    yield line.decode("utf-8", errors="surrogateescape")
+                    continue
+                scanned = len(buf)
+                with self._read_lock:
+                    self._reading = True
+                    if self._backlog_end is not None and self._read_total >= self._backlog_end:
+                        self._waiting.set()  # everything that existed at the exit is relayed
+                sel.select()
+                with self._read_lock:
+                    self._reading = False
+                    data = os.read(fd, 65536)
+                    self._read_total += len(data)
+                if not data:
+                    if buf:
+                        yield buf.decode("utf-8", errors="surrogateescape")
+                    return
+                buf += data
+        finally:
+            sel.close()
 
     def _relay_lines(self, proc: subprocess.Popen[str]) -> None:
         for line in self._read_lines(proc):
