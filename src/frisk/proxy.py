@@ -60,8 +60,9 @@ import tempfile
 import termios
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import IO, Callable, Iterator, TextIO
+from typing import IO, Callable, TextIO
 
 from . import jsonread
 from .debug import log as _root_log, ms_since, redact
@@ -649,7 +650,7 @@ class Proxy:
         """The server's output line by line, read from its pipe directly so that what has
         been read, and what is still queued, are known exactly (see _note_server_exit)."""
         assert proc.stdout is not None
-        fd =proc.stdout.fileno()
+        fd = proc.stdout.fileno()
         buf = bytearray()
         scanned = 0
         while True:

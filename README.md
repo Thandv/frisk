@@ -622,7 +622,8 @@ stop), or on SIGTERM or SIGINT. The proxy stops relaying 5 s after the server ex
 a child of the server still holds its output open. The 5 s start once the proxy has relayed
 all the output that existed when the server exited, however slowly the client reads it, so a
 slow reader still gets every reply the server wrote before it exited; only output that arrives
-after that point is cut off (a line dropped at the limit is logged). A signal ends the proxy
+after that point is cut off, and a line being written when the limit is reached is finished
+first. A signal ends the proxy
 at once, even partway through a line. However the client goes away, the proxy
 exits with the server's status (128 + the signal number if a signal ended it), never a
 status of its own. A server command that cannot be

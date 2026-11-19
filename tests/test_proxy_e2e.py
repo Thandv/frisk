@@ -3,8 +3,9 @@
 A line that is not UTF-8 no longer kills the relay; the server is stopped and reaped on every
 way the proxy ends (its input closing, SIGTERM, SIGINT, its output closing); a server that
 cannot be launched or a --log that cannot be opened is one line and exit 2; a 5 MB tool result
-is delivered, marked partially scanned. No sleeps: each wait is on a pipe or a process, under a
-deadline that kills the proxy if it hangs.
+is delivered, marked partially scanned. Each wait is on a pipe or a process, under a deadline
+that kills the proxy if it hangs; the only sleeps are the slow-reader stalls, which outlast the
+proxy's STOP_GRACE_S bound on purpose.
 Run: PYTHONPATH=src python3 -B -m unittest discover -s tests
 """
 from __future__ import annotations
@@ -253,6 +254,18 @@ class TestLifecycle(ProxyCase):
         self.assertNotIn(b"Fatal Python error", proc.stderr.read())
         self.assertGreater(len(lines), 0)  # the child's output was relayed
         for line in lines:  # every line that reached the client is whole
+            self.assertEqual(json.loads(line)["method"], "notifications/message")
+
+    def test_a_line_being_written_when_relaying_stops_is_finished_for_a_stalled_reader(self) -> None:
+        proc = self.started(server_env={"FAKE_MCP_GRANDCHILD": str(self.grandchild_file),
+                                        "FAKE_MCP_GRANDCHILD_LINES": "1"})
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.close()  # the server exits; its child's first large line fills the pipe to the client
+        time.sleep(proxy.STOP_GRACE_S + 2)  # the client stalls past the bound, the proxy mid-line
+        lines = proc.stdout.read().splitlines()
+        self.assertEqual(proc.wait(timeout=DEADLINE_S), 0)
+        self.assertGreater(len(lines), 0)
+        for line in lines:  # the line being written when relaying stopped arrives whole
             self.assertEqual(json.loads(line)["method"], "notifications/message")
 
 

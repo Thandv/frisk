@@ -10,7 +10,7 @@ After the server exits, the proxy finishes the line it is writing to the client,
 limit on relaying starts once it has relayed all the output that existed when the server
 exited, however slowly the client reads it: every reply the server wrote before exiting
 still reaches a client that closed its input and reads late. Only output that arrives after
-that point (from a child still writing) is cut off, and a line dropped at the limit is logged. On SIGTERM or SIGINT the proxy exits at once, even partway
+that point (from a child still writing) is cut off. On SIGTERM or SIGINT the proxy exits at once, even partway
 through a line.
 
 A small reply written to a closed output used to end the proxy with exit code 120 (the flush
